@@ -1,0 +1,35 @@
+# PYCHARM
+.idea
+__pycache__/
+*.pyc
+.pytest_cache
+
+# IGNORE ALL IMAGES, BUT ALLOW CERTAIN FILES
+
+# Ignore content of OUTPUT entirely
+OUTPUT/*
+
+# Ignore everything in INPUT and MASK, but allow specific files
+INPUT/*
+MASK/*
+
+# Re-allow folders (so Git can descend into them)
+!INPUT/
+!MASK/
+
+# Re-allow specific test images
+!INPUT/test_face1.png
+!INPUT/test_face2.png
+!INPUT/test_face3.png
+!INPUT/test_face4.png
+!INPUT/test_face5.png
+!INPUT/test_scene1.png
+!INPUT/test_scene2.png
+!INPUT/test_scene3.png
+!INPUT/test_scene4.png
+!INPUT/test_scene5.png
+
+!MASK/mask.png
+
+# OTHERS
+tests/*
