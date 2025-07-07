@@ -177,7 +177,7 @@ class ImageListIO:
         self.n_dims = self.data[0].ndim
 
     def _get_drange(self):
-        if self.dtype == np.bool or self.dtype == bool:
+        if self.dtype == np.bool or self.dtype == bool or self.dtype == np.float64 :
             self.drange = (0, 1)
         elif self.dtype == np.uint8:
             self.drange = (0, 2 ** 8 - 1)
