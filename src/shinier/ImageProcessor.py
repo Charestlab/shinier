@@ -428,7 +428,7 @@ class ImageProcessor:
             r1 = r.flatten().astype(np.uint16)
 
             # Match spatial frequency on rotational average of the magnitude spectrum
-            for idx, image in enumerate(input_collection):
+            for idx in range(len(input_collection)):
                 matched_image = []
                 magnitude = im3D(magnitudes[idx])
                 phase = im3D(phases[idx])
@@ -457,7 +457,7 @@ class ImageProcessor:
                 output_collection[idx] = np.clip(output_collection[idx], 0, 1)
             return output_collection
 
-        def _spec_match(phases: ImageListType, output_collection: ImageListType, target_spectrum: np.ndarray):
+        def _spec_match(input_collection: ImageListType, output_collection: ImageListType, phases : ImageListType, target_spectrum: np.ndarray):
             target_spectrum = im3D(target_spectrum)
             x_size, y_size, n_channels = target_spectrum.shape[:3]
 
@@ -504,7 +504,7 @@ class ImageProcessor:
         if matching_type == 'sf':
             buffer_collection = _sf_match(input_collection=input_collection, output_collection=buffer_collection, magnitudes=self.dataset.magnitudes, phases=self.dataset.phases, target_spectrum=target_spectrum)
         elif matching_type == 'spec':
-            buffer_collection = _spec_match(phases=input_collection, output_collection=buffer_collection, target_spectrum=target_spectrum)
+            buffer_collection = _spec_match(input_collection=input_collection, output_collection=buffer_collection, phases=self.dataset.phases, target_spectrum=target_spectrum)
 
         buffer_collection = self._apply_post_processing(output_name, buffer_collection, dithering=self.options.dithering, rescaling=self.options.rescaling)
         self._set_relevant_output(buffer_collection, output_name)
