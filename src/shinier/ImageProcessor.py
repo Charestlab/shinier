@@ -352,8 +352,8 @@ class ImageProcessor:
             target_cdf = _count_cdf(target_hist)
 
         # Match the histogram
-        n_iter = 10  # Number of iterations for SSIM optimization (default = 10)
-        step_size = 67  # Step size (default = 67)
+        n_iter = self.options.iterations  # Number of iterations for SSIM optimization (default = 10)
+        step_size = self.options.step_size  # Step size (default = 67)
         for idx, image in enumerate(buffer_collection):
             if hist_optim:
                 image = im3D(image)

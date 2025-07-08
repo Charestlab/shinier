@@ -47,8 +47,11 @@ class Options:
 
         hist_optim (int): Default = 0
             0 = no SSIM optimization
-            1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 67), see ImageProcessor.hist_match)
+            1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 67), see below)
 
+        iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
+        step_size (int): Step size for SSIM optimization in hist_optim. Default is 67.
+        
         seed (int): Optional seed to initialize the PRNG.
 
     """
@@ -73,6 +76,8 @@ class Options:
             dithering: bool = True,
             rescaling: int = 1,
             hist_optim: int = 0,
+            iterations: int = 10,
+            step_size: int = 67,
             seed: Optional[int] = None,
             legacy_mode: bool = False
     ):
@@ -86,7 +91,6 @@ class Options:
         self.conserve_memory = conserve_memory
         self.as_gray = as_gray
 
-        self.iterations = iterations
         self.mode = mode
         self.background = background
         self.target_lum = target_lum
@@ -95,6 +99,9 @@ class Options:
         self.dithering = dithering
         self.rescaling = 0 if mode==1 else rescaling
         self.hist_optim = hist_optim
+        self.iterations = iterations
+        self.step_size = step_size
+
 
         self.seed = seed
         self.legacy_mode = legacy_mode
@@ -127,6 +134,10 @@ class Options:
             raise ValueError("hist_specification must be 0 or 1. See Options")
         if self.hist_optim not in [0, 1]:
             raise ValueError("Optim must be 0 or 1. See Options")
+        if self.iterations < 1:
+            raise ValueError("Iterations must be at least 1. See Options")
+        if self.step_size < 1:
+            raise ValueError("Step size must be at least 1. See Options")
         if self.rescaling != 0 and self.mode in [1, 2]:
             raise ValueError("Should not apply rescaling after luminance or histogram matching.")
         if not self.input_folder.is_dir():
