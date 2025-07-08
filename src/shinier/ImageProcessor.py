@@ -369,7 +369,8 @@ class ImageProcessor:
                         print(f'Ordering accuracy per channel = {OA}') if self.verbose else None
 
                     sens, ssim = ssim_sens(image, Y, n_bins=2**bit_size)
-                    X = Y + step_size * M * sens
+                    ssim_update = step_size * M * sens
+                    X = Y + ssim_update
                 new_image = X
             else:
                 if hist_specification == 1:
