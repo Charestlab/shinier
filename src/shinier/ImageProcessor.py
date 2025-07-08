@@ -358,7 +358,7 @@ class ImageProcessor:
             if hist_optim:
                 image = im3D(image)
                 X = image.copy() #TODO: Is the copy really needed?
-                M = np.prod(image[idx].shape)
+                M = np.prod(image.shape)/image.shape[2]
                 for iter in range(n_iter):
                     if np.issubdtype(X.dtype, np.floating) and bit_size == 16:
                         X = float01_to_uint(X, bit_size=bit_size)
