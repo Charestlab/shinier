@@ -505,6 +505,7 @@ class ImageProcessor:
             buffer_collection = _sf_match(input_collection=input_collection, output_collection=buffer_collection, magnitudes=self.dataset.magnitudes, phases=self.dataset.phases, target_spectrum=target_spectrum)
         elif matching_type == 'spec':
             buffer_collection = _spec_match(input_collection=input_collection, output_collection=buffer_collection, phases=self.dataset.phases, target_spectrum=target_spectrum)
+        buffer_collection.drange = (0, 1) # spec and sf clipped (0, 1)
 
         buffer_collection = self._apply_post_processing(output_name, buffer_collection, dithering=self.options.dithering, rescaling=self.options.rescaling)
         self._set_relevant_output(buffer_collection, output_name)
