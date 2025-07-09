@@ -244,7 +244,8 @@ class ImageListIO:
     def final_save_all(self) -> None:
         """Save all images to the save_dir and clean up temp files."""
         for idx in range(len(self.file_paths)):
-            self._save_image(idx, self[idx], save_dir=self.save_dir)
+            image = self._load_image(self._temp_dir / f'image_{idx}.npy') if self.conserve_memory else self[idx]
+            self._save_image(idx, image, save_dir=self.save_dir)
 
         # Clean up temporary directory
         self._cleanup_temp_dir()
