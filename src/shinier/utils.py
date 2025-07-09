@@ -242,7 +242,7 @@ class ImageListIO:
         return format_mapping.get(ext, 'TIFF')
 
     def final_save_all(self) -> None:
-        """Save all images to the save_dir and clean up temp files."""
+        """Save images to save_dir. If needed (self.conserve_memory) loads images and clears up temp files."""
         for idx in range(len(self.file_paths)):
             image = self._load_image(self._temp_dir / f'image_{idx}.npy') if self.conserve_memory else self[idx]
             self._save_image(idx, image, save_dir=self.save_dir)
