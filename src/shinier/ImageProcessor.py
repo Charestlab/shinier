@@ -260,27 +260,23 @@ class ImageProcessor:
             hist_optim (Optional[int]): If 0, only basic histogram matching is performed (default).
                 If 1, uses the SSIM optimization method of Avanaki (2009).
             n_bins (int): Number of gray levels (default is 256).
-
         """
-
         def _avg_hist(images: ImageListType, normalized: bool=True) -> np.ndarray:
             n_channels = 1 if images.n_dims == 2 else 3
             n_bins = max(images.drange) + 1
             hist_sum = np.zeros((n_bins, n_channels))
-            expected_n = 0
             for idx, im in enumerate(images):
                 self._get_mask(idx) # Prepare the mask if it does not already exist. Default mask is all True.
                 hist_sum += imhist(im, self.bool_masks[idx], n_bins=n_bins)
-                # print(im.shape)
-                expected_n += np.prod(im.shape)
 
             # Average of the pixels in the bins
             average = hist_sum / len(images)
             if normalized:
                 average /= average.sum()
-
+        
             return average
 
+        # Cumulative distribution function : gives the proportion of pixel = or under the vlaue of a bin for each channel
         def _count_cdf(hist_count: np.ndarray, normalized: bool=True) -> np.ndarray:
             cdf = np.cumsum(hist_count, axis=0).astype(np.float64)
             if normalized:
@@ -313,8 +309,7 @@ class ImageProcessor:
                 new_im[:, :, channel] = mapping[image[:, :, channel]]
 
             return new_im.astype(image.dtype).squeeze()
-
-
+        
         # Get appropriate image collection
         input_collection, input_name, output_collection, output_name = self._get_relevant_input_output()
         buffer_collection = self.dataset.buffer
@@ -328,8 +323,8 @@ class ImageProcessor:
             # Convert float to uint16 to preserve as much info as possible during exact hist_matching which relies on integers.
             bit_size = 16
             to_convert = True
-
         n_bins = 2 ** bit_size
+
         for idx, image in enumerate(input_collection):
             if to_convert:
                 if np.issubdtype(dtype, np.floating):
@@ -337,20 +332,22 @@ class ImageProcessor:
                         buffer_collection[idx] = float01_to_uint(image, allow_clipping=True, bit_size=bit_size)
                     else:
                         print('Why does this happen?')
+                
                 elif dtype == np.uint8:
-                    buffer_collection[idx] = (image / 255.0 * (2 ** bit_size - 1)).astype(np.dtype(f'uint{bit_size}'))
+                    buffer_collection[idx] = (image / 255.0 * (2 ** bit_size - 1)).astype(np.dtype(f'uint{bit_size}'))       
             else:
                 buffer_collection[idx] = image
 
         if target_hist is None:
             target_hist = _avg_hist(buffer_collection)  # Placeholder for avgHist
+            
         else:
             if not isinstance(target_hist, np.ndarray) or target_hist[0].dtype not in (np.uint8, int, np.uint16):
                 raise TypeError('The target histogram must be a np.ndarray of 256 or 65,536 frequencies.')
-
+            
         if hist_specification:
             target_cdf = _count_cdf(target_hist)
-
+        
         # Match the histogram
         n_iter = self.options.iterations  # Number of iterations for SSIM optimization (default = 10)
         step_size = self.options.step_size  # Step size (default = 67)
@@ -360,18 +357,19 @@ class ImageProcessor:
                 X = image.copy() #TODO: Is the copy really needed?
                 M = np.prod(image.shape)/image.shape[2]
                 for iter in range(n_iter):
-                    if np.issubdtype(X.dtype, np.floating) and bit_size == 16:
-                        X = float01_to_uint(X, bit_size=bit_size)
                     if hist_specification:
-                        Y = _match_count_cdf(X, self.bool_masks[idx], target_cdf, noise_level, n_bins=n_bins)
+                        Y = _match_count_cdf(image=X, mask=self.bool_masks[idx], target_cdf=target_cdf, noise_level=noise_level, n_bins=n_bins)
                     else:
-                        Y, OA = exact_histogram(image=X, target_hist=target_hist, binary_mask=self.bool_masks[idx])
+                        Y, OA = exact_histogram(image=X.astype(np.uint16), target_hist=target_hist, binary_mask=self.bool_masks[idx])                        
                         print(f'Ordering accuracy per channel = {OA}') if self.verbose else None
 
-                    sens, ssim = ssim_sens(image, Y, n_bins=2**bit_size)
-                    ssim_update = step_size * M * sens
-                    X = Y + ssim_update
-                new_image = X
+                    sens, ssim = ssim_sens(image, Y, n_bins=n_bins)
+                    print(f'Mean SSIM = {np.mean(ssim):.4f}') if self.verbose else None
+                    ssim_update = sens * step_size * M
+                    X = Y + ssim_update # X float64, Y uint8/uint16
+                    X = np.clip(X, 0, 2**bit_size - 1)  
+                new_image = X.astype(np.uint16) if bit_size == 16 else X.astype(np.uint8)
+                
             else:
                 if hist_specification == 1:
                     new_image = _match_count_cdf(image, self.bool_masks[idx], target_cdf, noise_level, n_bins)
@@ -379,13 +377,8 @@ class ImageProcessor:
                     new_image, OA = exact_histogram(image=image, target_hist=target_hist, binary_mask=self.bool_masks[idx])
                     print(f'Ordering accuracy per channel = {OA}') if self.verbose else None
 
-            # if bit_size != 8:
-            #     buffer_collection[idx] = uint_to_float01(new_image)
-            #     buffer_collection.drange = (0, 1)
-            # else:
-            #     buffer_collection[idx] = new_image # update the dataset (Buffer uses float)
             buffer_collection[idx] = new_image
-
+    
         output_collection = self._apply_post_processing(output_name=output_name, output_collection=buffer_collection, dithering=self.options.dithering, rescaling=0)
         self._set_relevant_output(output_collection, output_name)
 
