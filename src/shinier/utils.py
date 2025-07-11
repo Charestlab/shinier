@@ -954,10 +954,17 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> Tupl
         Tuple[np.ndarray, float]:
             - Gradient of SSIM (sensitivity) as a 2D array.
             - Mean SSIM value as a float.
-    """
 
-    image1 = im3D(image1.astype(np.float64))
-    image2 = im3D(image2.astype(np.float64))
+    References : 
+        1. Avanaki, A.N. Exact global histogram specification optimized for structural similarity. 
+        OPT REV 16, 613–621 (2009). https://doi.org/10.1007/s10043-009-0119-z
+
+        2. Zhou Wang, A. C. Bovik, H. R. Sheikh and E. P. Simoncelli, "Image quality assessment: 
+        from error visibility to structural similarity," in IEEE Transactions on Image Processing,
+        vol. 13, no. 4, pp. 600-612, April 2004, doi: 10.1109/TIP.2003.819861.
+    """
+    image_x_3D = im3D(image1.astype(np.float64))
+    image_y_3D = im3D(image2.astype(np.float64))
 
     # Gaussian kernel parameters
     window_size = 11
@@ -973,43 +980,47 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> Tupl
 
     # Mean calculations
     all_sens, all_mssim = [], []
-    for channel in range(image1.shape[2]):
-        mx = convolve_2d(image1[:, :, channel].squeeze(), window)
-        my = convolve_2d(image2[:, :, channel].squeeze(), window)
-        m2x = mx ** 2
-        m2y = my ** 2
-        mxmy = mx * my
+    for channel in range(image_x_3D.shape[2]):
+        # Select channels
+        image_x = image_x_3D[:, :, channel]
+        image_y = image_y_3D[:, :, channel]
 
-        # Variance and covariance
-        sx = convolve_2d(image1[:, :, channel].squeeze() ** 2, window) - m2x
-        sy = convolve_2d(image2[:, :, channel].squeeze() ** 2, window) - m2y
-        sxy = convolve_2d(image1[:, :, channel].squeeze() * image2[:, :, channel].squeeze(), window) - mxmy
+        # Mean pixel intensity
+        mu_x = convolve_2d(image_x, window)
+        mu_y = convolve_2d(image_y, window)
+        mu_x_sq = mu_x ** 2
+        mu_y_sq = mu_y ** 2
+        mu_x_y = mu_x * mu_y
 
-        # SSIM map calculations
-        numerator1 = 2 * mxmy + C1
-        numerator2 = 2 * sxy + C2
-        denominator1 = m2x + m2y + C1
-        denominator2 = sx + sy + C2
+        # Variances et covariance
+        sigma_x_sq = convolve_2d(image_x ** 2, window) - mu_x_sq
+        sigma_y_sq = convolve_2d(image_y ** 2, window) - mu_y_sq
+        sigma_x_y = convolve_2d(image_x * image_y, window) - mu_x_y
 
-        ssim_map = (numerator1 * numerator2) / (denominator1 * denominator2)
+        # SSIM map (Eq. 6)
+        num_1 = 2 * mu_x_y + C1
+        num_2 = 2 * sigma_x_y + C2
+        num = (num_1 * num_2) 
+
+        den_1 = mu_x_sq + mu_y_sq + C1
+        den_2 = sigma_x_sq + sigma_y_sq + C2
+        den = (den_1 * den_2) 
+
+        ssim_map = num / den
         mssim = np.mean(ssim_map)
+        
+        # SSIM gradient - Eqs. (7) and (8) (Avanaki, 2009)
+        term_1 = num_1 / den
+        sens = convolve_2d(term_1, window) * image_x
 
-        # Gradient (sensitivity) calculation
-        den = denominator1 * denominator2
-        term1 = mx * (numerator2 - numerator1) - my * ssim_map * (denominator2 - denominator1)
-        term1 = convolve_2d(2 * term1 / den, window)
+        term_2 = -ssim_map/den_2
+        sens += convolve_2d(term_2, window) * image_y
 
-        sens = term1
+        term_3 = (mu_x * (num_2 - num_1) - mu_y * ssim_map * (den_2 - den_1)) / den
+        sens += convolve_2d(term_3, window)
 
-        term2 = 2 * numerator1 / den
-        term2 = convolve_2d(term2, window) * image1[:, :, channel]
-        sens += term2
+        sens *= 2 / sens.size 
 
-        term3 = -ssim_map / denominator2
-        term3 = 2 * convolve_2d(term3, window) * image2[:, :, channel]
-        sens += term3
-
-        sens /= sens.size
         all_sens.append(sens)
         all_mssim.append(mssim)
     return np.stack(all_sens, axis=-1).squeeze(), np.stack(all_mssim)
