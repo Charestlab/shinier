@@ -285,3 +285,68 @@ The Options, ImageListIO, ImageDataset and ImageProcessor classes were tested. P
 
 #### ImageProcessor
 All possible processing configurations (i.e. all possible combination of input parameters for the Option class) were tested on a small sample of placeholder noisy images.  
+
+#### How to use ? 
+##### Import the necessaries
+```
+from shinier import ImageDataset, ImageProcessor, Options
+```
+
+##### Set the options (see Options.py for more detailed description)
+```
+options = Options(
+    # Paths
+    input_folder="testing_INPUT",
+    output_folder="testing_OUTPUT",
+    masks_folder="testing_MASKS",
+    
+    # Formats (tif, jpg, png)
+    masks_format="png",
+    images_format="png",
+
+    # Mode (1 to 8)
+    mode = 1,
+
+    # Rescaling options (0 to 2)
+    rescaling = 0,
+
+    # What part of the image is processed (1 to 3)
+    whole_image=3,
+
+    # RGB or gray scale
+    as_gray = False,
+
+    # Save active memory 
+    conserve_memory=False,
+
+    # Noise in histogram specification (0 or 1)
+    hist_specification = 0,
+
+    # SSIM optimization of histogram matching (0 or 1)
+    hist_optim = 1,
+    # Number of iterations and step size, (]0, inf])
+    iterations = 2,
+    step_size=67,
+
+    # Image dithering (True or False)
+    dithering= True,
+
+    # Legacy mode (True or False)
+    legacy_mode = False,
+    
+    # Background luminance values in the masks ([0, 255]), !! Must be indicated even if boolean !!
+    background=0
+
+    # Random seed, for reproductibility
+    seed = 0
+    )
+```
+##### Create the image dataset from the options
+```
+dataset = ImageDataset(options=options)
+```
+
+##### Process the images
+```
+ImageProcessor(dataset = dataset, verbose = False)
+```
