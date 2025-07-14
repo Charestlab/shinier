@@ -864,7 +864,7 @@ def separate(mask: np.ndarray, background: Union[int, float] = None, smoothing: 
     """
 
     mask = rgb2gray(mask)
-    mask = mask.astype(np.float64)/255 if np.max(mask) > 1 else mask
+    mask = (mask.astype(np.float64)/255).astype(np.bool) if np.max(mask) > 1 else mask
     if background == 300:
         # Use np.unique to get unique values and their counts
         unique_values, counts = np.unique(mask.flatten(), return_counts=True)
