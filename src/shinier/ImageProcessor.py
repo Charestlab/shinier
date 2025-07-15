@@ -293,25 +293,29 @@ class ImageProcessor:
 
             # Exact histogram specification requires the addition of noise to convert discrete into continuous pixel values
             noisy_image = image + noise
-
             source_hist = imhist(noisy_image, mask, n_bins=n_bins)
             source_cdf = _count_cdf(source_hist)
             image = im3D(image)
+            new_im = np.zeros(image.shape)
             n_bits = int(np.log2(n_bins))
+
             if np.issubdtype(image.dtype, np.floating):
                 image = image.astype(f'uint{n_bits}')
             elif np.iinfo(image.dtype).bits != n_bits:
                 raise TypeError(f"image.dtype is {image.dtype} but n_bins argument = {n_bins}")
 
-            new_im = np.zeros(image.shape)
             for channel in range(image.shape[-1]):
                 # Map source intensities to target intensities
                 mapping = np.interp(source_cdf[:, channel], target_cdf[:, channel], np.arange(n_bins))
                 mapping = np.clip(mapping, 0, n_bins-1)  # Ensure valid intensity values
 
-                # Apply the mapping to the source image
-                new_im[:, :, channel] = mapping[image[:, :, channel]]
-
+                # Data and mask of the channel
+                channel_data = image[:, :, channel]
+                channel_mask = mask[..., channel] if mask.ndim == 3 else mask
+                
+                new_channel = channel_data.copy()
+                new_channel[channel_mask] = mapping[channel_data[channel_mask]]
+                new_im[:, :, channel] = new_channel
             return new_im.astype(image.dtype).squeeze()
         
         # Get appropriate image collection
