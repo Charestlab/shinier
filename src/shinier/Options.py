@@ -126,7 +126,7 @@ class Options:
             raise ValueError("whole_image must be 1, 2 or 3. See Options")
         if self.mode not in [1, 2, 3, 4, 5, 6, 7, 8]:
             raise ValueError("Invalid mode selected. See Options")
-        if self.background not in range(0,256) and background != 300:
+        if self.background not in range(0,256) and self.background != 300:
             raise ValueError("background must be [0, 255] or 300")
         if self.rescaling not in [0, 1, 2]:
             raise ValueError("Rescaling must be 0, 1, or 2. See Options")
