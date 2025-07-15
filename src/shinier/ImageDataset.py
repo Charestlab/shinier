@@ -48,15 +48,16 @@ class ImageDataset:
         self.images_name = [path.name for path in self.images.file_paths]
         self.images._n_channels = self.images[0].shape[-1]
 
-        # Load masks if not provided
-        self.masks = ImageListIO(
-            input_data = masks if masks else Path(self.options.masks_folder) / f"*.{self.options.masks_format}",
-            conserve_memory = self.options.conserve_memory,
-            as_gray = self.options.as_gray,
-            save_dir = self.options.masks_folder
-        )
-        self.n_masks = len(self.masks)
-        self.masks_name = [path.name for path in self.masks.file_paths]
+        if self.options.whole_image == 3 and self.options.masks_folder != None and self.options.masks_format != None:
+            # Load masks if not provided
+            self.masks = ImageListIO(
+                input_data = masks if masks else Path(self.options.masks_folder) / f"*.{self.options.masks_format}",
+                conserve_memory = self.options.conserve_memory,
+                as_gray = self.options.as_gray,
+                save_dir = self.options.masks_folder
+            )
+            self.n_masks = len(self.masks)
+            self.masks_name = [path.name for path in self.masks.file_paths]
 
         # Create placeholders for magnitudes and phases if options.mode in [3, 4, 5, 6, 7, 8]
         self.magnitudes, self.phases, self.buffer = None, None, None
@@ -97,14 +98,15 @@ class ImageDataset:
         """
         if self.n_images <= 1:
             raise ValueError(f"There are {self.n_images} images stored in the dataset. More than one image should be loaded.")
-        if self.n_masks > 0:
-            if self.n_masks not in [1, self.n_images]:
-                raise ValueError("The number of masks should be either 1 or equal to the number of images.")
+        if self.options.whole_image == 3 and self.options.masks_folder != None and self.options.masks_format != None:
+            if self.n_masks > 0:
+                if self.n_masks not in [1, self.n_images]:
+                    raise ValueError("The number of masks should be either 1 or equal to the number of images.")
 
-        # Ensure masks and images have compatible sizes if both are provided
-        if self.masks and self.images:
-            if self.masks[0].shape[:2] != self.images[0].shape[:2]:
-                raise ValueError(f"Masks and images should have the same shape")
+            # Ensure masks and images have compatible sizes if both are provided
+            if self.masks and self.images:
+                if self.masks[0].shape[:2] != self.images[0].shape[:2]:
+                    raise ValueError(f"Masks and images should have the same shape")
 
     def save_images(self):
         self.images.final_save_all()
@@ -125,7 +127,8 @@ class ImageDataset:
 
     def close(self):
         self.images.close()
-        self.masks.close()
+        if self.options.whole_image == 3 and self.options.masks_folder != None and self.options.masks_format != None:
+            self.masks.close()
         if self.magnitudes is not None:
             self.magnitudes.close()
             self.phases.close()

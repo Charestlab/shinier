@@ -98,10 +98,14 @@ class ImageProcessor:
         n_dims = self.dataset.images.n_dims
         im_size = self.dataset.images.reference_size
         if self.bool_masks[idx] is None:
-            if self.options.whole_image != 1:
-                if min(idx, self.dataset.n_masks - 1) == idx:
-                    print('prepare mask') if self.verbose else None
-                    self._prepare_mask(self.dataset.masks[idx], self.dataset.images[idx])
+            if self.options.whole_image == 2:
+                print('prepare mask (whole-image 2)') if self.verbose else None
+                self._prepare_mask(image = self.dataset.images[idx])
+                self.bool_masks[idx] = np.stack((self.current_masks[0],) * (3 if n_dims == 3 else 1), axis=-1).squeeze()
+            elif self.options.whole_image == 3:
+                if idx < self.dataset.n_masks: # If there is one mask, it picks self.bool_masks[0] everytime
+                    print('prepare mask (whole-image : 3)') if self.verbose else None
+                    self._prepare_mask(image = self.dataset.images[idx], mask = self.dataset.masks[idx])
                     self.bool_masks[idx] = np.stack((self.current_masks[0],) * (3 if n_dims == 3 else 1), axis=-1).squeeze()
                 else:
                     self.bool_masks[idx] = self.bool_masks[0]
@@ -109,9 +113,9 @@ class ImageProcessor:
                 masks_size = im_size
                 if n_dims == 3:
                     masks_size = list(im_size) + [n_dims]
-                self.bool_masks[idx] = np.ones(masks_size, dtype=bool).squeeze() if idx == 0 else self.bool_masks[0]
+                self.bool_masks[idx] = np.ones(masks_size, dtype=bool).squeeze() if idx == 0 else self.bool_masks[0]   
 
-    def _prepare_mask(self, mask, image):
+    def _prepare_mask(self, image, mask = None):
         if self.options.whole_image == 2:
             mask_f, mask_b, _ = separate(image, self.options.background)
         elif self.options.whole_image == 3:

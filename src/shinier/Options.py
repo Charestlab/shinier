@@ -82,10 +82,12 @@ class Options:
             legacy_mode: bool = False
     ):
         self.images_format = images_format
-        self.masks_format = masks_format
         self.input_folder = Path(input_folder).resolve()
         self.output_folder = Path(output_folder).resolve()
-        self.masks_folder = Path(masks_folder).resolve()
+
+        self.masks_format = masks_format if whole_image == 3 else None
+        self.masks_folder = Path(masks_folder).resolve() if whole_image == 3 else None
+
         self.whole_image = whole_image
 
         self.conserve_memory = conserve_memory
@@ -144,5 +146,6 @@ class Options:
             raise ValueError(f"{self.input_folder} folder does not exists")
         if not self.output_folder.is_dir():
             raise ValueError(f"{self.output_folder} folder does not exists")
-        if not self.masks_folder.is_dir():
-            raise ValueError(f"{self.masks_folder} folder does not exists")
+        if self.masks_folder != None:
+            if not self.masks_folder.is_dir():
+                    raise ValueError(f"{self.masks_folder} folder does not exists")
