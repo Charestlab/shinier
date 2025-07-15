@@ -30,7 +30,7 @@ class Options:
             7 = sf_match & hist_match
             8 = spec_match & hist_match (default)
 
-        background (int): Background lum of mask, or 300=automatic (default)
+        background (int or float): Background lum of mask, or 300=automatic (default)
             (automatically, the luminance that occurs most frequently in the image is used as background lum);
             basically, all regions of that lum are treated as background
 
@@ -122,12 +122,12 @@ class Options:
 
     def _validate_options(self):
         """Validates the options to ensure they are within acceptable ranges."""
-        if self.iterations < 1:
-            raise ValueError("Iterations must be at least 1. See Options")
         if self.whole_image not in [1, 2, 3]:
             raise ValueError("whole_image must be 1, 2 or 3. See Options")
         if self.mode not in [1, 2, 3, 4, 5, 6, 7, 8]:
             raise ValueError("Invalid mode selected. See Options")
+        if self.background not in range(0,256) and background != 300:
+            raise ValueError("background must be [0, 255] or 300")
         if self.rescaling not in [0, 1, 2]:
             raise ValueError("Rescaling must be 0, 1, or 2. See Options")
         if self.hist_specification not in [0, 1]:

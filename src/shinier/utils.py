@@ -849,8 +849,9 @@ def separate(mask: np.ndarray, background: Union[int, float] = None, smoothing: 
     Function for simple figure-ground segregation.
     Args:
       mask (np.ndarray): Source mask. Could be an image or a bit mask.
-      background (Optional[np.uint8]); Uint8 value of the background (e.g., 255); if equals to 300 or not
-          specified, it is the value that occurs most frequently in mask.
+        background (Optional[Union[uint8, float64]]); uint8 value of the background ([0,255]) (e.g., 255) 
+        or float64 value of the background ([0,1]) (e.g., 1); if equals to 300 or not specified, it is the
+        value that occurs the most frequently in mask.
       smoothing (bool): If true, applies median blur on mask.
 
     Returns:
@@ -865,6 +866,8 @@ def separate(mask: np.ndarray, background: Union[int, float] = None, smoothing: 
 
     mask = rgb2gray(mask)
     mask = mask.astype(np.float64)/255 if np.max(mask) > 1 else mask
+    background = background/255 if background > 1 and background < 256 else background 
+
     if background == 300:
         # Use np.unique to get unique values and their counts
         unique_values, counts = np.unique(mask.flatten(), return_counts=True)
