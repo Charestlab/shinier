@@ -472,7 +472,7 @@ class MatlabOperators:
          nearest even integer.)
 
          return:
-          an array of rounded values (as integers)
+          an array of rounded values
 
          example:
          import numpy as np
@@ -480,8 +480,23 @@ class MatlabOperators:
          y = alt_round(x)
 
          from https://github.com/cvnlab/GLMsingle/blob/main/glmsingle/utils/alt_round.py
-        """
+        
         return (np.sign(x) * np.ceil(np.floor(np.abs(x) * 2) / 2)).astype(int)
+        ----
+        Slight modifications to follow MATLAB's behavior of not changing types: Mathias Salvas-Hébert, 2025-07-16
+         MATLAB : 
+            x = int8([-3.7, -1.2, 0.5, 2.9, 10.1]);
+            y = round(x);   
+            class(y) 
+            > ans = 'int8'
+
+            x = double([-3.7, -1.2, 0.5, 2.9, 10.1]);
+            y = round(x);
+            class(y) 
+            > ans = 'double'
+        """
+        return np.sign(x) * np.ceil(np.floor(np.abs(x) * 2) / 2)
+
     @staticmethod
     def uint8(x):
         """Replicates MATLAB's uint8 behavior: rounds and clips to [0, 255]"""
