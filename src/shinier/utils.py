@@ -599,8 +599,7 @@ def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.
     im_sort, OA = pixel_order(image)
 
     # Process each channel separately
-    im_out = np.zeros_like(image, dtype=image.dtype)
-    # image_copy = image.copy()
+    im_out = image.copy()
     for channel in range(n_channels):
         # Work only on the masked (foreground) pixels
         foreground_indices = binary_mask[:, :, channel]
@@ -628,6 +627,7 @@ def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.
 
         # Assign the sorted intensity values back to the output image
         im_out[:, :, channel][foreground_indices] = Hraw_sorted.astype(image.dtype)
+        im_out[:, :, channel][~foreground_indices] = image[:, :, channel][~foreground_indices]
 
     return im_out.squeeze(), OA
 
