@@ -127,7 +127,7 @@ class ImageProcessor:
             self.dataset.processing_steps.append('lum_match')
         if self.options.mode in [2, 5, 6]:
             print('Applying histogram matching...')
-            self.hist_match(hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
+            self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
             self.dataset.processing_steps.append('hist_match')
         if self.options.mode in [3, 5, 7]:
             print('Applying spatial frequency matching...')
@@ -139,7 +139,7 @@ class ImageProcessor:
             self.dataset.processing_steps.append('spec_match')
         if self.options.mode in [7, 8]:
             print('Applying histogram matching...')
-            self.hist_match(hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
+            self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
             self.dataset.processing_steps.append('hist_match')
 
     def lum_match(self, lum: Optional[Iterable[Union[float, int]]] = (0, 0), safe_values: bool = False):
@@ -334,10 +334,11 @@ class ImageProcessor:
 
         if target_hist is None:
             target_hist = _avg_hist(buffer_collection)  # Placeholder for avgHist
-            
         else:
-            if not isinstance(target_hist, np.ndarray) or target_hist[0].dtype not in (np.uint8, int, np.uint16):
-                raise TypeError('The target histogram must be a np.ndarray of 256 or 65,536 frequencies.')
+            for idx, im in enumerate(buffer_collection):
+                self._get_mask(idx)
+            if target_hist.shape[0] != n_bins:
+                raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
             
         if hist_specification:
             target_cdf = _count_cdf(target_hist)
@@ -363,7 +364,6 @@ class ImageProcessor:
                     X = Y + ssim_update # X float64, Y uint8/uint16
                     X = np.clip(X, 0, 2**bit_size - 1)  
                 new_image = X.astype(np.uint16) if bit_size == 16 else X.astype(np.uint8)
-                
             else:
                 if hist_specification == 1:
                     new_image = _match_count_cdf(image, self.bool_masks[idx], target_cdf, noise_level, n_bins)

@@ -2,6 +2,8 @@
 from typing import Union, Optional, Iterable
 from pathlib import Path
 
+import numpy
+
 class Options:
     """
     Class to hold SHINE processing options.
@@ -12,8 +14,6 @@ class Options:
         input_folder (Union[str, Path]): relative or absolute path of the image folder (default = ./INPUT)
         output_folder (Union[str, Path]): relative or absolute path where processed images will be saved (default = ./OUTPUT)
         masks_folder (Union[str, Path]): relative or absolute path of mask (default = ./MAKS)
-
-        iterations (int): number of iterations (default = 1)
 
         whole_image (int): Default = 1
             1 = whole image (default)
@@ -49,6 +49,10 @@ class Options:
             0 = no SSIM optimization
             1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 67), see below)
 
+        target_hist (Optional[np.ndarray]): Target histogram to use for histogram or fourier matching. Should be a numpy array of shape (256,) or (65536,)
+                                            for 8-bit or 16-bit images, or as required by the processing function. Default is None.
+
+
         iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
         step_size (int): Step size for SSIM optimization in hist_optim. Default is 67.
         
@@ -70,6 +74,7 @@ class Options:
             mode: int = 8,
             background: Union[int, float] = 300,
             target_lum: Optional[Iterable[Union[int, float]]] = None,
+            target_hist: Optional[np.ndarray] = None,
             safe_lum_match: bool = False,
             hist_specification: int = 0,
             dithering: bool = True,
@@ -102,8 +107,8 @@ class Options:
         self.hist_optim = hist_optim
         self.iterations = iterations
         self.step_size = step_size
-
-
+        
+        self.target_hist = target_hist
         self.seed = seed
         self.legacy_mode = legacy_mode
 
@@ -148,3 +153,18 @@ class Options:
         if self.masks_folder != None:
             if not self.masks_folder.is_dir():
                     raise ValueError(f"{self.masks_folder} folder does not exists")
+        if self.target_hist is not None:
+            if not isinstance(self.target_hist, np.ndarray):
+                raise TypeError("target_hist must be a numpy.ndarray.")
+            if self.as_gray:
+                if self.target_hist.ndim != 1:
+                    raise ValueError("For grayscale images (as_gray=True), target_hist must be 1D (shape (256,) or (65536,)).")
+                if self.target_hist.shape[0] not in [256, 65536]:
+                    raise ValueError("target_hist must have 256 or 65536 values (for 8 or 16 bits).")
+            else:
+                if self.target_hist.ndim != 2:
+                    raise ValueError("For color images (as_gray=False), target_hist must be 2D (shape (256, 3) or (65536, 3)).")
+                if self.target_hist.shape[0] not in [256, 65536] or self.target_hist.shape[1] != 3:
+                    raise ValueError("target_hist must have shape (256, 3) or (65536, 3) for RGB images.")
+            if not np.issubdtype(self.target_hist.dtype, np.integer):
+                raise TypeError("target_hist must contain integer values (pixel counts per bin).")
