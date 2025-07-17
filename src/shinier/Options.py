@@ -67,7 +67,6 @@ class Options:
             conserve_memory: bool = True,
             as_gray: bool = False,
 
-            iterations: int = 1,
             mode: int = 8,
             background: Union[int, float] = 300,
             target_lum: Optional[Iterable[Union[int, float]]] = None,
