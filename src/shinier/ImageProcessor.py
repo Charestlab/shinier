@@ -131,11 +131,11 @@ class ImageProcessor:
             self.dataset.processing_steps.append('hist_match')
         if self.options.mode in [3, 5, 7]:
             print('Applying spatial frequency matching...')
-            self.fourier_match(rescaling_option=self.options.rescaling, matching_type='sf')
+            self.fourier_match(target_spectrum = self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='sf')
             self.dataset.processing_steps.append('sf_match')
         if self.options.mode in [4, 6, 8]:
             print('Applying spectrum matching...')
-            self.fourier_match(rescaling_option=self.options.rescaling, matching_type='spec')
+            self.fourier_match(target_spectrum = self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='spec')
             self.dataset.processing_steps.append('spec_match')
         if self.options.mode in [7, 8]:
             print('Applying histogram matching...')
@@ -475,10 +475,6 @@ class ImageProcessor:
                 target_spectrum += mag
             target_spectrum /= len(self.dataset.magnitudes)
         else:
-            if not isinstance(target_spectrum, np.ndarray):
-                raise TypeError('The target spectrum must be a numpy array of np.float64.')
-            if np.issubdtype(target_spectrum.dtype, np.floating):
-                raise TypeError('The target spectrum must be a numpy array of np.float64.')
             if target_spectrum.shape != self.dataset.images.reference_size:
                 raise TypeError('The target spectrum must have the same size as the images.')
 

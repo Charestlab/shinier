@@ -2,7 +2,7 @@
 from typing import Union, Optional, Iterable
 from pathlib import Path
 
-import numpy
+import numpy as np
 
 class Options:
     """
@@ -10,15 +10,20 @@ class Options:
 
     Args:
         images_format (str): png, tif, jpg (default = tif)
-        masks_format (str): png, tif, jpg (default = tif)
         input_folder (Union[str, Path]): relative or absolute path of the image folder (default = ./INPUT)
         output_folder (Union[str, Path]): relative or absolute path where processed images will be saved (default = ./OUTPUT)
+
+        masks_format (str): png, tif, jpg (default = tif)
         masks_folder (Union[str, Path]): relative or absolute path of mask (default = ./MAKS)
 
         whole_image (int): Default = 1
             1 = whole image (default)
             2 = figure-ground separated (input images as mask(s))
             3 = figure-ground separated (based on mask(s))
+        
+        background (int or float): Background lum of mask, or 300=automatic (default)
+            (automatically, the luminance that occurs most frequently in the image is used as background lum);
+            basically, all regions of that lum are treated as background
 
         mode (int): Default = 8
             1 = lum_match only
@@ -30,16 +35,14 @@ class Options:
             7 = sf_match & hist_match
             8 = spec_match & hist_match (default)
 
-        background (int or float): Background lum of mask, or 300=automatic (default)
-            (automatically, the luminance that occurs most frequently in the image is used as background lum);
-            basically, all regions of that lum are treated as background
+        as_gray (Optional[bool]): If True, images are converted to grayscale upon loading.
+            Defaults to False.
 
         dithering (bool): If True, apply dithering after processing is done and before final conversion to uint8
 
-        rescaling (int): Default = 1. Post-processing applied after sf_match or spec_match only.
-            0 = no rescaling
-            1 = rescale to min and max of all images (default)
-            2 = rescale to average min and max values across all images
+        conserve_memory (Optional[bool]): If True (default), uses a temporary directory to store images
+            and keeps only one image in memory at a time. If True and input_data is a list of NumPy arrays,
+            images are first saved as .npy in a temporary directory, and they are loaded in memory one at a time upon request.
 
         hist_specification (int): Default = 0
             0 = Exact specification without noise (see Coltuc, Bolon & Chassery, 2006)
@@ -49,41 +52,61 @@ class Options:
             0 = no SSIM optimization
             1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 67), see below)
 
-        target_hist (Optional[np.ndarray]): Target histogram to use for histogram or fourier matching. Should be a numpy array of shape (256,) or (65536,)
+        target_hist (Optional[np.ndarray[int]]): Target histogram to use for histogram or fourier matching. Should be a numpy array of shape (256,) or (65536,)
                                             for 8-bit or 16-bit images, or as required by the processing function. Default is None.
-
-
+                                            E.g., 
+                                                from shinier.utils import imhist
+                                                target_hist = imhist(im)
+                                                
         iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
-        step_size (int): Step size for SSIM optimization in hist_optim. Default is 67.
+        step_size (int): Step size for SSIM optimization in hist_optim. Default is 67.                                    
+                                                
+        target_spectrum: Optional[np.ndarray[float]] : Target magnitude spectrum. Same size as the images of float values.
+                                                       If None, the target magnitude spectrum is the average spectrum of the all the input images.
+                                                       E.g.,
+                                                            from shinier.utils import cart2pol
+                                                            fftim = np.fft.fftshift(np.fft.fft2(im))
+                                                            rho, theta = cart2pol(np.real(fftim), np.imag(fftim))
+                                                            tarmget_spectrum = rho
+        
+        rescaling (int): Default = 1. Post-processing applied after sf_match or spec_match only.
+            0 = no rescaling
+            1 = rescale to min and max of all images (default)
+            2 = rescale to average min and max values across all images
         
         seed (int): Optional seed to initialize the PRNG.
 
     """
     def __init__(
             self,
+    
             images_format: str = 'tif',
-            masks_format: str = 'tif',
             input_folder: Union[str, Path] = Path('./../../INPUT'),
             output_folder: Union[str, Path] = Path('./../../OUTPUT'),
+            
+            masks_format: str = 'tif',
             masks_folder: Optional[Union[str, Path]] = Path("./../../MASK") if Path("./../../MASK").is_dir() and any(Path("./../../MASK").iterdir()) else None,
-
             whole_image: int = 1,
-            conserve_memory: bool = True,
-            as_gray: bool = False,
+            background: Union[int, float] = 300,
 
             mode: int = 8,
-            background: Union[int, float] = 300,
-            target_lum: Optional[Iterable[Union[int, float]]] = None,
-            target_hist: Optional[np.ndarray] = None,
-            safe_lum_match: bool = False,
-            hist_specification: int = 0,
+            as_gray: bool = False,
             dithering: bool = True,
-            rescaling: int = 1,
+            conserve_memory: bool = True,
+            seed: Optional[int] = None,
+            legacy_mode: bool = False,
+
+            safe_lum_match: bool = False,
+            target_lum: Optional[Iterable[Union[int, float]]] = None,
+
+            hist_specification: int = 0,
             hist_optim: int = 0,
             iterations: int = 10,
             step_size: int = 67,
-            seed: Optional[int] = None,
-            legacy_mode: bool = False
+            target_hist: Optional[np.ndarray[int]] = None,
+            
+            rescaling: int = 1,
+            target_spectrum: Optional[np.ndarray[float]] = None
     ):
         self.images_format = images_format
         self.input_folder = Path(input_folder).resolve()
@@ -91,26 +114,27 @@ class Options:
 
         self.masks_format = masks_format if whole_image == 3 else None
         self.masks_folder = Path(masks_folder).resolve() if whole_image == 3 else None
-
         self.whole_image = whole_image
-
-        self.conserve_memory = conserve_memory
-        self.as_gray = as_gray
+        self.background = background
 
         self.mode = mode
-        self.background = background
-        self.target_lum = target_lum
-        self.safe_lum_match = safe_lum_match
-        self.hist_specification = hist_specification
+        self.as_gray = as_gray
         self.dithering = dithering
-        self.rescaling = 0 if mode==1 else rescaling
+        self.conserve_memory = conserve_memory
+        self.seed = seed
+        self.legacy_mode = legacy_mode
+
+        self.safe_lum_match = safe_lum_match
+        self.target_lum = target_lum
+
+        self.hist_specification = hist_specification
         self.hist_optim = hist_optim
         self.iterations = iterations
         self.step_size = step_size
-        
         self.target_hist = target_hist
-        self.seed = seed
-        self.legacy_mode = legacy_mode
+        
+        self.rescaling = 0 if mode==1 else rescaling
+        self.target_spectrum = target_spectrum
 
         # Override validation and
         if self.legacy_mode != True:
@@ -168,3 +192,8 @@ class Options:
                     raise ValueError("target_hist must have shape (256, 3) or (65536, 3) for RGB images.")
             if not np.issubdtype(self.target_hist.dtype, np.integer):
                 raise TypeError("target_hist must contain integer values (pixel counts per bin).")
+        if self.target_spectrum is not None :
+            if not isinstance(self.target_spectrum, np.ndarray):
+                raise TypeError('The target spectrum must be a numpy array of np.float64.')
+            if np.issubdtype(self.target_spectrum.dtype, np.floating):
+                raise TypeError('The target spectrum must be a numpy array of np.float64.')
