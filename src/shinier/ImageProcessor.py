@@ -46,12 +46,11 @@ class ImageProcessor:
         output_collection = getattr(self.dataset, output_name)
         return input_collection, input_name, output_collection, output_name
 
-    def _apply_post_processing(self, output_name: str, output_collection: ImageListType):        
+    def _apply_post_processing(self, output_name: str, output_collection: ImageListType, dithering: bool):        
         # Applies dithering if required and last processing step
         if output_name == 'images': # Apply post_processing only if last processing step
             dtype = output_collection.dtype
             drange = output_collection.drange
-
             if dithering: #Make sure input images are float01
                 for idx, image in enumerate(output_collection):
                     # Dithering function assumes float with values in the [0, 1] range
@@ -474,7 +473,7 @@ class ImageProcessor:
             target_spectrum = np.zeros(self.dataset.magnitudes[0].shape)
             for idx, mag in enumerate(self.dataset.magnitudes):
                 target_spectrum += mag
-            target_spectrum /= len(self.dataset.magnitudes)        
+            target_spectrum /= len(self.dataset.magnitudes)
         else:
             if not isinstance(target_spectrum, np.ndarray):
                 raise TypeError('The target spectrum must be a numpy array of np.float64.')
@@ -489,7 +488,6 @@ class ImageProcessor:
         # Apply the relevant Fourier match
         if matching_type == 'sf':
             buffer_collection = _sf_match(input_collection=input_collection, output_collection=buffer_collection, magnitudes=self.dataset.magnitudes, phases=self.dataset.phases, target_spectrum=target_spectrum)
-    
         elif matching_type == 'spec':
             buffer_collection = _spec_match(output_collection=buffer_collection, phases=self.dataset.phases, target_spectrum=target_spectrum)
 
