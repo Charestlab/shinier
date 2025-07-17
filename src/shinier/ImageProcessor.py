@@ -46,11 +46,12 @@ class ImageProcessor:
         output_collection = getattr(self.dataset, output_name)
         return input_collection, input_name, output_collection, output_name
 
-    def _apply_post_processing(self, output_name: str, output_collection: ImageListType, dithering: bool, rescaling: int):
-        # Applies rescaling and dithering if required and last processing step
+    def _apply_post_processing(self, output_name: str, output_collection: ImageListType):        
+        # Applies dithering if required and last processing step
         if output_name == 'images': # Apply post_processing only if last processing step
             dtype = output_collection.dtype
             drange = output_collection.drange
+
             if dithering: #Make sure input images are float01
                 for idx, image in enumerate(output_collection):
                     # Dithering function assumes float with values in the [0, 1] range
@@ -59,19 +60,6 @@ class ImageProcessor:
                     elif np.issubdtype(dtype, np.floating) and drange != (0, 1):
                         image = image/max(drange)
                     output_collection[idx] = noisy_bit_dithering(image)
-                dtype = output_collection.dtype
-                drange = output_collection.drange
-            if rescaling: #Make sure input images are float255
-                for idx, image in enumerate(output_collection):
-                    # Rescale function assumes float with values in the [0, 255] range
-                    if not np.issubdtype(dtype, np.floating):
-                        image = uint_to_float01(image) * 255
-                    else:
-                        if drange != (0, 255):
-                            image = image/max(drange) * 255
-                    output_collection[idx] = image
-                output_collection.drange = (0, 255)
-                output_collection = rescale_images(output_collection, rescaling_option=self.options.rescaling)
                 dtype = output_collection.dtype
                 drange = output_collection.drange
 
@@ -249,8 +237,7 @@ class ImageProcessor:
         self.dataset.images = self._apply_post_processing(
             output_name='images',
             output_collection=self.dataset.images,
-            dithering=self.options.dithering,
-            rescaling=0)
+            dithering=self.options.dithering)
 
     def hist_match(self, target_hist: Optional[np.ndarray] = None, hist_optim: Optional[int] = 1, hist_specification: Optional[int] = 0, noise_level=0.1, n_bins: int = 256):
         """
@@ -387,7 +374,7 @@ class ImageProcessor:
 
             buffer_collection[idx] = new_image
     
-        output_collection = self._apply_post_processing(output_name=output_name, output_collection=buffer_collection, dithering=self.options.dithering, rescaling=0)
+        output_collection = self._apply_post_processing(output_name=output_name, output_collection=buffer_collection, dithering=self.options.dithering)
         self._set_relevant_output(output_collection, output_name)
 
     def fourier_match(self, target_spectrum: Optional[np.ndarray] = None, matching_type: str = 'sf', rescaling_option: Optional[int] = 1) -> List[np.ndarray]:
@@ -456,7 +443,6 @@ class ImageProcessor:
                     output = np.real(np.fft.ifft2(np.fft.ifftshift(new)))
                     matched_image.append(output)
                 output_collection[idx] = np.stack(matched_image, axis=-1).squeeze()
-                output_collection[idx] = np.clip(output_collection[idx], 0, 1)
             return output_collection
 
         def _spec_match(output_collection: ImageListType, phases : ImageListType, target_spectrum: np.ndarray):
@@ -473,8 +459,6 @@ class ImageProcessor:
                     output = np.real(np.fft.ifft2(np.fft.ifftshift(new)))
                     matched_image.append(output)
                 output_collection[idx] = np.stack(matched_image, axis=-1).squeeze()
-                output_collection[idx] = np.clip(output_collection[idx], 0, 1)
-
             return output_collection
 
         # Get proper input and output image collections
@@ -490,7 +474,7 @@ class ImageProcessor:
             target_spectrum = np.zeros(self.dataset.magnitudes[0].shape)
             for idx, mag in enumerate(self.dataset.magnitudes):
                 target_spectrum += mag
-            target_spectrum /= len(self.dataset.magnitudes)
+            target_spectrum /= len(self.dataset.magnitudes)        
         else:
             if not isinstance(target_spectrum, np.ndarray):
                 raise TypeError('The target spectrum must be a numpy array of np.float64.')
@@ -505,10 +489,17 @@ class ImageProcessor:
         # Apply the relevant Fourier match
         if matching_type == 'sf':
             buffer_collection = _sf_match(input_collection=input_collection, output_collection=buffer_collection, magnitudes=self.dataset.magnitudes, phases=self.dataset.phases, target_spectrum=target_spectrum)
+    
         elif matching_type == 'spec':
             buffer_collection = _spec_match(output_collection=buffer_collection, phases=self.dataset.phases, target_spectrum=target_spectrum)
-        buffer_collection.drange = (0, 1) # spec and sf clipped (0, 1)
-        buffer_collection.dtype = np.float64
 
-        buffer_collection = self._apply_post_processing(output_name, buffer_collection, dithering=self.options.dithering, rescaling=self.options.rescaling)
+        # buffer_collection dtype is np.float64 and drange is approx. [-1.5 to 1.5] before rescaling of any sort       
+        if self.options.rescaling:
+            buffer_collection = rescale_images(buffer_collection, rescaling_option=self.options.rescaling)
+        else :
+            for idx in range(len(buffer_collection)):
+                 buffer_collection[idx] = (np.clip(buffer_collection[idx], 0, 1) * 255).astype(np.uint8)
+        
+        buffer_collection = self._apply_post_processing(output_name, buffer_collection, dithering=self.options.dithering)
         self._set_relevant_output(buffer_collection, output_name)
+
