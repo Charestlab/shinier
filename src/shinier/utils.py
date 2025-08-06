@@ -291,7 +291,9 @@ def pixel_order(image: np.ndarray) -> Tuple[np.ndarray, Union[float, list]]:
     F5 = np.ones((5, 5)) / 21.0
     F5[[0, 0, 4, 4], [0, 4, 0, 4]] = 0
     F6 = np.ones((5, 5)) / 25.0
-    F = [F2, F3, F4, F5, F6]
+    
+    # Filters ordered by importance (last = most important for lexsort)    
+    F = [F6, F5, F4, F3, F2]
 
     # Convolve filters with the image and order
     im_sort = []
