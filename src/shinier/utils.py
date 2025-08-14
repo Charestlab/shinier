@@ -293,7 +293,7 @@ def pixel_order(image: np.ndarray) -> Tuple[np.ndarray, Union[float, list]]:
     F6 = np.ones((5, 5)) / 25.0
     
     # Filters ordered by importance (last = most important for lexsort)    
-    F = [F6, F5, F4, F3, F2]
+    F = [F2, F3, F4, F5, F6]
 
     # Convolve filters with the image and order
     im_sort = []
@@ -315,7 +315,7 @@ def pixel_order(image: np.ndarray) -> Tuple[np.ndarray, Union[float, list]]:
         OA.append(n / (M * N))
 
         # Sort responses lexicographically
-        idx_pos = np.lexsort(FR.T)
+        idx_pos = np.lexsort(FR[:, ::-1].T)
 
         # Rearrange indices according to pixel position
         idx_o = np.argsort(idx_pos)
