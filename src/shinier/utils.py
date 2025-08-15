@@ -1040,6 +1040,11 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> Tupl
         sens += convolve_2d(term_3, window)
 
         sens *= 2 / sens.size 
+        
+        # FIX : scales the SSIM gradient to compensate for its attenuation at larger n_bins and keep the
+        # effective update weight consistent across bit depths (more bins require proportionally larger 
+        # changes for the same effect).
+        sens *= 256**(2*(np.log(n_bins) / np.log(256)-1))
 
         all_sens.append(sens)
         all_mssim.append(mssim)
