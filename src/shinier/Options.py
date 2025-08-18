@@ -1,5 +1,5 @@
 # Global imports
-from typing import Union, Optional, Iterable
+from typing import Union, Optional, Iterable, List
 from pathlib import Path
 
 import numpy as np
@@ -9,10 +9,12 @@ class Options:
     Class to hold SHINE processing options.
 
     Args:
+    ----------------------------------------------INPUT/OUTPUT images folders-------------------------------------------------
         images_format (str): png, tif, jpg (default = tif)
         input_folder (Union[str, Path]): relative or absolute path of the image folder (default = ./INPUT)
         output_folder (Union[str, Path]): relative or absolute path where processed images will be saved (default = ./OUTPUT)
-
+    
+    -------------------------------------------MASKS and FIGURE-GROUND separation----------------------------------------------
         masks_format (str): png, tif, jpg (default = tif)
         masks_folder (Union[str, Path]): relative or absolute path of mask (default = ./MAKS)
 
@@ -24,7 +26,8 @@ class Options:
         background (int or float): Background lum of mask, or 300=automatic (default)
             (automatically, the luminance that occurs most frequently in the image is used as background lum);
             basically, all regions of that lum are treated as background
-
+       
+    ------------------------------------------SHINIER MODE, COLORS, RAM management---------------------------------------------
         mode (int): Default = 8
             1 = lum_match only
             2 = hist_match only
@@ -38,19 +41,31 @@ class Options:
         as_gray (Optional[bool]): If True, images are converted to grayscale upon loading.
             Defaults to False.
 
-        dithering (bool): If True, apply dithering after processing is done and before final conversion to uint8
+        dithering (Optional[bool]): If True, apply dithering after processing is done and before final conversion to uint8
+            Defaults to True.
 
         conserve_memory (Optional[bool]): If True (default), uses a temporary directory to store images
             and keeps only one image in memory at a time. If True and input_data is a list of NumPy arrays,
             images are first saved as .npy in a temporary directory, and they are loaded in memory one at a time upon request.
+        
+        seed (int): Optional seed to initialize the PRNG.
 
+        legacy_mode (bool): If True, ensures compatibility with older versions and workflows, preserving previous functionality 
+                            while integrating new optimizations. (conserve_memory = False, as_gray = False, dithering = False, 
+                            hist_specification = 1, safe_lum_match = False)
+
+        metrics (Optional[List[str]]) : Metrics giving after images are processed. (Default = ['rmse', 'ssim'])
+                                        The structural similarity index measure (SSIM) and root mean square (RMSE) averages are available.
+                                        If the list is given empty, no index will be given.
+        
+    --------------------------------------------------HISTOGRAM matching--------------------------------------------------------
         hist_specification (int): Default = 0
             0 = Exact specification without noise (see Coltuc, Bolon & Chassery, 2006)
             1 = Exact specification with noise (legacy code)
 
         hist_optim (int): Default = 0
             0 = no SSIM optimization
-            1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 67), see below)
+            1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 35), see below)
 
         target_hist (Optional[np.ndarray[int]]): Target histogram to use for histogram or fourier matching. Should be a numpy array of shape (256,) or (65536,)
                                             for 8-bit or 16-bit images, or as required by the processing function. Default is None.
@@ -59,8 +74,9 @@ class Options:
                                                 target_hist = imhist(im)
                                                 
         iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
-        step_size (int): Step size for SSIM optimization in hist_optim. Default is 67.                                    
-                                                
+        step_size (int): Step size for SSIM optimization in hist_optim. Default is 35. (Avanaki (2009) uses 67)                                    
+    
+    --------------------------------------------------FOURIER matching--------------------------------------------------------                     
         target_spectrum: Optional[np.ndarray[float]] : Target magnitude spectrum. Same size as the images of float values.
                                                        If None, the target magnitude spectrum is the average spectrum of the all the input images.
                                                        E.g.,
@@ -73,9 +89,6 @@ class Options:
             0 = no rescaling
             1 = rescale to min and max of all images (default)
             2 = rescale to average min and max values across all images
-        
-        seed (int): Optional seed to initialize the PRNG.
-
     """
     def __init__(
             self,
@@ -95,6 +108,7 @@ class Options:
             conserve_memory: bool = True,
             seed: Optional[int] = None,
             legacy_mode: bool = False,
+            metrics: Optional[List[str]] = ['rmse', 'ssim'],
 
             safe_lum_match: bool = False,
             target_lum: Optional[Iterable[Union[int, float]]] = None,
@@ -102,7 +116,7 @@ class Options:
             hist_specification: int = 0,
             hist_optim: int = 0,
             iterations: int = 10,
-            step_size: int = 67,
+            step_size: int = 35,
             target_hist: Optional[np.ndarray[int]] = None,
             
             rescaling: int = 1,
@@ -123,6 +137,7 @@ class Options:
         self.conserve_memory = conserve_memory
         self.seed = seed
         self.legacy_mode = legacy_mode
+        self.metrics = metrics
 
         self.safe_lum_match = safe_lum_match
         self.target_lum = target_lum
@@ -133,7 +148,7 @@ class Options:
         self.step_size = step_size
         self.target_hist = target_hist
         
-        self.rescaling = 0 if mode==1 else rescaling
+        self.rescaling = 0 if mode == 1 else rescaling
         self.target_spectrum = target_spectrum
 
         # Override validation and
@@ -170,6 +185,8 @@ class Options:
             raise ValueError("Step size must be at least 1. See Options")
         if self.rescaling != 0 and self.mode in [1, 2]:
             raise ValueError("Should not apply rescaling after luminance or histogram matching.")
+        if not isinstance(self.metrics, list) or set(self.metrics) - {"rmse", "ssim"} or len(self.metrics) != len(set(self.metrics)):
+            raise ValueError("metrics must be a list containing only 'rmse', 'ssim', both, or empty")
         if not self.input_folder.is_dir():
             raise ValueError(f"{self.input_folder} folder does not exists")
         if not self.output_folder.is_dir():

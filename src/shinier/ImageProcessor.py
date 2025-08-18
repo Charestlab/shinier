@@ -7,7 +7,8 @@ from shinier import ImageDataset, Options
 from shinier.utils import (
     ImageListType, separate, imhist, im3D,
     rescale_images, get_images_spectra, ssim_sens, cart2pol,
-    pol2cart, float01_to_uint, uint_to_float01, noisy_bit_dithering, exact_histogram, bcolors, MatlabOperators)
+    pol2cart, float01_to_uint, uint_to_float01, noisy_bit_dithering,
+    exact_histogram, compute_metrics_from_paths, bcolors, MatlabOperators)
 
 
 class ImageProcessor:
@@ -33,6 +34,7 @@ class ImageProcessor:
         }
         self.seed = self.options.seed
         self.process()
+        self.computed_metrics = compute_metrics_from_paths(self.dataset, self.options)
         self.dataset.save_images()
         self.dataset.print_log()
         self.dataset.close()

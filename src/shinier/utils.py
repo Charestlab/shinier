@@ -12,6 +12,7 @@ import shutil
 import tempfile
 from itertools import chain
 import numpy as np
+from shinier import Options
 
 
 # Type definition
@@ -1062,6 +1063,56 @@ def compute_rmse(image1: np.ndarray, image2: np.ndarray) -> float:
         float
     """
     return np.sqrt(np.mean((image1 - image2) ** 2))
+
+def compute_metrics_from_paths(images: ImageListType, options: Options):
+    """Computes the average SSIM and RMSM between the original images and the processed ones
+
+    Args:
+        images (ImageListType): images after being processed
+        options (Options):
+            as_gray (bool): If the input images and RGB or grayscale. If True, images are converted to grayscale upon loading.
+            input_folder (Union[str, Path]): relative or absolute path of the image folder (default = ./INPUT)
+            images_format (str): png, tif, jpg (default = 'tif')
+            metrics (List[str], optional): Metrics to compute. Defaults to ['rmse', 'ssim'].
+
+    Returns:
+        output (list): 2D array [avg_rmse, avg_ssim].
+    """
+    if options.metrics != None : 
+        total_rmse = 0
+        total_ssim = 0
+        output = []
+        image_paths = Path(options.input_folder) / f"*.{options.images_format}"
+        directory = image_paths.parent
+        pattern = image_paths.name
+        file_paths = sorted(directory.glob(pattern))
+
+        for image_path, proc_im in zip(file_paths, images.images):
+            # 1 : Load original image
+            with Image.open(image_path) as image:
+                if options.as_gray:
+                    orig_im = np.array(image.convert('L'))
+                else:
+                    orig_im = np.array(image.convert('RGB'))
+
+            # 2 : Compute the metrics
+            if 'rmse' in options.metrics:
+                rmse_value = compute_rmse(orig_im, proc_im)
+                total_rmse += rmse_value
+            if 'ssim' in options.metrics:
+                _, ssim_value = ssim_sens(orig_im, proc_im)
+                total_ssim += ssim_value.squeeze()
+        
+        if 'rmse' in options.metrics:
+            avg_rmse = total_rmse / len(file_paths)
+            print(total_rmse, len(file_paths))
+            print(f"Average RMSE: {avg_rmse:}")
+            output.append(avg_rmse)
+        if 'ssim' in options.metrics:
+            avg_ssim = total_ssim / len(file_paths)
+            print(f"Average SSIM: {avg_ssim}")
+            output.append(avg_ssim)
+        return output
 
 def compute_images_metrics(images: ImageListType, original_images: ImageListType, metrics: List[str] = ['rmse', 'ssim']):
 
