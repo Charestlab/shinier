@@ -354,14 +354,16 @@ class ImageProcessor:
                 X = image.copy() #TODO: Is the copy really needed?
                 M = np.prod(image.shape)/image.shape[2]
                 for iter in range(n_iter):
+                    print(f'Image {idx +1}, Iter {iter + 1} : ') if self.verbose else None
+
                     if hist_specification:
                         Y = _match_count_cdf(image=X, mask=self.bool_masks[idx], target_cdf=target_cdf, noise_level=noise_level, n_bins=n_bins)
                     else:
                         Y, OA = exact_histogram(image=X, target_hist=target_hist, binary_mask=self.bool_masks[idx])                        
-                        print(f'Ordering accuracy per channel = {OA}') if self.verbose else None
+                        print(f'    Ordering accuracy per channel = {OA}') if self.verbose else None
 
                     sens, ssim = ssim_sens(image, Y, n_bins=n_bins)
-                    print(f'Mean SSIM = {np.mean(ssim):.4f}') if self.verbose else None
+                    print(f'    Mean SSIM = {np.mean(ssim):.4f}') if self.verbose else None
                     ssim_update = sens * step_size * M
                     X = Y + ssim_update # X float64, Y uint8/uint16
                     X = np.clip(X, 0, 2**bit_size - 1).astype(np.uint16) if bit_size == 16 else np.clip(X, 0, 2**bit_size - 1)
