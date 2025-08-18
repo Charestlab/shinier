@@ -347,7 +347,7 @@ class ImageProcessor:
         
         # Match the histogram
         n_iter = self.options.iterations  # Number of iterations for SSIM optimization (default = 10)
-        step_size = self.options.step_size  # Step size (default = 67)
+        step_size = self.options.step_size  # Step size (default = 35)
         for idx, image in enumerate(buffer_collection):
             if hist_optim:
                 image = im3D(image)
