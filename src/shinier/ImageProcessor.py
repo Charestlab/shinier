@@ -354,7 +354,7 @@ class ImageProcessor:
                 X = image.copy() #TODO: Is the copy really needed?
                 M = np.prod(image.shape)/image.shape[2]
                 for iter in range(n_iter):
-                    print(f'Image {idx +1}, Iter {iter + 1} : ') if self.verbose else None
+                    print(f'Image {idx +1}, Iteration {iter + 1} : ') if self.verbose else None
 
                     if hist_specification:
                         Y = _match_count_cdf(image=X, mask=self.bool_masks[idx], target_cdf=target_cdf, noise_level=noise_level, n_bins=n_bins)
