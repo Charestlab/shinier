@@ -112,8 +112,6 @@ class ImageProcessor:
         self.current_masks = (mask_f, mask_b)
 
     def process(self):
-        if self.options.mode not in range(1, 9):
-            raise ValueError('Options.mode should be between 1 and 8')
 
         if self.options.mode in [2, 5, 6, 7, 8] and self.options.hist_specification:
             # Set a seed for the random generator used in exact histogram specification
@@ -166,17 +164,6 @@ class ImageProcessor:
             predicted_max = (np.array(original_min_max)[:, 1] - np.array(original_means))/np.array(original_stds) * target_std + target_mean
             predicted_range = predicted_max - predicted_min
             return predicted_min, predicted_max, predicted_range
-
-
-        # Validate lum arg
-        if lum is not None and not (isinstance(lum, Iterable) and all([isinstance(item, (float, int)) for item in lum]) and len(lum) ==2):
-            raise ValueError("lum should be an iterable of two numbers")
-        if lum is None:
-            lum = (0, 0)
-        if not (lum[0] >= 0 and lum[0] <= 255):
-            raise ValueError(f"Mean luminance is {lum[0]} but should be between 0 and 255")
-        if lum[1] < 0:
-            raise ValueError(f"Standard deviation is {lum[1]} but should be greater than or equal to 0")
 
         # 1) Compute the mean and standard deviation of the original images.
         # 2) Compute the target mean and standard deviation if not provided.
@@ -481,9 +468,6 @@ class ImageProcessor:
         else:
             if target_spectrum.shape != self.dataset.images.reference_size:
                 raise TypeError('The target spectrum must have the same size as the images.')
-
-        if matching_type not in ['sf', 'spec']:
-            raise ValueError("Matching type must be either 'sf' or 'spec'")
 
         # Apply the relevant Fourier match
         if matching_type == 'sf':

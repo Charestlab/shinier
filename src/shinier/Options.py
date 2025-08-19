@@ -48,7 +48,7 @@ class Options:
             and keeps only one image in memory at a time. If True and input_data is a list of NumPy arrays,
             images are first saved as .npy in a temporary directory, and they are loaded in memory one at a time upon request.
         
-        seed (int): Optional seed to initialize the PRNG.
+        seed (Optional[Int]): Optional seed to initialize the PRNG.
 
         legacy_mode (bool): If True, ensures compatibility with older versions and workflows, preserving previous functionality 
                             while integrating new optimizations. (conserve_memory = False, as_gray = False, dithering = False, 
@@ -65,18 +65,32 @@ class Options:
 
         hist_optim (int): Default = 0
             0 = no SSIM optimization
-            1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 34), see below)
+            1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 35), see below)
+                                                
+        iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
+        step_size (int): Step size for SSIM optimization in hist_optim. Default is 35. (Avanaki (2009) uses 67)             
 
         target_hist (Optional[np.ndarray[int]]): Target histogram to use for histogram or fourier matching. Should be a numpy array of shape (256,) or (65536,)
                                             for 8-bit or 16-bit images, or as required by the processing function. Default is None.
                                             E.g., 
                                                 from shinier.utils import imhist
                                                 target_hist = imhist(im)
-                                                
-        iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
-        step_size (int): Step size for SSIM optimization in hist_optim. Default is 34. (Avanaki (2009) uses 67)                                    
-    
+
+    --------------------------------------------------LUMINANCE matching------------------------------------------------------
+        safe_lum_match (bool): Default = False.
+            If True, adjusts the target mean and standard deviation to keep all luminance values within [0, 255]; 
+            the resulting targets may differ from the requested values. 
+
+        target_lum (Optional[Iterable[Union[int, float]]]): Default = (0, 0)
+            Pair (mean, std) of target luminance for luminance matching. The mean must be in [0, 255], and the standard deviation must be ≥ 0.
+            The mean must be in [0, 255], and the standard deviation must be ≥ 0.
+
     --------------------------------------------------FOURIER matching--------------------------------------------------------                     
+        rescaling (int): Default = 1. Post-processing applied after sf_match or spec_match only.
+            0 = no rescaling
+            1 = rescale to min and max of all images (default)
+            2 = rescale to average min and max values across all images
+
         target_spectrum: Optional[np.ndarray[float]] : Target magnitude spectrum. Same size as the images of float values.
                                                        If None, the target magnitude spectrum is the average spectrum of the all the input images.
                                                        E.g.,
@@ -85,10 +99,6 @@ class Options:
                                                             rho, theta = cart2pol(np.real(fftim), np.imag(fftim))
                                                             tarmget_spectrum = rho
         
-        rescaling (int): Default = 1. Post-processing applied after sf_match or spec_match only.
-            0 = no rescaling
-            1 = rescale to min and max of all images (default)
-            2 = rescale to average min and max values across all images
     """
     def __init__(
             self,
@@ -111,7 +121,7 @@ class Options:
             metrics: Optional[List[str]] = ['rmse', 'ssim'],
 
             safe_lum_match: bool = False,
-            target_lum: Optional[Iterable[Union[int, float]]] = None,
+            target_lum: Optional[Iterable[Union[int, float]]] = (0, 0),
 
             hist_specification: int = 0,
             hist_optim: int = 0,
@@ -134,7 +144,7 @@ class Options:
         self.mode = mode
         self.as_gray = as_gray
         self.dithering = dithering
-        self.conserve_memory = conserve_memory
+        self.conserve_memory = conserve_memory if mode in [5,6,7,8] else False
         self.seed = seed
         self.legacy_mode = legacy_mode
         self.metrics = metrics
@@ -167,14 +177,48 @@ class Options:
 
     def _validate_options(self):
         """Validates the options to ensure they are within acceptable ranges."""
+        if not self.input_folder.is_dir():
+            raise ValueError(f"{self.input_folder} folder does not exists")
+        if not self.output_folder.is_dir():
+            raise ValueError(f"{self.output_folder} folder does not exists")
+        if self.masks_folder != None:
+            if not self.masks_folder.is_dir():
+                    raise ValueError(f"{self.masks_folder} folder does not exists")
+        if self.images_format not in ['png', 'tif', 'jpg']:
+            raise ValueError("images format must be either 'png', 'tif' or 'jpg'")
+        if self.masks_format not in ['png', 'tif', 'jpg'] and self.whole_image == 3 :
+            raise ValueError("masks format muse be either 'png', 'tif' or 'jpg' if whole_image == 3")
         if self.whole_image not in [1, 2, 3]:
             raise ValueError("whole_image must be 1, 2 or 3. See Options")
-        if self.mode not in [1, 2, 3, 4, 5, 6, 7, 8]:
-            raise ValueError("Invalid mode selected. See Options")
         if self.background not in range(0,256) and self.background != 300:
             raise ValueError("background must be [0, 255] or 300")
-        if self.rescaling not in [0, 1, 2]:
-            raise ValueError("Rescaling must be 0, 1, or 2. See Options")
+        
+        if self.mode not in [1, 2, 3, 4, 5, 6, 7, 8]:
+            raise ValueError("Invalid mode selected. See Options")
+        if not isinstance(self.as_gray, bool):
+            raise TypeError("as_gray must be a boolean value.")
+        if not isinstance(self.dithering, bool):
+            raise TypeError("dithering must be a boolean value.")
+        if not isinstance(self.conserve_memory, bool):
+            raise TypeError("conserve_memory must be a boolean value.")
+        if self.seed is not None and not isinstance(self.seed, int):
+            raise TypeError("seed must be an integer value or None.")
+        if not isinstance(self.legacy_mode, bool):
+            raise TypeError("legacy_mode must be a boolean value.")
+        if not isinstance(self.metrics, list) or set(self.metrics) - {"rmse", "ssim"} or len(self.metrics) != len(set(self.metrics)):
+            raise ValueError("metrics must be a list containing only 'rmse', 'ssim', both, or empty")
+        
+        if not isinstance(self.legacy_mode, bool):
+            raise TypeError("legacy_mode must be a boolean value.")
+        if not isinstance(self.safe_lum_match, bool):
+            raise TypeError("safe_lum_match must be a boolean value.")
+        if not (isinstance(self.target_lum, Iterable) and all([isinstance(item, (float, int)) for item in self.target_lum]) and len(self.target_lum) ==2):
+            raise ValueError("lum should be an iterable of two numbers")
+        if not (self.target_lum[0] >= 0 and self.target_lum[0] <= 255):
+            raise ValueError(f"Mean luminance is {self.target_lum[0]} but should be between 0 and 255")
+        if self.target_lum[1] < 0:
+            raise ValueError(f"Standard deviation is {self.target_lum[1]} but should be greater than or equal to 0")
+       
         if self.hist_specification not in [0, 1]:
             raise ValueError("hist_specification must be 0 or 1. See Options")
         if self.hist_optim not in [0, 1]:
@@ -183,17 +227,6 @@ class Options:
             raise ValueError("Iterations must be at least 1. See Options")
         if self.step_size < 1:
             raise ValueError("Step size must be at least 1. See Options")
-        if self.rescaling != 0 and self.mode in [1, 2]:
-            raise ValueError("Should not apply rescaling after luminance or histogram matching.")
-        if not isinstance(self.metrics, list) or set(self.metrics) - {"rmse", "ssim"} or len(self.metrics) != len(set(self.metrics)):
-            raise ValueError("metrics must be a list containing only 'rmse', 'ssim', both, or empty")
-        if not self.input_folder.is_dir():
-            raise ValueError(f"{self.input_folder} folder does not exists")
-        if not self.output_folder.is_dir():
-            raise ValueError(f"{self.output_folder} folder does not exists")
-        if self.masks_folder != None:
-            if not self.masks_folder.is_dir():
-                    raise ValueError(f"{self.masks_folder} folder does not exists")
         if self.target_hist is not None:
             if not isinstance(self.target_hist, np.ndarray):
                 raise TypeError("target_hist must be a numpy.ndarray.")
@@ -209,6 +242,11 @@ class Options:
                     raise ValueError("target_hist must have shape (256, 3) or (65536, 3) for RGB images.")
             if not np.issubdtype(self.target_hist.dtype, np.integer):
                 raise TypeError("target_hist must contain integer values (pixel counts per bin).")
+            
+        if self.rescaling != 0 and self.mode in [1, 2]:
+            raise ValueError("Should not apply rescaling after luminance or histogram matching.")
+        if self.rescaling not in [0, 1, 2]:
+            raise ValueError("Rescaling must be 0, 1, or 2. See Options")    
         if self.target_spectrum is not None :
             if not isinstance(self.target_spectrum, np.ndarray):
                 raise TypeError('The target spectrum must be a numpy array of np.float64.')
