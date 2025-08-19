@@ -65,7 +65,7 @@ class Options:
 
         hist_optim (int): Default = 0
             0 = no SSIM optimization
-            1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 35), see below)
+            1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 34), see below)
 
         target_hist (Optional[np.ndarray[int]]): Target histogram to use for histogram or fourier matching. Should be a numpy array of shape (256,) or (65536,)
                                             for 8-bit or 16-bit images, or as required by the processing function. Default is None.
@@ -74,7 +74,7 @@ class Options:
                                                 target_hist = imhist(im)
                                                 
         iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
-        step_size (int): Step size for SSIM optimization in hist_optim. Default is 35. (Avanaki (2009) uses 67)                                    
+        step_size (int): Step size for SSIM optimization in hist_optim. Default is 34. (Avanaki (2009) uses 67)                                    
     
     --------------------------------------------------FOURIER matching--------------------------------------------------------                     
         target_spectrum: Optional[np.ndarray[float]] : Target magnitude spectrum. Same size as the images of float values.
@@ -116,7 +116,7 @@ class Options:
             hist_specification: int = 0,
             hist_optim: int = 0,
             iterations: int = 10,
-            step_size: int = 35,
+            step_size: int = 34,
             target_hist: Optional[np.ndarray[int]] = None,
             
             rescaling: int = 1,
