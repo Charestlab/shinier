@@ -16,7 +16,7 @@ class Options:
     
     -------------------------------------------MASKS and FIGURE-GROUND separation----------------------------------------------
         masks_format (str): png, tif, jpg (default = tif)
-        masks_folder (Union[str, Path]): relative or absolute path of mask (default = ./MAKS)
+        masks_folder (Union[str, Path]): relative or absolute path of mask (default = ./MASKS)
 
         whole_image (int): Default = 1
             1 = whole image (default)
@@ -37,12 +37,15 @@ class Options:
             6 = hist_match & spec_match
             7 = sf_match & hist_match
             8 = spec_match & hist_match (default)
+            9 = only dithering
 
         as_gray (Optional[bool]): If True, images are converted to grayscale upon loading.
             Defaults to False.
 
-        dithering (Optional[bool]): If True, apply dithering after processing is done and before final conversion to uint8
-            Defaults to True.
+        dithering (Optional[int]): Default = 1, dithering before final conversion to uint8
+            0 = no dithering
+            1 = noisy bit dithering (Allard R. & Faubert J. (2008))
+            2 = Floyd-Steinberg dithering (Floyd R. & Steinberg L. (1976))
 
         conserve_memory (Optional[bool]): If True (default), uses a temporary directory to store images
             and keeps only one image in memory at a time. If True and input_data is a list of NumPy arrays,
@@ -51,7 +54,7 @@ class Options:
         seed (Optional[Int]): Optional seed to initialize the PRNG.
 
         legacy_mode (bool): If True, ensures compatibility with older versions and workflows, preserving previous functionality 
-                            while integrating new optimizations. (conserve_memory = False, as_gray = False, dithering = False, 
+                            while integrating new optimizations. (conserve_memory = False, as_gray = False, dithering = 0, 
                             hist_specification = 1, safe_lum_match = False)
 
         metrics (Optional[List[str]]) : Metrics giving after images are processed. (Default = ['rmse', 'ssim'])
@@ -114,7 +117,7 @@ class Options:
 
             mode: int = 8,
             as_gray: bool = False,
-            dithering: bool = True,
+            dithering: bool = 1,
             conserve_memory: bool = True,
             seed: Optional[int] = None,
             legacy_mode: bool = False,
@@ -144,6 +147,7 @@ class Options:
         self.mode = mode
         self.as_gray = as_gray
         self.dithering = dithering
+
         self.conserve_memory = conserve_memory if mode in [5,6,7,8] else False
         self.seed = seed
         self.legacy_mode = legacy_mode
@@ -193,12 +197,12 @@ class Options:
         if self.background not in range(0,256) and self.background != 300:
             raise ValueError("background must be [0, 255] or 300")
         
-        if self.mode not in [1, 2, 3, 4, 5, 6, 7, 8]:
+        if self.mode not in [1, 2, 3, 4, 5, 6, 7, 8, 9]:
             raise ValueError("Invalid mode selected. See Options")
         if not isinstance(self.as_gray, bool):
             raise TypeError("as_gray must be a boolean value.")
         if not isinstance(self.dithering, bool):
-            raise TypeError("dithering must be a boolean value.")
+            raise ValueError("dithering must be a boolean value.")
         if not isinstance(self.conserve_memory, bool):
             raise TypeError("conserve_memory must be a boolean value.")
         if self.seed is not None and not isinstance(self.seed, int):
@@ -213,7 +217,7 @@ class Options:
         if not isinstance(self.safe_lum_match, bool):
             raise TypeError("safe_lum_match must be a boolean value.")
         if not (isinstance(self.target_lum, Iterable) and all([isinstance(item, (float, int)) for item in self.target_lum]) and len(self.target_lum) ==2):
-            raise ValueError("lum should be an iterable of two numbers")
+            raise ValueError("target_lum should be an iterable of two numbers")
         if not (self.target_lum[0] >= 0 and self.target_lum[0] <= 255):
             raise ValueError(f"Mean luminance is {self.target_lum[0]} but should be between 0 and 255")
         if self.target_lum[1] < 0:

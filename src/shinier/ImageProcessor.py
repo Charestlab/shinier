@@ -3,6 +3,7 @@ Vector = Iterable[Union[float, int]]
 from datetime import datetime
 import inspect
 import numpy as np
+
 from shinier import ImageDataset, Options
 from shinier.utils import (
     ImageListType, separate, imhist, im3D,
@@ -30,7 +31,8 @@ class ImageProcessor:
             5: {'hist_match': ['images', 'buffer'], 'fourier_match': ['buffer', 'images']},
             6: {'hist_match': ['images', 'buffer'], 'fourier_match': ['buffer', 'images']},
             7: {'fourier_match': ['images', 'buffer'], 'hist_match': ['buffer', 'images']},
-            8: {'fourier_match': ['images', 'buffer'], 'hist_match': ['buffer', 'images']}
+            8: {'fourier_match': ['images', 'buffer'], 'hist_match': ['buffer', 'images']},
+            9: {'only_dithering': ['images', 'images']}
         }
         self.seed = self.options.seed
         self.process()
@@ -60,7 +62,7 @@ class ImageProcessor:
                         image = uint_to_float01(image)
                     elif np.issubdtype(dtype, np.floating) and drange != (0, 1):
                         image = image/max(drange)
-                    output_collection[idx] = noisy_bit_dithering(image)
+                    output_collection[idx] = noisy_bit_dithering(image, 256)
                 dtype = output_collection.dtype
                 drange = output_collection.drange
 
@@ -70,8 +72,8 @@ class ImageProcessor:
                     image = MatlabOperators.uint8(image/max(drange)*255) if self.options.legacy_mode else np.clip(image/max(drange)*255, 0, 255).astype(np.uint8)
                 elif dtype != np.uint8:
                     image = MatlabOperators.uint8(image) if self.options.legacy_mode else image.astype(np.uint8)
-
                 output_collection[idx] = image.squeeze()
+
         return output_collection
 
     def _set_relevant_output(self, output_collection: ImageListType, output_name: str):
@@ -80,10 +82,7 @@ class ImageProcessor:
         setattr(self.dataset, output_name, output_collection)
 
     def _get_mask(self, idx):
-        """
-        Provide mask if masks exists in the dataset, if not make a blank masks (all True).
-        Make sure there are the same number of masks than images and that they are of the same size.
-        """
+        """ Provide mask if masks exists in the dataset, if not make blank masks (all True). """
         n_dims = self.dataset.images.n_dims
         im_size = self.dataset.images.reference_size
         if self.bool_masks[idx] is None:
@@ -112,7 +111,6 @@ class ImageProcessor:
         self.current_masks = (mask_f, mask_b)
 
     def process(self):
-
         if self.options.mode in [2, 5, 6, 7, 8] and self.options.hist_specification:
             # Set a seed for the random generator used in exact histogram specification
             if self.seed is None:
@@ -141,18 +139,25 @@ class ImageProcessor:
             print('Applying histogram matching...')
             self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
             self.dataset.processing_steps.append('hist_match')
+    
+    def only_dithering(self):
+        input_collection, input_name, output_collection, output_name = self._get_relevant_input_output()
+        buffer_collection = self.dataset.buffer
 
-    def lum_match(self, lum: Optional[Iterable[Union[float, int]]] = (0, 0), safe_values: bool = False):
+        buffer_collection = self._apply_post_processing(output_name, buffer_collection, dithering=True)
+        self._set_relevant_output(buffer_collection, output_name)
+
+    def lum_match(self, target_lum: Optional[Iterable[Union[float, int]]] = (0, 0), safe_values: bool = False):
         """
-        Matches the mean and standard deviation of a set of images. If lum is provided, it will match the mean and standard
-        deviation of lum, where lum[0] is the mean and lum[1] is the standard deviation. If safe_values is enabled, it will
-        find a target mean and standard deviation that is close to lum while not producing out-of-range values, i.e. outside of [0, 255].
+        Matches the mean and standard deviation of a set of images. If target_lum is provided, it will match the mean and standard
+        deviation of target_lum, where target_lum[0] is the mean and target_lum[1] is the standard deviation. If safe_values is enabled, it will
+        find a target mean and standard deviation that is close to target_lum while not producing out-of-range values, i.e. outside of [0, 255].
 
             Args:
                 images (ImageListType): A list of grayscale images to be processed.
                 masks (ImageListType): Optional. A list of mask(s) for figure-ground segregation.
                     Each mask contains ones where the histograms are obtained (e.g., foreground) and zeros elsewhere.
-                lum (Iterable[Union[float, int]]): Optional. An iterable of the requested mean and standard deviation.
+                target_lum (Iterable[Union[float, int]]): Optional. An iterable of the requested mean and standard deviation.
                 safe_values (bool): If true, the mean and standard deviation used to match the images will be computed so that all resulting values remain in the [0, 255] range.
 
             Warnings:
@@ -180,7 +185,7 @@ class ImageProcessor:
             original_means.append(M)
             original_stds.append(SD)
             original_min_max.append((im[self.bool_masks[idx]].min(), im[self.bool_masks[idx]].max()))
-        target_mean, target_std = (np.mean(original_means), np.mean(original_stds)) if lum == (0, 0) or lum is None else lum
+        target_mean, target_std = (np.mean(original_means), np.mean(original_stds)) if target_lum == (0, 0) else target_lum
         predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
         print(f"Target values: M = {target_mean:.4f}, SD = {target_std:.4f}") if self.verbose else None
         if safe_values and (any(predicted_min<0) or any(predicted_max>255)):
@@ -255,7 +260,7 @@ class ImageProcessor:
         
             return average
 
-        # Cumulative distribution function : gives the proportion of pixel = or under the vlaue of a bin for each channel
+        # Cumulative distribution function : gives the proportion of pixel equal or under the value of a bin for each channel
         def _count_cdf(hist_count: np.ndarray, normalized: bool=True) -> np.ndarray:
             cdf = np.cumsum(hist_count, axis=0).astype(np.float64)
             if normalized:
@@ -338,10 +343,10 @@ class ImageProcessor:
         for idx, image in enumerate(buffer_collection):
             if hist_optim:
                 image = im3D(image)
-                X = image.copy() #TODO: Is the copy really needed?
+                X = image
                 M = np.prod(image.shape)/image.shape[2]
                 for iter in range(n_iter):
-                    print(f'Image {idx +1}, Iteration {iter + 1} : ') if self.verbose else None
+                    print(f'Image #{idx +1}, iteration #{iter + 1}: ') if self.verbose else None
 
                     if hist_specification:
                         Y = _match_count_cdf(image=X, mask=self.bool_masks[idx], target_cdf=target_cdf, noise_level=noise_level, n_bins=n_bins)
@@ -357,7 +362,7 @@ class ImageProcessor:
                 new_image = X.astype(np.uint16) if bit_size == 16 else X.astype(np.uint8)
             else:
                 if hist_specification == 1:
-                    new_image = _match_count_cdf(image, self.bool_masks[idx], target_cdf, noise_level, n_bins)
+                    new_image = _match_count_cdf(image=image, mask=self.bool_masks[idx], target_cdf=target_cdf, noise_level=noise_level, n_bins=n_bins)
                 else:
                     new_image, OA = exact_histogram(image=image, target_hist=target_hist, binary_mask=self.bool_masks[idx])
                     print(f'Ordering accuracy per channel = {OA}') if self.verbose else None
@@ -372,14 +377,14 @@ class ImageProcessor:
         Match either the rotational average of the Fourier amplitude or the entire spectrum for a set of images.
 
         Args:
-            matching_type (str): if "sf", it will match the rotational average of the fourier. If "spec" it will
-                match the entire spectrum.
             target_spectrum (Optional[np.ndarray]) : Target magnitude spectrum. Same size as the images.
                 If None, the target magnitude spectrum is the average spectrum of the all the input images.
                     E.g.,
                         fftim = np.fft.fftshift(np.fft.fft2(im))
                         rho, theta = self.cart2pol(np.real(fftim), np.imag(fftim))
                         tarmag = rho
+            matching_type (str): if "sf", it will match the rotational average of the fourier. If "spec" it will
+                match the entire spectrum.
             rescaling_option (Optional[int]) : Determines whether the luminance values are rescaled after the image modification
                 0 : Rescaling self max/min
                 1 : Rescaling absolute max/min (Default)
@@ -475,12 +480,12 @@ class ImageProcessor:
         elif matching_type == 'spec':
             buffer_collection = _spec_match(output_collection=buffer_collection, phases=self.dataset.phases, target_spectrum=target_spectrum)
 
-        # buffer_collection dtype is np.float64 and drange is approx. [-1.5 to 1.5] before rescaling of any sort       
+        # buffer_collection dtype is np.float64 and drange is close but out of [0, 1] before rescaling of any sort       
         if self.options.rescaling:
             buffer_collection = rescale_images(buffer_collection, rescaling_option=self.options.rescaling)
         else :
             for idx in range(len(buffer_collection)):
-                 buffer_collection[idx] = (np.clip(buffer_collection[idx], 0, 1) * 255).astype(np.uint8)
+                buffer_collection[idx] = (np.clip(buffer_collection[idx], 0, 1) * 255).astype(np.uint8)
         
         buffer_collection = self._apply_post_processing(output_name, buffer_collection, dithering=self.options.dithering)
         self._set_relevant_output(buffer_collection, output_name)

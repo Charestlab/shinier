@@ -74,7 +74,7 @@ class ImageListIO:
         self._initialize_collection(input_data)
 
     def __getitem__(self, idx: int) -> np.ndarray:
-        """Access an image by index."""
+        """ Access an image by index. """
         if idx < -len(self.file_paths) or idx >= len(self.file_paths):
             raise IndexError("Index out of range.")
         if idx < 0:
@@ -89,7 +89,7 @@ class ImageListIO:
         return self.data[idx]
 
     def __setitem__(self, idx: int, new_image: np.ndarray) -> None:
-        """Modify an image at a given index."""
+        """ Modify an image at a given index. """
         if idx < 0 or idx >= len(self.file_paths):
             raise IndexError("Index out of range.")
 
@@ -102,16 +102,16 @@ class ImageListIO:
         self.data[idx] = new_image
 
     def __len__(self) -> int:
-        """Get the number of images in the collection."""
+        """ Get the number of images in the collection. """
         return len(self.file_paths)
 
     def __iter__(self) -> Iterator[np.ndarray]:
-        """Iterate over the images in the collection."""
+        """ Iterate over the images in the collection. """
         for idx in range(len(self.file_paths)):
             yield self[idx]
 
     def _validate_image(self, image: np.ndarray) -> np.ndarray:
-        """Validate the image and return it."""
+        """ Validate the image and return it. """
         image_size = (image.shape[1], image.shape[0])
         if self.reference_size is None:
             self.reference_size = image_size
@@ -127,7 +127,7 @@ class ImageListIO:
         return image
 
     def _initialize_collection(self, input_data: ImageListType) -> None:
-        """Initialize the image collection from input data."""
+        """ Initialize the image collection from input data. """
         if isinstance(input_data, (str, Path)):
             # Convert to Path if input_data is a string
             input_path = Path(input_data)
@@ -190,7 +190,7 @@ class ImageListIO:
             self.drange = (0, 2 ** 64 - 1)
 
     def _load_image(self, image_path: Path) -> np.ndarray:
-        """Load an image from a file path."""
+        """ Load an image from a file path. """
         try:
             if image_path.suffix == ".npy":
                 image = np.load(image_path)
@@ -209,7 +209,7 @@ class ImageListIO:
         return np.array(image)
 
     def _save_image(self, idx: int, image: np.ndarray, save_dir: Optional[Path] = None) -> None:
-        """Save an image to the temporary directory."""
+        """ Save an image to the temporary directory. """
         save_dir = Path(save_dir or self._temp_dir or self.file_paths[idx].parent or Path.cwd())
         save_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -229,12 +229,12 @@ class ImageListIO:
             raise AttributeError(f"Failed to save image at index {idx}: {e}")
 
     def _reset_data(self) -> None:
-        """Reset data attribute with placeholders."""
+        """ Reset data attribute with placeholders. """
         self.data = [None] * len(self.file_paths)
 
     @staticmethod
     def _get_file_format(image_path: Path) -> str:
-        """Get the file format based on the file extension."""
+        """ Get the file format based on the file extension. """
         ext = image_path.suffix.lower()
         format_mapping = {
             '.jpg': 'JPEG', '.jpeg': 'JPEG', '.png': 'PNG',
@@ -243,7 +243,7 @@ class ImageListIO:
         return format_mapping.get(ext, 'TIFF')
 
     def final_save_all(self) -> None:
-        """Save images to save_dir. If needed (self.conserve_memory) loads images and clears up temp files."""
+        """ Save images to save_dir. If needed (self.conserve_memory) loads images and clears up temp files. """
         for idx in range(len(self.file_paths)):
             image = self._load_image(self._temp_dir / f'image_{idx}.npy') if self.conserve_memory else self[idx]
             self._save_image(idx, image, save_dir=self.save_dir)
@@ -252,7 +252,7 @@ class ImageListIO:
         self._cleanup_temp_dir()
 
     def _cleanup_temp_dir(self) -> None:
-        """Clean up temporary directory if it exists."""
+        """ Clean up temporary directory if it exists. """
         # if self._temp_dir and self._temp_dir.is_dir():
         try:
             if self._temp_dir:
@@ -261,204 +261,13 @@ class ImageListIO:
         except Exception as e:
             # Log or handle the exception appropriately
             print(f"Failed to delete temporary directory {self._temp_dir}: {e}")
+    
     def close(self):
         self.__del__()
-    def __del__(self):
-        """Clean up temporary directory upon object destruction."""
-        self._cleanup_temp_dir()
-
-
-def pixel_order(image: np.ndarray) -> Tuple[np.ndarray, Union[float, list]]:
-    """
-    Assign strict ordering to image pixels.
-
-    Args:
-        image (np.ndarray): Monochromatic or multispectral image.
-
-    Returns:
-        Tuple[np.ndarray, Union[float, list]]:
-            - im_sort (np.ndarray): Image with same dimensions as input, with elements representing the pixel order.
-            - OA (float or list): Order accuracy in the range [0, 1], fraction of unique filter response combinations.
-              For multichannel images, OA is a list.
-    """
-    # Image dimensions
-    M, N, P = image.shape
-
-    # Define filters
-    F2 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]) / 5.0
-    F3 = np.ones((3, 3)) / 9.0
-    F4 = np.ones((5, 5)) / 13.0
-    F4[[0, 0, 1, 1, 1, 3, 3, 4, 4, 4], [0, 1, 0, 1, 4, 0, 4, 1, 3, 4]] = 0
-    F5 = np.ones((5, 5)) / 21.0
-    F5[[0, 0, 4, 4], [0, 4, 0, 4]] = 0
-    F6 = np.ones((5, 5)) / 25.0
     
-    # Filters ordered by importance (last = most important for lexsort)    
-    F = [F2, F3, F4, F5, F6]
-
-    # Convolve filters with the image and order
-    im_sort = []
-    OA = []
-
-    for i in range(P):
-        # Apply filters to each channel and collect filter responses
-        FR = np.zeros((M, N, 6))
-        FR[:, :, 0] = image[:, :, i]
-        for j in range(5):
-            FR[:, :, j + 1] = convolve_2d(image[:, :, i], F[j])
-
-        # Rearrange the filter responses
-        FR = FR.reshape(M * N, 6)
-
-        # Number of unique filter responses and ordering accuracy
-        unique_responses = np.unique(FR, axis=0)
-        n = unique_responses.shape[0]
-        OA.append(n / (M * N))
-
-        # Sort responses lexicographically
-        idx_pos = np.lexsort(FR[:, ::-1].T)
-
-        # Rearrange indices according to pixel position
-        idx_o = np.argsort(idx_pos)
-        idx_o = idx_o.reshape((M, N))
-
-        im_sort.append(idx_o)
-
-    if P == 1:
-        OA = OA[0]
-
-    return np.stack(im_sort, axis=-1), OA
-
-
-def convolve_2d(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
-    """
-    Efficiently convolve a given 2D image with a given square kernel.
-
-    Args:
-        image (np.ndarray): Input 2D image.
-        kernel (np.ndarray): Square convolution kernel.
-
-    Returns:
-        np.ndarray: Convolved image.
-    """
-    if not isinstance(kernel, np.ndarray):
-        raise TypeError('Kernel must be a 2D np.ndarray of square shape')
-    if not isinstance(image, np.ndarray):
-        raise TypeError('Image must be a 2D np.ndarray')
-    if image.ndim == 3:
-        raise TypeError('Image must be a 2D np.ndarray')
-    if kernel.shape[0] != kernel.shape[1]:
-        raise ValueError('Kernel must be a 2D np.ndarray of square shape')
-
-    # Get kernel dimensions (assuming square kernel)
-    kernel_size = kernel.shape[0]
-
-    # Apply reflective padding to the image
-    pad_size = kernel_size // 2
-    padded_image = np.pad(image, pad_size, mode='reflect')
-
-    # Create sliding window view
-    windows = sliding_window_view(padded_image, (kernel_size, kernel_size))
-
-    # Perform convolution using optimized summation
-    conv_result = np.tensordot(windows, kernel, axes=((2, 3), (0, 1)))
-    return conv_result
-
-
-def count_unique_hash(array: np.ndarray) -> int:
-    """
-    Count the number of unique elements in a 2D numpy array using Python sets.
-
-    Args:
-        array (np.ndarray): The input 2D array.
-
-    Returns:
-        int: The count of unique rows.
-    """
-
-    unique_hashes = set()
-    for row in array:
-        row_hash = hashlib.md5(row).hexdigest()  # Hashing without tuple conversion
-        unique_hashes.add(row_hash)
-    return len(unique_hashes)
-
-#
-# def pixel_order(image: np.ndarray) -> Tuple[np.ndarray, List]:
-#     """
-#     Assign strict ordering to image pixels.
-#
-#     Args:
-#         image (np.ndarray): Monochromatic or multispectral image.
-#
-#     Returns:
-#         Tuple[np.ndarray, List]:
-#             - im_sort (np.ndarray): Image with same dimensions as input, with elements representing the pixel order.
-#             - OA (list): Order accuracy in the range [0, 1], fraction of unique filter response combinations.
-#
-#     References:
-#         1. Coltuc D. and Bolon P., 1999, "Strict ordering on discrete images
-#         and applications"
-#         2. Coltuc D., Bolon P. and Chassery J-M., 2006, "Exact histogram
-#         specification", IEEE Transcations on Image Processing
-#         15(5):1143-1152
-#
-#     This code is a Python implementation of Anton Semechko's (asemechk@uoguelph.ca) exact_histogram in MATLAB
-#
-#     """
-#     image = im3D(image)
-#
-#     # Image dimensions
-#     x_size, y_size, n_channels = image.shape
-#
-#     # Original filters
-#     F2 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]) / 5.0
-#     F3 = np.ones((3, 3)) / 9.0
-#     F4 = np.ones((5, 5)) / 13.0
-#     F4[[0, 0, 1, 1, 1, 3, 3, 4, 4, 4], [0, 1, 0, 1, 4, 0, 4, 1, 3, 4]] = 0
-#     F5 = np.ones((5, 5)) / 21.0
-#     F5[[0, 0, 4, 4], [0, 4, 0, 4]] = 0
-#
-#     # Combine all filters into a list
-#     F = [F2, F3, F4, F5]
-#
-#
-#     # # Define filters
-#     # F2 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]) / 5.0
-#     # F3 = np.ones((3, 3)) / 9.0
-#     # F4 = np.ones((5, 5)) / 13.0
-#     # F4[[0, 0, 1, 1, 1, 3, 3, 4, 4, 4], [0, 1, 0, 1, 4, 0, 4, 1, 3, 4]] = 0
-#     # F5 = np.ones((5, 5)) / 21.0
-#     # F5[[0, 0, 4, 4], [0, 4, 0, 4]] = 0
-#     # F6 = np.ones((5, 5)) / 25.0
-#     # F = [F2, F3, F4, F5, F6]
-#     n_kernels = len(F)
-#
-#     # Convolve filters with the image and order
-#     im_sort = []
-#     OA = []
-#     for channel in range(n_channels):
-#         # Apply filters to each channel and collect filter responses
-#         FR = np.zeros((x_size, y_size, n_kernels + 1))
-#         FR[:, :, 0] = image[:, :, channel]
-#         for j in range(n_kernels):
-#             FR[:, :, j + 1] = convolve_2d(image[:, :, channel], F[j])
-#         FR_reshaped = FR.reshape((x_size*y_size, n_kernels + 1))
-#
-#         # Number of unique filter responses and ordering accuracy
-#         n = len(np.unique(FR_reshaped, axis=0))
-#         OA.append(n / (x_size * y_size))
-#
-#         # Sort responses lexicographically
-#         FR_reshaped = FR_reshaped[:, ::-1] # Because np.lexsort sorts from right to left whereas MATLAB's sortrows sorts from left to right.
-#         idx_pos = np.lexsort(FR_reshaped.T)
-#
-#         # Rearrange indices according to pixel position
-#         idx_o = np.argsort(idx_pos)
-#         idx_o = idx_o.reshape((x_size, y_size))
-#
-#         im_sort.append(idx_o)
-#
-#     return np.stack(im_sort, axis=-1), OA
+    def __del__(self):
+        """ Clean up temporary directory upon object destruction. """
+        self._cleanup_temp_dir()
 
 
 class MatlabOperators:
@@ -564,6 +373,102 @@ class MatlabOperators:
         return np.remainder(x, y)
 
 
+def convolve_2d(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+    """
+    Efficiently convolve a given 2D image with a given square kernel.
+
+    Args:
+        image (np.ndarray): Input 2D image.
+        kernel (np.ndarray): Square convolution kernel.
+
+    Returns:
+        np.ndarray: Convolved image.
+    """
+    if not isinstance(kernel, np.ndarray):
+        raise TypeError('Kernel must be a 2D np.ndarray of square shape')
+    if not isinstance(image, np.ndarray):
+        raise TypeError('Image must be a 2D np.ndarray')
+    if image.ndim == 3:
+        raise TypeError('Image must be a 2D np.ndarray')
+    if kernel.shape[0] != kernel.shape[1]:
+        raise ValueError('Kernel must be a 2D np.ndarray of square shape')
+
+    # Get kernel dimensions (assuming square kernel)
+    kernel_size = kernel.shape[0]
+
+    # Apply reflective padding to the image
+    pad_size = kernel_size // 2
+    padded_image = np.pad(image, pad_size, mode='reflect')
+
+    # Create sliding window view
+    windows = sliding_window_view(padded_image, (kernel_size, kernel_size))
+
+    # Perform convolution using optimized summation
+    conv_result = np.tensordot(windows, kernel, axes=((2, 3), (0, 1)))
+    return conv_result
+
+
+def pixel_order(image: np.ndarray) -> Tuple[np.ndarray, Union[float, list]]:
+    """ 
+    Assigns strict ordering to monochromatic or multispectralimage pixels.
+
+    Args:
+        image (np.ndarray): image
+
+    Returns:
+        Tuple[np.ndarray, Union[float, list]]:
+            - im_sort (np.ndarray): Image with same dimensions as input, with elements representing the pixel order.
+            - OA (float or list): Order accuracy in the range [0, 1], fraction of unique filter response combinations.
+              For multichannel images, OA is a list.
+    """
+    M, N, P = image.shape
+
+    # Defining the 6 filters (F1 = grayscale of pixel for a channel)
+    F2 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]) / 5.0
+    F3 = np.ones((3, 3)) / 9.0
+    F4 = np.ones((5, 5)) / 13.0
+    F4[[0, 0, 1, 1, 1, 3, 3, 4, 4, 4], [0, 1, 0, 1, 4, 0, 4, 1, 3, 4]] = 0
+    F5 = np.ones((5, 5)) / 21.0
+    F5[[0, 0, 4, 4], [0, 4, 0, 4]] = 0
+    F6 = np.ones((5, 5)) / 25.0
+    
+    # Filters ordered by importance  
+    F = [F2, F3, F4, F5, F6]
+
+    # Convolve filters with the image and order
+    im_sort = []
+    OA = []
+
+    for i in range(P):
+        # Apply filters to each channel and collect filter responses
+        FR = np.zeros((M, N, 6))
+        FR[:, :, 0] = image[:, :, i]
+        for j in range(5):
+            FR[:, :, j + 1] = convolve_2d(image[:, :, i], F[j])
+
+        # Rearrange the filter responses
+        FR = FR.reshape(M * N, 6)
+
+        # Number of unique filter responses and ordering accuracy
+        unique_responses = np.unique(FR, axis=0)
+        n = unique_responses.shape[0]
+        OA.append(n / (M * N))
+
+        # Sort responses lexicographically
+        # [:, ::-1] because np.lexsort applies sort keys from last to first (right to left).
+        idx_pos = np.lexsort(FR[:, ::-1].T)
+
+        # Rearrange indices according to pixel position
+        idx_o = np.argsort(idx_pos)
+        idx_o = idx_o.reshape((M, N))
+
+        im_sort.append(idx_o)
+
+    if P == 1:
+        OA = OA[0]
+
+    return np.stack(im_sort, axis=-1), OA
+
 
 def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.ndarray = None, verbose: bool = True) -> Tuple[np.ndarray, List]:
     """
@@ -650,7 +555,7 @@ def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.
     return im_out.squeeze(), OA
 
 
-def noisy_bit_dithering(image: np.ndarray) -> np.ndarray:
+def noisy_bit_dithering(image: np.ndarray, depth: int = 256) -> np.ndarray:
     """
     Implements the dithering algorithm presented in :
         Allard, R., Faubert, J. (2008) The noisy-bit method for digital displays:
@@ -658,14 +563,14 @@ def noisy_bit_dithering(image: np.ndarray) -> np.ndarray:
         Research Method, 40(3), 735-743.
 
     Args:
-        image (np.ndarray): A image of floats ranging from 0 to 1.
+        image (np.ndarray): An image of floats ranging from 0 to 1.
+        depth (optional) : The number of gray shades. (Default = 256)
 
     Returns:
         processed_image (np.ndarray): image matrix containing integer values [1, depth], indicating which luminance value should be used for every pixel.
-
-
+            Output uses the smallest integer dtype that fits all values.
     E.g.:
-        processed_image = noisy_bit_dithering(image, pixel_depth = 256)
+        processed_image = noisy_bit_dithering(image, depth = 256)
 
     This example assumes that all rgb values are linearly related to luminance
     values (e.g. on a Mac, put your LCD monitor gamma parameter to 1 in the Displays
@@ -676,20 +581,21 @@ def noisy_bit_dithering(image: np.ndarray) -> np.ndarray:
     Frederic Gosselin, 27/09/2022
     frederic.gosselin@umontreal.ca
 
-    Slight modifications for Matlab compatibility: Nicolas Dupuis-Roy, 2025-01-28
+    Slight modifications for Matlab compatibility: Nicolas Dupuis-Roy & Mathias Salvas-Hébert, 2025-08-19
 
     """
-
     if not isinstance(image, np.ndarray) or np.issubdtype(image.dtype, np.integer):
         raise TypeError('image should be a np.ndarray of floats ranging from 0 to 1')
+    if not isinstance(depth, int):
+        raise TypeError('depth should be an integer')
 
-    pixel_depth = 256
-    processed_image = image * (pixel_depth - 1.0)
-    processed_image = processed_image + np.random.random(np.shape(image)) - 0.5
-    image_uint8 = MatlabOperators.uint8(processed_image).squeeze()
+    processed_image = image * (depth - 1.0)
 
     # tim = np.uint8(np.fmax(np.fmin(np.around(tim + np.random.random(np.shape(im)) - 0.5), depth - 1.0), 0.0))
-    return image_uint8
+    processed_image = processed_image + np.random.random(np.shape(image)) - 0.5
+    tim = np.clip(MatlabOperators.round(processed_image), 0, depth-1)
+    uint_image = tim.astype(np.min_scalar_type(int(tim.max()))).squeeze()
+    return uint_image
 
 
 def uint_to_float01(image: np.ndarray, allow_clipping: bool = True) -> np.ndarray:
@@ -961,7 +867,6 @@ def gaussian_kernel(size: int, sigma: float) -> np.ndarray:
     return kernel / np.sum(kernel)
 
 
-
 def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> Tuple[np.ndarray, float]:
     """
     Compute the Structural Similarity Index (SSIM) and its gradient.
@@ -1052,16 +957,7 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> Tupl
     return np.stack(all_sens, axis=-1).squeeze(), np.stack(all_mssim)
 
 def compute_rmse(image1: np.ndarray, image2: np.ndarray) -> float:
-    """
-    Compute the root-mean-square error between two images
-
-    Args:
-        image1 (np.ndarray): Image 1
-        image2 (np.ndarray): Image 2
-
-    Returns:
-        float
-    """
+    """ Compute the root-mean-square error between two images. """
     return np.sqrt(np.mean((image1 - image2) ** 2))
 
 def compute_metrics_from_paths(images: ImageListType, options: Options):
@@ -1076,7 +972,7 @@ def compute_metrics_from_paths(images: ImageListType, options: Options):
             metrics (List[str], optional): Metrics to compute. Defaults to ['rmse', 'ssim'].
 
     Returns:
-        output (dict): with 'avg_rmse' and 'avg_ssim' if computed
+        output (dict): with 'avg_rmse' and 'avg_ssim' if computed.
     """
     if options.metrics != None : 
         total_rmse = 0
@@ -1114,27 +1010,6 @@ def compute_metrics_from_paths(images: ImageListType, options: Options):
             output.append(avg_ssim)
         return output
 
-def compute_images_metrics(images: ImageListType, original_images: ImageListType, metrics: List[str] = ['rmse', 'ssim']):
-
-    total_rmse = 0
-    total_ssim = 0
-    output = []
-    for orig_im, proc_im in zip(original_images, images):
-        if 'rmse' in metrics:
-            rmse_value = compute_rmse(orig_im, proc_im)
-            total_rmse += rmse_value
-        if 'ssim' in metrics:
-            _, ssim_value = ssim_sens(orig_im, proc_im)
-            total_ssim += ssim_value
-    if 'rmse' in metrics:
-        avg_rmse = total_rmse / len(images)
-        print(f"Average RMSE: {avg_rmse}")
-        output.append(avg_rmse)
-    if 'ssim' in metrics:
-        avg_ssim = total_ssim / len(images)
-        print(f"Average SSIM: {avg_ssim}")
-        output.append(avg_ssim)
-    return output
 
 def get_images_spectra(images: ImageListType, magnitudes: Optional[ImageListIO] = None, phases: Optional[ImageListIO] = None) -> Union[List[np.ndarray], ImageListType]:
     """
@@ -1262,38 +1137,6 @@ def apply_median_blur(image: np.ndarray, kernel_size: int = 3) -> np.ndarray:
     blurred = blurred[:, :, 0].squeeze() if original_ndim == 2 else blurred
 
     return blurred
-#
-#
-# def apply_median_blur(image: np.ndarray, kernel_size: int = 3) -> np.ndarray:
-#     """
-#     Apply a median blur to image.
-#
-#     Parameters:
-#         image (np.ndarray): Input image (2D grayscale or 3D multi-channel).
-#         kernel_size (int): Size of the square kernel (must be an odd integer).
-#
-#     Returns:
-#         np.ndarray: Blurred image
-#
-#     Tested by Nicolas D.R.: Should provide exact same results on np.uint8 as cv2.medianBlur.
-#     """
-#     if kernel_size % 2 == 0:
-#         raise ValueError("kernel_size must be an odd integer.")
-#     if image.ndim not in [2, 3]:
-#         raise ValueError("Input image must be a 2D or 3D array.")
-#
-#     ndim = image.ndim
-#     image = im3D(image)
-#
-#
-#     pad = kernel_size // 2
-#     padded_image = np.pad(image, pad_width=((pad, pad), (pad, pad), (0, 0)), mode='reflect')
-#     windows = sliding_window_view(padded_image, (kernel_size, kernel_size, image.shape[2]))
-#     blurred_image = np.median(windows, axis=(-3, -2)).squeeze()
-#
-#     blurred_image = blurred_image[:, :, 0].squeeze() if ndim == 2 else blurred_image
-#     return blurred_image.astype(image.dtype)
-#
 
 
 def hist2list(hist: np.ndarray) -> np.ndarray:
@@ -1314,6 +1157,7 @@ def hist2list(hist: np.ndarray) -> np.ndarray:
         final_lists[:, channel] = np.stack(list(chain.from_iterable([val] * cnt for val, cnt in enumerate(hist[:, channel])))).astype(int)
     return final_lists
 
+
 def im3D(image: np.ndarray):
     """ Forces a third dimension on grayscale image.
 
@@ -1325,6 +1169,7 @@ def im3D(image: np.ndarray):
 
     """
     return np.stack((image,) * 1, axis=-1) if image.ndim != 3 else image
+
 
 def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins=256) -> np.ndarray:
     """ Computes the histogram of the image. If RGB image, it provides one hist per channel.
@@ -1348,3 +1193,93 @@ def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins=256) -> 
     for channel in range(n_channels):
         count[:, channel], _ = np.histogram(image[:, :, channel][mask[:, :, channel]], bins=n_bins, range=(0, n_bins))
     return count
+
+
+
+# Extra utilities :
+def floyd_steinberg_dithering(image : np.ndarray, depth : int = 256) -> np.ndarray:
+        """
+        Implements the dithering algorithm presented in :
+            R.W. Floyd, L. Steinberg, An adaptive algorithm for spatial grey scale.
+            Proceedings of the Society of Information Display 17, 75Ð77 (1976).
+        
+        Args:
+            image (np.ndarray): An image of floats ranging from 0 to 1.
+            depth (optional) : The number of gray shades. (Default = 256)
+            
+        Returns:
+            processed_image (np.ndarray): image matrix containing integer values [1, depth], indicating which luminance value should be used for every pixel.     
+                Output uses the smallest integer dtype that fits all values.
+        """
+        if not isinstance(image, np.ndarray) or np.issubdtype(image.dtype, np.integer):
+            raise TypeError('image should be a np.ndarray of floats ranging from 0 to 1')
+        if not isinstance(depth, int):
+            raise TypeError('depth should be an integer')
+
+        tim = image * (depth - 1.0)
+        for xx in np.arange(1,image.shape[1]-1,1):
+            for yy in np.arange(1,image.shape[0]-1,1): # exchange with the following
+                oldpixel = tim[yy,xx]
+                newpixel = MatlabOperators.round(tim[yy,xx])
+                quant_error = oldpixel - newpixel
+                tim[yy,xx+1] = tim[yy,xx+1] + 7/16 * quant_error
+                tim[yy+1,xx-1] = tim[yy+1,xx-1] + 3/16 * quant_error
+                tim[yy+1,xx] = tim[yy+1,xx] + 5/16 * quant_error
+                tim[yy+1,xx+1] = tim[yy+1,xx+1] + 1/16 * quant_error
+
+        tim = np.clip(MatlabOperators.round(tim), 0, depth-1)
+        uint_image = tim.astype(np.min_scalar_type(int(tim.max()))).squeeze()
+        return uint_image
+
+def gaussian_ellipsoidal_mask(ims, grayTone=127, RGB=False, cutoffA=0.5, cutoffB=0.75, offsetA=0, offsetB=0):
+    """
+    Applies a smooth, ellipsoidal Gaussian mask to a list of images.
+
+    The mask is defined by an ellipse with configurable axes and offsets, and is blurred using a Gaussian kernel.
+    The masked region blends the image towards a specified gray tone, with optional support for RGB images.
+
+    Args:
+        ims : list or array-like
+            List of input images (as numpy arrays or PIL Images) to be masked.
+        grayTone : int, optional
+            The gray tone (0-255) to blend towards in the masked region. Default is 127.
+        RGB : bool, optional
+            If True, treats images as RGB (3-channel). If False, treats as grayscale. Default is False.
+        cutoffA : float, optional
+            Semi-axis length of the ellipse along the x-direction (normalized to [0,1]). Default is 0.5.
+        cutoffB : float, optional
+            Semi-axis length of the ellipse along the y-direction (normalized to [0,1]). Default is 0.75.
+        offsetA : float, optional
+            Offset of the ellipse center along the x-direction (normalized to [-1,1]). Default is 0.
+        offsetB : float, optional
+            Offset of the ellipse center along the y-direction (normalized to [-1,1]). Default is 0.
+
+    Returns:
+        out : list of PIL.Image
+            List of masked images as PIL Image objects, with the ellipsoidal mask applied.
+
+    Notes:
+        - The mask smoothly blends the image towards the specified gray tone inside the ellipse.
+        - The mask is blurred using a Gaussian kernel for smooth transitions.
+        - For RGB images, the mask is applied to all channels.
+    """
+    def gaussian_blur(a, s=5):
+        r = int(3*s)
+        x = np.arange(-r, r+1)
+        k = np.exp(-0.5*(x/s)**2); k /= k.sum()
+        a = np.pad(a, ((0,0),(r,r)), mode='reflect')
+        a = np.apply_along_axis(lambda v: np.convolve(v, k, mode='valid'), 1, a)
+        a = np.pad(a, ((r,r),(0,0)), mode='reflect')
+        a = np.apply_along_axis(lambda v: np.convolve(v, k, mode='valid'), 0, a)
+        return a
+    out = []
+    for im in ims:
+        im = np.asarray(im); H, W = im.shape[:2]; f = im.astype(np.float64)/255.0
+        xv, yv = np.meshgrid(np.linspace(0,1,W), np.linspace(0,1,H))
+        m = ((((2*xv-1-offsetA)**2)/(cutoffA**2) + ((2*yv-1-offsetB)**2)/(cutoffB**2)) < 1).astype(np.float64)
+        m = gaussian_blur(m); mx = m.max(); m = m/(mx if mx>0 else 1.0)
+        f = m[...,None]*(f-0.5)+0.5 if (RGB and f.ndim==3 and f.shape[2]==3) else m*(f-0.5)+0.5
+        a = f*255.0; g = 127 - grayTone
+        o = np.where(a!=255.0, a-g, 255.0)
+        out.append(Image.fromarray(np.clip(o,0,255).astype(np.uint8)))
+    return out

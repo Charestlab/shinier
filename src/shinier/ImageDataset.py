@@ -15,7 +15,8 @@ class ImageDataset:
 
     Args:
         images (ImageListType): List of images. If not provided, images will be loaded from `input_folder` as defined in the Options class.
-        masks (ImageListType): List of masks, each specifying the parts of the image that should be taken into account. If not provided, they will be loaded from `masks_folder` as defined in the Options class.
+        masks (ImageListType): List of masks, each specifying the parts of the image that should be taken into account. 
+            If not provided, they will be loaded from `masks_folder` as defined in the Options class.
         options (Optional[Options]): Instance of the Options class. If not provided, Options will be instantiated with default values.
 
     Attributes:
@@ -62,7 +63,6 @@ class ImageDataset:
         # Create placeholders for magnitudes and phases if options.mode in [3, 4, 5, 6, 7, 8]
         self.magnitudes, self.phases, self.buffer = None, None, None
 
-
         # Create placeholders for buffer if options.mode include hist_match or fourier_match
         if options.mode >= 2:
             # Create placeholders for buffer
@@ -71,7 +71,7 @@ class ImageDataset:
                 input_data=input_data,
                 conserve_memory=self.options.conserve_memory,
                 as_gray=self.options.as_gray,
-                save_dir = self.options.output_folder
+                save_dir=self.options.output_folder
             )
 
             # Create placeholders for spectra
@@ -112,10 +112,7 @@ class ImageDataset:
         self.images.final_save_all()
 
     def print_log(self) -> None:
-        """
-        Record processing_steps list for reproducibility
-        """
-
+        """ Record processing_steps list for reproducibility """
         # Generate a filename with the full date and time
         current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         filename = Path(self.options.output_folder) / f"log_{current_datetime}.txt"
