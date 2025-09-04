@@ -121,7 +121,7 @@ class ImageProcessor:
             print(f'Use this seed for reproducibility: {self.seed}')
         if self.options.mode == 1:
             print('Applying luminance matching...')
-            self.lum_match(lum=self.options.target_lum, safe_values=self.options.safe_lum_match)
+            self.lum_match(target_lum=self.options.target_lum, safe_values=self.options.safe_lum_match)
             self.dataset.processing_steps.append('lum_match')
         if self.options.mode in [2, 5, 6]:
             print('Applying histogram matching...')
