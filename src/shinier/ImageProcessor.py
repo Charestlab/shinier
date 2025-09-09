@@ -9,14 +9,14 @@ from shinier.utils import (
     ImageListType, separate, imhist, im3D,
     rescale_images, get_images_spectra, ssim_sens, cart2pol,
     pol2cart, float01_to_uint, uint_to_float01, noisy_bit_dithering,
-    exact_histogram, compute_metrics_from_paths, bcolors, MatlabOperators)
+    exact_histogram, compute_metrics_from_paths, Bcolors, MatlabOperators)
 
 
 class ImageProcessor:
     """Base class for image processing."""
-    def __init__(self, dataset: ImageDataset, verbose: bool=True):
-        self.dataset: ImageDataset=dataset
-        self.options: Options=dataset.options
+    def __init__(self, dataset: ImageDataset, verbose: bool = True):
+        self.dataset: ImageDataset = dataset
+        self.options: Options = dataset.options
         self.current_image: Optional[np.ndarray] = None
         self.current_masks: Optional[np.ndarray] = None
         self.bool_masks: List = [None] * len(self.dataset.images)
@@ -50,7 +50,7 @@ class ImageProcessor:
         output_collection = getattr(self.dataset, output_name)
         return input_collection, input_name, output_collection, output_name
 
-    def _apply_post_processing(self, output_name: str, output_collection: ImageListType, dithering: bool):        
+    def _apply_post_processing(self, output_name: str, output_collection: ImageListType, dithering: bool):
         # Applies dithering if required and last processing step
         if output_name == 'images': # Apply post_processing only if last processing step
             dtype = output_collection.dtype
@@ -101,7 +101,7 @@ class ImageProcessor:
                 masks_size = im_size
                 if n_dims == 3:
                     masks_size = list(im_size) + [n_dims]
-                self.bool_masks[idx] = np.ones(masks_size, dtype=bool).squeeze() if idx == 0 else self.bool_masks[0]   
+                self.bool_masks[idx] = np.ones(masks_size, dtype=bool).squeeze() if idx == 0 else self.bool_masks[0]
 
     def _prepare_mask(self, image, mask = None):
         if self.options.whole_image == 2:
@@ -121,7 +121,7 @@ class ImageProcessor:
             print(f'Use this seed for reproducibility: {self.seed}')
         if self.options.mode == 1:
             print('Applying luminance matching...')
-            self.lum_match(lum=self.options.target_lum, safe_values=self.options.safe_lum_match)
+            self.lum_match(target_lum=self.options.target_lum, safe_values=self.options.safe_lum_match)
             self.dataset.processing_steps.append('lum_match')
         if self.options.mode in [2, 5, 6]:
             print('Applying histogram matching...')
@@ -129,17 +129,17 @@ class ImageProcessor:
             self.dataset.processing_steps.append('hist_match')
         if self.options.mode in [3, 5, 7]:
             print('Applying spatial frequency matching...')
-            self.fourier_match(target_spectrum = self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='sf')
+            self.fourier_match(target_spectrum=self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='sf')
             self.dataset.processing_steps.append('sf_match')
         if self.options.mode in [4, 6, 8]:
             print('Applying spectrum matching...')
-            self.fourier_match(target_spectrum = self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='spec')
+            self.fourier_match(target_spectrum=self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='spec')
             self.dataset.processing_steps.append('spec_match')
         if self.options.mode in [7, 8]:
             print('Applying histogram matching...')
             self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
             self.dataset.processing_steps.append('hist_match')
-    
+
     def only_dithering(self):
         input_collection, input_name, output_collection, output_name = self._get_relevant_input_output()
         buffer_collection = self.dataset.buffer
@@ -216,7 +216,7 @@ class ImageProcessor:
             print(f'\tStandardized:\tM = {M:.4f}, SD = {SD:.4f}') if self.verbose else None
             mx, mn = np.max(im2[self.bool_masks[idx]]), np.min(im2[self.bool_masks[idx]])
             clipping_needed = mn<0 or mx>255
-            print(f"{bcolors.WARNING}Warning: Clipping applied because values of image #{idx} are outside the [0, 255] range: [{mn}, {mx}]. Results of lum_match might not be exact{bcolors.ENDC}") if self.verbose and clipping_needed else None
+            print(f"{Bcolors.WARNING}Warning: Clipping applied because values of image #{idx} are outside the [0, 255] range: [{mn}, {mx}]. Results of lum_match might not be exact{Bcolors.ENDC}") if self.verbose and clipping_needed else None
             im2 = MatlabOperators.uint8(im2) if self.options.legacy_mode else np.clip(im2, 0, 255).astype('uint8')
 
             # Save resulting image
@@ -257,7 +257,7 @@ class ImageProcessor:
             average = hist_sum / len(images)
             if normalized:
                 average /= average.sum()
-        
+
             return average
 
         # Cumulative distribution function : gives the proportion of pixel equal or under the value of a bin for each channel
@@ -292,12 +292,12 @@ class ImageProcessor:
                 # Data and mask of the channel
                 channel_data = image[:, :, channel]
                 channel_mask = mask[..., channel] if mask.ndim == 3 else mask
-                
+
                 new_channel = channel_data.copy()
                 new_channel[channel_mask] = mapping[channel_data[channel_mask]]
                 new_im[:, :, channel] = new_channel
             return new_im.astype(image.dtype).squeeze()
-        
+
         # Get appropriate image collection
         input_collection, input_name, output_collection, output_name = self._get_relevant_input_output()
         buffer_collection = self.dataset.buffer
@@ -320,9 +320,9 @@ class ImageProcessor:
                         buffer_collection[idx] = float01_to_uint(image, allow_clipping=True, bit_size=bit_size)
                     else:
                         print('Why does this happen?')
-                
+
                 elif dtype == np.uint8:
-                    buffer_collection[idx] = (image / 255.0 * (2 ** bit_size - 1)).astype(np.dtype(f'uint{bit_size}'))       
+                    buffer_collection[idx] = (image / 255.0 * (2 ** bit_size - 1)).astype(np.dtype(f'uint{bit_size}'))
             else:
                 buffer_collection[idx] = image
 
@@ -333,10 +333,10 @@ class ImageProcessor:
                 self._get_mask(idx)
             if target_hist.shape[0] != n_bins:
                 raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
-            
+
         if hist_specification:
             target_cdf = _count_cdf(target_hist)
-        
+
         # Match the histogram
         n_iter = self.options.iterations  # Number of iterations for SSIM optimization (default = 10)
         step_size = self.options.step_size  # Step size (default = 34)
@@ -351,7 +351,7 @@ class ImageProcessor:
                     if hist_specification:
                         Y = _match_count_cdf(image=X, mask=self.bool_masks[idx], target_cdf=target_cdf, noise_level=noise_level, n_bins=n_bins)
                     else:
-                        Y, OA = exact_histogram(image=X, target_hist=target_hist, binary_mask=self.bool_masks[idx])                        
+                        Y, OA = exact_histogram(image=X, target_hist=target_hist, binary_mask=self.bool_masks[idx])
                         print(f'    Ordering accuracy per channel = {OA}') if self.verbose else None
 
                     sens, ssim = ssim_sens(image, Y, n_bins=n_bins)
@@ -368,7 +368,7 @@ class ImageProcessor:
                     print(f'Ordering accuracy per channel = {OA}') if self.verbose else None
 
             buffer_collection[idx] = new_image
-    
+
         output_collection = self._apply_post_processing(output_name=output_name, output_collection=buffer_collection, dithering=self.options.dithering)
         self._set_relevant_output(output_collection, output_name)
 
@@ -480,13 +480,13 @@ class ImageProcessor:
         elif matching_type == 'spec':
             buffer_collection = _spec_match(output_collection=buffer_collection, phases=self.dataset.phases, target_spectrum=target_spectrum)
 
-        # buffer_collection dtype is np.float64 and drange is close but out of [0, 1] before rescaling of any sort       
+        # buffer_collection dtype is np.float64 and drange is close but out of [0, 1] before rescaling of any sort
         if self.options.rescaling:
             buffer_collection = rescale_images(buffer_collection, rescaling_option=self.options.rescaling)
         else :
             for idx in range(len(buffer_collection)):
                 buffer_collection[idx] = (np.clip(buffer_collection[idx], 0, 1) * 255).astype(np.uint8)
-        
+
         buffer_collection = self._apply_post_processing(output_name, buffer_collection, dithering=self.options.dithering)
         self._set_relevant_output(buffer_collection, output_name)
 
