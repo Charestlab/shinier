@@ -1,25 +1,27 @@
-# from datetime import datetime
-import hashlib
-from pathlib import Path
-
-
 # TODO: refactor class and function names; refactor docstrings to google style; get rid of cv2
+# TODO: Before V1 commit: Remove all revision comments (e.g. see round in MatlabOperators)
+# TODO: Before V1 commit: Remove debug points
+# TODO: Optimization: Check image type and use np.fft.rfft2 for faster computations.
 
+# External package imports
+from pathlib import Path
+import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
-from typing import Any, Optional, Tuple, Union, NewType, List, Iterator, Callable
+from typing import Any, Optional, Tuple, Union, NewType, List, Iterator, Callable, Literal
 from PIL import Image, ImageFilter
 import shutil
 import tempfile
 from itertools import chain
-import numpy as np
-from shinier import Options
+from matplotlib import pyplot as plt
 
+# Local package imports
+from shinier import Options
 
 # Type definition
 ImageListType = Union[str, Path, List[Union[str, Path]], List[np.ndarray]]
 
 
-class bcolors:
+class Bcolors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
     OKCYAN = '\033[96m'
@@ -53,6 +55,9 @@ class ImageListIO:
         reference_size: Reference image size (x, y) for validation.
         n_dims: Number of dimensions of the image
     """
+
+    DEFAULT_GRAY_MODE = 'L'
+    DEFAULT_COLOR_MODE = 'RGB'
 
     def __init__(
         self,
@@ -94,7 +99,7 @@ class ImageListIO:
             raise IndexError("Index out of range.")
 
         self.dtype = new_image.dtype
-        self._get_drange()
+        self._update_drange()
         new_image = self._validate_image(new_image)
         if self.conserve_memory:
             self._reset_data()
@@ -120,7 +125,7 @@ class ImageListIO:
             raise ValueError(f"Image size {image_size} does not match reference size {self.reference_size}.")
         if self.dtype is None:
             self.dtype = image.dtype
-            self._get_drange()
+            self._update_drange()
         else:
             if self.dtype != image.dtype:
                 raise ValueError(f"Image dtype {image.dtype} does not match collection dtype {self.dtype}.")
@@ -177,17 +182,21 @@ class ImageListIO:
         self.reference_size = self.data[0].shape[:2]
         self.n_dims = self.data[0].ndim
 
-    def _get_drange(self):
-        if self.dtype == np.bool or self.dtype == bool :
+    def _update_drange(self) -> None:
+        """Update numeric dynamic range based on current self.dtype."""
+        if self.dtype is None:
+            self.drange = None
+            return
+        if np.issubdtype(self.dtype, np.bool_) or self.dtype is bool:
             self.drange = (0, 1)
-        elif self.dtype == np.uint8:
-            self.drange = (0, 2 ** 8 - 1)
-        elif self.dtype == np.uint16:
-            self.drange = (0, 2 ** 16 - 1)
-        elif self.dtype == np.uint32:
-            self.drange = (0, 2 ** 32 - 1)
-        elif self.dtype == np.uint64:
-            self.drange = (0, 2 ** 64 - 1)
+        elif np.issubdtype(self.dtype, np.integer):
+            info = np.iinfo(self.dtype)
+            self.drange = (int(info.min), int(info.max))
+        elif np.issubdtype(self.dtype, np.floating):
+            # Do not assume a fixed range for floats
+            self.drange = None
+        else:
+            self.drange = None
 
     def _load_image(self, image_path: Path) -> np.ndarray:
         """ Load an image from a file path. """
@@ -196,13 +205,14 @@ class ImageListIO:
                 image = np.load(image_path)
                 self.dtype = image.dtype
             else:
-                self.dtype = np.uint8
-                with Image.open(image_path) as image:
+                with Image.open(image_path) as pil_image:
                     if self.as_gray:
-                        image = image.convert('L')
+                        pil_image = pil_image.convert(self.DEFAULT_GRAY_MODE)
                     else:
-                        image = image.convert('RGB')
-            self._get_drange()
+                        pil_image = pil_image.convert(self.DEFAULT_COLOR_MODE)
+                    image = np.array(pil_image)
+                self.dtype = image.dtype
+            self._update_drange()
         except IOError as e:
             raise IOError(f"Failed to load image from {image_path}: {e}")
 
@@ -225,7 +235,7 @@ class ImageListIO:
                     image.save(image_path, format=file_format)
             except (IOError, TypeError) as e:
                 raise IOError(f"Failed to save image at index {idx} to {image_path}: {e}")
-        except (AttributeError) as e:
+        except AttributeError as e:
             raise AttributeError(f"Failed to save image at index {idx}: {e}")
 
     def _reset_data(self) -> None:
@@ -261,11 +271,11 @@ class ImageListIO:
         except Exception as e:
             # Log or handle the exception appropriately
             print(f"Failed to delete temporary directory {self._temp_dir}: {e}")
-    
-    def close(self):
+
+    def close(self) -> None:
         self.__del__()
-    
-    def __del__(self):
+
+    def __del__(self) -> None:
         """ Clean up temporary directory upon object destruction. """
         self._cleanup_temp_dir()
 
@@ -292,19 +302,19 @@ class MatlabOperators:
          y = alt_round(x)
 
          from https://github.com/cvnlab/GLMsingle/blob/main/glmsingle/utils/alt_round.py
-        
+
         return (np.sign(x) * np.ceil(np.floor(np.abs(x) * 2) / 2)).astype(int)
         ----
         Slight modifications to follow MATLAB's behavior of not changing types: Mathias Salvas-Hébert, 2025-07-16
-         MATLAB : 
+         MATLAB :
             x = int8([-3.7, -1.2, 0.5, 2.9, 10.1]);
-            y = round(x);   
-            class(y) 
+            y = round(x);
+            class(y)
             > ans = 'int8'
 
             x = double([-3.7, -1.2, 0.5, 2.9, 10.1]);
             y = round(x);
-            class(y) 
+            class(y)
             > ans = 'double'
         """
         return np.sign(x) * np.ceil(np.floor(np.abs(x) * 2) / 2)
@@ -315,13 +325,14 @@ class MatlabOperators:
         return np.uint8(np.clip(MatlabOperators.round(x), 0, 255))
 
     @staticmethod
-    def std2(A):
+    def std2(x):
         """Replicates MATLAB's std2 function, which uses ddof=1"""
-        return np.std(A, ddof=1)
+        return np.std(x, ddof=1)
 
     @staticmethod
-    def mean2(A):
-        return np.mean(A)
+    def mean2(x):
+        return np.mean(x)
+
     @staticmethod
     def double(x):
         """Ensures double precision, similar to MATLAB's double."""
@@ -334,8 +345,8 @@ class MatlabOperators:
 
     @staticmethod
     def int16(x):
-        """Replicates MATLAB's int16 behavior: rounds and clips to [-32768, 32767]"""
-        return np.int16(np.clip(MatlabOperators.round(x), -32768, 32767))
+        """Replicates MATLAB's int16 behavior: rounds and clips to [-2**15, 2**15 - 1]"""
+        return np.int16(np.clip(MatlabOperators.round(x), -2**15, 2**15 - 1))
 
     @staticmethod
     def int32(x):
@@ -373,96 +384,161 @@ class MatlabOperators:
         return np.remainder(x, y)
 
 
-def convolve_2d(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
-    """
-    Efficiently convolve a given 2D image with a given square kernel.
+def convolve_1d(arr: np.ndarray, kernel: np.ndarray, axis: int) -> np.ndarray:
+    """Apply 1D convolution with reflect padding along a chosen axis.
 
     Args:
-        image (np.ndarray): Input 2D image.
-        kernel (np.ndarray): Square convolution kernel.
+        arr (np.ndarray): Input 2D image array.
+        kernel (np.ndarray): 1D convolution kernel.
+        axis (int): Axis along which to convolve (0 for vertical, 1 for horizontal).
 
     Returns:
         np.ndarray: Convolved image.
     """
-    if not isinstance(kernel, np.ndarray):
-        raise TypeError('Kernel must be a 2D np.ndarray of square shape')
+    if arr.ndim != 2:
+        raise TypeError("Input must be a 2D array.")
+    if kernel.ndim != 1:
+        raise TypeError("Kernel must be 1D.")
+
+    r = len(kernel) // 2
+    if axis == 0:
+        pad = ((r, r), (0, 0))
+    elif axis == 1:
+        pad = ((0, 0), (r, r))
+    else:
+        raise ValueError("axis must be 0 or 1")
+    padded = np.pad(arr, pad, mode="reflect").astype(np.float64, copy=False)
+    windows = sliding_window_view(padded, window_shape=len(kernel), axis=axis)
+
+    # True convolution: reverse kernel (flip is redundant if kernel is symmetric)
+    return np.tensordot(windows, kernel[::-1], axes=([-1], [0]))
+
+
+def convolve_2d(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+    """Convolve a 2D image with a kernel.
+
+    Supports:
+      * 1D kernel: applies separable convolution (horizontal then vertical).
+      * 2D square kernel: applies dense 2D convolution with sliding windows.
+
+    Args:
+        image (np.ndarray): Input 2D image.
+        kernel (np.ndarray): Convolution kernel. Either 1D (length k) or 2D (k x k).
+
+    Returns:
+        np.ndarray: Convolved image.
+
+    Raises:
+        TypeError: If inputs have wrong type or dimensionality.
+        ValueError: If a 2D kernel is not square.
+    """
     if not isinstance(image, np.ndarray):
-        raise TypeError('Image must be a 2D np.ndarray')
-    if image.ndim == 3:
-        raise TypeError('Image must be a 2D np.ndarray')
-    if kernel.shape[0] != kernel.shape[1]:
-        raise ValueError('Kernel must be a 2D np.ndarray of square shape')
+        raise TypeError("Image must be a np.ndarray")
+    if image.ndim != 2:
+        raise TypeError("Image must be 2D")
+    if not isinstance(kernel, np.ndarray):
+        raise TypeError("Kernel must be a np.ndarray")
 
-    # Get kernel dimensions (assuming square kernel)
-    kernel_size = kernel.shape[0]
+    # Separable path: user passed a 1D kernel (e.g., Gaussian vector)
+    if kernel.ndim == 1:
+        tmp = convolve_1d(image, kernel, axis=1)
+        return convolve_1d(tmp, kernel, axis=0)
 
-    # Apply reflective padding to the image
-    pad_size = kernel_size // 2
-    padded_image = np.pad(image, pad_size, mode='reflect')
-
-    # Create sliding window view
-    windows = sliding_window_view(padded_image, (kernel_size, kernel_size))
-
-    # Perform convolution using optimized summation
-    conv_result = np.tensordot(windows, kernel, axes=((2, 3), (0, 1)))
-    return conv_result
+    # Dense 2D path
+    if kernel.ndim != 2 or kernel.shape[0] != kernel.shape[1]:
+        raise ValueError("2D kernel must be square")
+    k = kernel.shape[0]
+    pad = k // 2
+    padded = np.pad(image, pad, mode="reflect")
+    windows = sliding_window_view(padded, (k, k))
+    return np.tensordot(windows, kernel, axes=((2, 3), (0, 1)))
 
 
 def pixel_order(image: np.ndarray) -> Tuple[np.ndarray, Union[float, list]]:
-    """ 
-    Assigns strict ordering to monochromatic or multispectralimage pixels.
+    """Assign strict ordering to monochromatic or multispectral image pixels.
+
+    For each channel, builds a 6-D feature vector per pixel:
+      F1 = raw pixel value
+      F2 = 3×3 cross mean (not separable)
+      F3 = 3×3 box mean (separable)
+      F4 = 5×5 ring-ish mean (not separable)
+      F5 = 5×5 box w/o corners (not separable)
+      F6 = 5×5 full box mean (separable)
+
+    Then sorts pixels lexicographically by (F1, F2, F3, F4, F5, F6).
+    Returns per-channel rank maps and order accuracy (OA).
 
     Args:
-        image (np.ndarray): image
+        image (np.ndarray): Grayscale (H, W) or color (H, W, C) image.
 
     Returns:
-        Tuple[np.ndarray, Union[float, list]]:
-            - im_sort (np.ndarray): Image with same dimensions as input, with elements representing the pixel order.
-            - OA (float or list): Order accuracy in the range [0, 1], fraction of unique filter response combinations.
-              For multichannel images, OA is a list.
+        im_sort (np.ndarray): (H, W, C) rank maps (or (H, W, 1) for grayscale).
+        OA: Order accuracy in [0, 1]; list per channel for C>1, else float.
     """
+    image = im3D(image)
     M, N, P = image.shape
 
-    # Defining the 6 filters (F1 = grayscale of pixel for a channel)
-    F2 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]) / 5.0
-    F3 = np.ones((3, 3)) / 9.0
-    F4 = np.ones((5, 5)) / 13.0
-    F4[[0, 0, 1, 1, 1, 3, 3, 4, 4, 4], [0, 1, 0, 1, 4, 0, 4, 1, 3, 4]] = 0
-    F5 = np.ones((5, 5)) / 21.0
-    F5[[0, 0, 4, 4], [0, 4, 0, 4]] = 0
-    F6 = np.ones((5, 5)) / 25.0
-    
-    # Filters ordered by importance  
-    F = [F2, F3, F4, F5, F6]
+    # --- Define filters ---
+    # F2: 3×3 cross (not separable)
+    F2 = np.array([[0, 1, 0],
+                   [1, 1, 1],
+                   [0, 1, 0]], dtype=np.float64) / 5.0
 
-    # Convolve filters with the image and order
+    # F3: 3×3 box (separable: g3 ⊗ g3)
+    g3 = np.array([1.0, 1.0, 1.0], dtype=np.float64) / 3.0
+
+    # F4: 5×5 ring-ish (not separable)
+    F4 = np.ones((5, 5), dtype=np.float64) / 13.0
+    F4[[0, 0, 1, 1, 1, 3, 3, 4, 4, 4], [0, 1, 0, 1, 4, 0, 4, 1, 3, 4]] = 0.0
+
+    # F5: 5×5 box without corners (not separable)
+    F5 = np.ones((5, 5), dtype=np.float64) / 21.0
+    F5[[0, 0, 4, 4], [0, 4, 0, 4]] = 0.0
+
+    # F6: 5×5 full box (separable: g5 ⊗ g5)
+    g6 = np.ones(5, dtype=np.float64) / 5.0
+
     im_sort = []
     OA = []
 
-    for i in range(P):
-        # Apply filters to each channel and collect filter responses
-        FR = np.zeros((M, N, 6))
-        FR[:, :, 0] = image[:, :, i]
-        for j in range(5):
-            FR[:, :, j + 1] = convolve_2d(image[:, :, i], F[j])
+    for c in range(P):
+        ch = image[:, :, c].astype(np.float64, copy=False)
+
+        # Build feature responses FR[..., 0..5]
+        FR = np.zeros((M, N, 6), dtype=np.float64)
+
+        # F1: identity
+        FR[:, :, 0] = ch
+
+        # F2: 3×3 cross (2D)
+        FR[:, :, 1] = convolve_2d(ch, F2)  # 2D kernel
+
+        # F3: 3×3 box (separable)
+        FR[:, :, 2] = convolve_2d(ch, g3)  # 1D -> separable path
+
+        # F4: 5×5 ring-ish (2D)
+        FR[:, :, 3] = convolve_2d(ch, F4)  # 2D kernel
+
+        # F5: 5×5 box without corners (2D)
+        FR[:, :, 4] = convolve_2d(ch, F5)  # 2D kernel
+
+        # F6: 5×5 full box (separable)
+        FR[:, :, 5] = convolve_2d(ch, g6)  # 1D -> separable path
 
         # Rearrange the filter responses
         FR = FR.reshape(M * N, 6)
 
         # Number of unique filter responses and ordering accuracy
-        unique_responses = np.unique(FR, axis=0)
-        n = unique_responses.shape[0]
-        OA.append(n / (M * N))
+        n_unique = np.unique(FR, axis=0).shape[0]
+        OA.append(n_unique / (M * N))
 
         # Sort responses lexicographically
         # [:, ::-1] because np.lexsort applies sort keys from last to first (right to left).
         idx_pos = np.lexsort(FR[:, ::-1].T)
 
         # Rearrange indices according to pixel position
-        idx_o = np.argsort(idx_pos)
-        idx_o = idx_o.reshape((M, N))
-
-        im_sort.append(idx_o)
+        idx_rank = np.argsort(idx_pos).reshape(M, N)
+        im_sort.append(idx_rank)
 
     if P == 1:
         OA = OA[0]
@@ -497,18 +573,18 @@ def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.
 
     # Maximum number of gray levels and image dimensions
     L = 2 ** np.iinfo(image.dtype).bits if np.issubdtype(image.dtype, np.integer) else None
-    image = im3D(image) if image.ndim != 3 else image  # force a third dimension on image
+    image = im3D(image)  # force a third dimension on image
     x_size, y_size, n_channels = image.shape
 
     # Verify input format
-    if not image.dtype in (np.uint8, np.uint16):
+    if image.dtype not in (np.uint8, np.uint16):
         raise ValueError("Input image must be 8- or 16-bit.")
     if len(target_hist) != L:
         raise ValueError("Number of histogram bins must match maximum number of gray levels.")
     if target_hist.ndim != 2 or target_hist.shape[1] != n_channels:
         raise ValueError("Target histogram (target_hist) should have the same number of channels as the image.")
     if binary_mask is not None:
-        binary_mask = im3D(binary_mask) if binary_mask.ndim == 2 else binary_mask  # force a third dimension on image
+        binary_mask = im3D(binary_mask)  # force a third dimension on image
         if not image.shape == binary_mask.shape:
             raise ValueError(f"binary_mask shape ({binary_mask.shape}) should be equal to image shape ({image.shape})")
         if np.sum(binary_mask) < (50 * n_channels):
@@ -519,9 +595,11 @@ def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.
         raise ValueError("Input image must have 1 or 3 channels.")
 
     # Assign strict order to pixels
+    print(f"{Bcolors.OKGREEN}Assigning strict order to pixels{Bcolors.ENDC}") if verbose else None
     im_sort, OA = pixel_order(image)
 
     # Process each channel separately
+    print(f"{Bcolors.OKGREEN}Main exact_histogram loop{Bcolors.ENDC}") if verbose else None
     im_out = image.copy()
     for channel in range(n_channels):
         # Work only on the masked (foreground) pixels
@@ -537,6 +615,7 @@ def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.
         # Adjust the specified histogram to match the number of pixels in the mask
         new_target_hist = (Ntotal * target_hist[:, channel] / np.sum(target_hist[:, channel])).astype(int)
         residuals = Ntotal - np.sum(new_target_hist)
+
         # Redistribute the residuals to ensure total counts match
         sorted_residuals = np.argsort(-np.mod(Ntotal * target_hist[:, channel] / np.sum(target_hist[:, channel]), 1))
         new_target_hist[sorted_residuals[:residuals]] += 1
@@ -553,6 +632,41 @@ def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.
         im_out[:, :, channel][~foreground_indices] = image[:, :, channel][~foreground_indices]
 
     return im_out.squeeze(), OA
+
+
+def floyd_steinberg_dithering(image: np.ndarray, depth: int = 256) -> np.ndarray:
+    """
+    Implements the dithering algorithm presented in :
+        R.W. Floyd, L. Steinberg, An adaptive algorithm for spatial grey scale.
+        Proceedings of the Society of Information Display 17, 75Ð77 (1976).
+
+    Args:
+        image (np.ndarray): An image of floats ranging from 0 to 1.
+        depth (optional) : The number of gray shades. (Default = 256)
+
+    Returns:
+        processed_image (np.ndarray): image matrix containing integer values [1, depth], indicating which luminance value should be used for every pixel.
+            Output uses the smallest integer dtype that fits all values.
+    """
+    if not isinstance(image, np.ndarray) or np.issubdtype(image.dtype, np.integer):
+        raise TypeError('image should be a np.ndarray of floats ranging from 0 to 1')
+    if not isinstance(depth, int):
+        raise TypeError('depth should be an integer')
+
+    tim = image * (depth - 1.0)
+    for xx in np.arange(1,image.shape[1]-1,1):
+        for yy in np.arange(1,image.shape[0]-1,1):  # exchange with the following
+            old_pixel = tim[yy,xx]
+            new_pixel = MatlabOperators.round(tim[yy,xx])
+            quant_error = old_pixel - new_pixel
+            tim[yy,xx+1] = tim[yy,xx+1] + 7/16 * quant_error
+            tim[yy+1,xx-1] = tim[yy+1,xx-1] + 3/16 * quant_error
+            tim[yy+1,xx] = tim[yy+1,xx] + 5/16 * quant_error
+            tim[yy+1,xx+1] = tim[yy+1,xx+1] + 1/16 * quant_error
+
+    tim = np.clip(MatlabOperators.round(tim), 0, depth-1)
+    uint_image = tim.astype(np.min_scalar_type(int(tim.max()))).squeeze()
+    return uint_image
 
 
 def noisy_bit_dithering(image: np.ndarray, depth: int = 256) -> np.ndarray:
@@ -689,7 +803,7 @@ def float01_to_uint(image: np.ndarray, allow_clipping: bool = True, bit_size: in
     return image_clipped.astype(target_dtype)
 
 
-def pol2cart(magnitude: np.ndarray, angle: np.ndarray) -> tuple:
+def pol2cart(magnitude: np.ndarray, angle: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
     Convert polar coordinates (magnitude, angle) to Cartesian coordinates (x, y).
 
@@ -707,7 +821,7 @@ def pol2cart(magnitude: np.ndarray, angle: np.ndarray) -> tuple:
     return x, y
 
 
-def cart2pol(x, y):
+def cart2pol(x, y) -> Tuple[np.ndarray, np.ndarray]:
     """
     Convert Cartesian coordinates (x, y) to polar coordinates (magnitude, angle).
 
@@ -725,7 +839,7 @@ def cart2pol(x, y):
     return magnitude, angle
 
 
-def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: Union[str] = 'perceptual') -> np.ndarray:
+def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: Union[str] = 'equal') -> np.ndarray:
     """
     Convert an RGB image to grayscale.
 
@@ -739,6 +853,8 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: Union[str] 
     """
     if isinstance(image, Image.Image):
         image = np.array(image)
+    elif not isinstance(image, np.ndarray):
+        raise ValueError(f"Invalid image type {type(image)}. Supported values are Image.Image and np.ndarray")
 
     if image.ndim > 2:
         if conversion_type == 'perceptual':
@@ -748,6 +864,9 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: Union[str] 
         return np.dot(image[..., :3].astype(np.float32), weights)
     elif image.ndim == 2:
         return image
+    else:
+        raise ValueError(f"Invalid image dimension {image.shape}. Supported values are >= 2")
+
 
 def gray2rgb(image: Union[np.ndarray, Image.Image]) -> np.ndarray:
     """
@@ -761,6 +880,8 @@ def gray2rgb(image: Union[np.ndarray, Image.Image]) -> np.ndarray:
     """
     if isinstance(image, Image.Image):
         image = np.array(image).astype(np.float32)
+    elif not isinstance(image, np.ndarray):
+        raise ValueError(f"Invalid image type {type(image)}. Supported values are Image.Image and np.ndarray")
 
     if image.ndim > 2:
         image = image[:, :, 0]
@@ -768,15 +889,16 @@ def gray2rgb(image: Union[np.ndarray, Image.Image]) -> np.ndarray:
     return np.stack((image,) * 3, axis=-1)
 
 
-def separate(mask: np.ndarray, background: Union[int, float] = None, smoothing: bool = False) -> Tuple[np.ndarray, np.ndarray, float]:
+def separate(mask: np.ndarray, background: Union[int, float] = None, smoothing: bool = False, show_figure: bool = False) -> Tuple[np.ndarray, np.ndarray, float]:
     """
     Function for simple figure-ground segregation.
     Args:
-      mask (np.ndarray): Source mask. Could be an image or a bit mask.
-        background (Optional[Union[uint8, float64]]); uint8 value of the background ([0,255]) (e.g., 255) 
-        or float64 value of the background ([0,1]) (e.g., 1); if equals to 300 or not specified, it is the
-        value that occurs the most frequently in mask.
-      smoothing (bool): If true, applies median blur on mask.
+        mask (np.ndarray): Source mask. Could be an image or a bit mask.
+        background (Optional[Union[uint8, float64]]); uint8 value of the background ([0,255]) (e.g., 255)
+            or float64 value of the background ([0,1]) (e.g., 1); if equals to 300 or not specified, it is the
+            value that occurs the most frequently in mask.
+        smoothing (bool): If true, applies median blur on mask.
+        show_figure (bool): If true, shows the foreground and background
 
     Returns:
         mask_fgr (np.ndarray[bool]): 2D matrix of the same size as the source mask; Foreground is True
@@ -790,7 +912,7 @@ def separate(mask: np.ndarray, background: Union[int, float] = None, smoothing: 
 
     mask = rgb2gray(mask)
     mask = mask.astype(np.float64)/255 if np.max(mask) > 1 else mask
-    background = background/255 if background > 1 and background < 256 else background 
+    background = background/255 if 1 < background < 256 else background
 
     if background == 300:
         # Use np.unique to get unique values and their counts
@@ -800,33 +922,28 @@ def separate(mask: np.ndarray, background: Union[int, float] = None, smoothing: 
     mask_bgr = mask == background
 
     # Apply median filter to smooth the mask
-    mask_bgr = apply_median_blur(mask_bgr)
+    if smoothing:
+        mask_bgr = apply_median_blur(np.uint8(mask_bgr))
     mask_fgr = (mask_bgr * -1) + 1
 
-    # TODO: add display options?
-    # if fig:
-    #     plt.figure(figsize=(10, 5))
-    #
-    #     plt.subplot(1, 3, 1)
-    #     plt.imshow(mask_fgr, cmap='gray')
-    #     plt.title('Foreground Mask')
-    #
-    #     plt.subplot(1, 3, 2)
-    #     plt.imshow(mask_bgr, cmap='gray')
-    #     plt.title('Background Mask')
-    #
-    #     plt.subplot(1, 3, 3)
-    #     plt.imshow(orig_im, cmap='gray')
-    #     plt.title('Original Image')
-    #     plt.show()
+    if show_figure:
+        plt.figure(figsize=(10, 5))
+
+        plt.subplot(1, 3, 1)
+        plt.imshow(mask_fgr, cmap='gray')
+        plt.title('Foreground Mask')
+
+        plt.subplot(1, 3, 2)
+        plt.imshow(mask_bgr, cmap='gray')
+        plt.title('Background Mask')
+        plt.show()
 
     return mask_fgr.astype(bool), mask_bgr.astype(bool), background
 
 
-
-def image_spectrum(image: np.ndarray, rescale: bool = True) -> np.ndarray:
+def image_spectrum(image: np.ndarray, rescale: bool = True) -> tuple[np.ndarray, np.ndarray]:
     """
-    Compute spectrum of an image
+    Compute the spectrum of an image
     Args:
         image (np.ndarray): An image
         rescale (bool): If true, will rescale each channel to [0, 1] range.
@@ -834,6 +951,7 @@ def image_spectrum(image: np.ndarray, rescale: bool = True) -> np.ndarray:
     Returns:
         magnitude, phase
 
+    TODO: Optimization: Check image type and use np.fft.rfft2 for faster computations.
     """
     image = im3D(image)
     if rescale:
@@ -850,24 +968,43 @@ def image_spectrum(image: np.ndarray, rescale: bool = True) -> np.ndarray:
     return magnitude, phase
 
 
-def gaussian_kernel(size: int, sigma: float) -> np.ndarray:
-    """
-    Generate a 2D Gaussian kernel.
+def gaussian_kernel(size: int, sigma: float, n_dim: int = 2) -> np.ndarray:
+    """Generate a normalized Gaussian kernel.
 
     Args:
-        size (int): Size of the kernel (must be odd).
+        size (int): Size of the kernel. Must be odd.
         sigma (float): Standard deviation of the Gaussian.
+        n_dim (int, optional): Dimensionality of the kernel.
+            * 1 -> return 1D Gaussian kernel of shape (size,)
+            * 2 -> return 2D Gaussian kernel of shape (size, size)
+            Defaults to 2.
 
     Returns:
-        np.ndarray: Normalized 2D Gaussian kernel.
+        np.ndarray: Normalized Gaussian kernel.
+
+    Raises:
+        ValueError: If `size` is not odd or `dim` is not 1 or 2.
     """
-    ax = np.linspace(-(size // 2), size // 2, size)
+    if size % 2 == 0:
+        raise ValueError("Kernel size must be odd.")
+    if n_dim not in (1, 2):
+        raise ValueError("n_dim must be 1 or 2.")
+
+    ax = np.arange(-(size // 2), size // 2 + 1, dtype=np.float64)
+
+    if n_dim == 1:
+        g = np.exp(-(ax ** 2) / (2 * sigma ** 2))
+        g /= g.sum()
+        return g
+
+    # n_dim == 2
     xx, yy = np.meshgrid(ax, ax)
     kernel = np.exp(-(xx ** 2 + yy ** 2) / (2 * sigma ** 2))
-    return kernel / np.sum(kernel)
+    kernel /= kernel.sum()
+    return kernel
 
 
-def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> Tuple[np.ndarray, float]:
+def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute the Structural Similarity Index (SSIM) and its gradient.
 
@@ -881,21 +1018,22 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> Tupl
             - Gradient of SSIM (sensitivity) as a 2D array.
             - Mean SSIM value as a float.
 
-    References : 
-        1. Avanaki, A.N. Exact global histogram specification optimized for structural similarity. 
+    References :
+        1. Avanaki, A.N. Exact global histogram specification optimized for structural similarity.
         OPT REV 16, 613–621 (2009). https://doi.org/10.1007/s10043-009-0119-z
 
-        2. Zhou Wang, A. C. Bovik, H. R. Sheikh and E. P. Simoncelli, "Image quality assessment: 
+        2. Zhou Wang, A. C. Bovik, H. R. Sheikh and E. P. Simoncelli, "Image quality assessment:
         from error visibility to structural similarity," in IEEE Transactions on Image Processing,
         vol. 13, no. 4, pp. 600-612, April 2004, doi: 10.1109/TIP.2003.819861.
     """
     image_x_3D = im3D(image1.astype(np.float64))
     image_y_3D = im3D(image2.astype(np.float64))
+    eps = 1e-12  # smallest gradient for covariance computation
 
     # Gaussian kernel parameters
     window_size = 11
     sigma = 1.5
-    window = gaussian_kernel(window_size, sigma)
+    window = gaussian_kernel(window_size, sigma, n_dim=1)  # 1d kernel to enable faster convolution with 2d separable kernel trick.
 
     # Constants for SSIM
     L = n_bins - 1
@@ -923,18 +1061,24 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> Tupl
         sigma_y_sq = convolve_2d(image_y ** 2, window) - mu_y_sq
         sigma_x_y = convolve_2d(image_x * image_y, window) - mu_x_y
 
+        # Clamp variance and covariance to avoid floating-point (negative) artifacts, which will produce NaNs, Infs,
+        # or SSIM > 1
+        sigma_x_sq = np.maximum(sigma_x_sq, 0.0)
+        sigma_y_sq = np.maximum(sigma_y_sq, 0.0)
+        sigma_x_y = np.clip(sigma_x_y, -np.sqrt(sigma_x_sq * sigma_y_sq) - eps, np.sqrt(sigma_x_sq * sigma_y_sq) + eps)
+
         # SSIM map (Eq. 6)
         num_1 = 2 * mu_x_y + C1
         num_2 = 2 * sigma_x_y + C2
-        num = (num_1 * num_2) 
+        num = (num_1 * num_2)
 
         den_1 = mu_x_sq + mu_y_sq + C1
         den_2 = sigma_x_sq + sigma_y_sq + C2
-        den = (den_1 * den_2) 
+        den = (den_1 * den_2)
 
         ssim_map = num / den
         mssim = np.mean(ssim_map)
-        
+
         # SSIM gradient - Eqs. (7) and (8) (Avanaki, 2009)
         term_1 = num_1 / den
         sens = convolve_2d(term_1, window) * image_x
@@ -945,10 +1089,10 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> Tupl
         term_3 = (mu_x * (num_2 - num_1) - mu_y * ssim_map * (den_2 - den_1)) / den
         sens += convolve_2d(term_3, window)
 
-        sens *= 2 / sens.size 
-        
-        # FIX : scales the SSIM gradient to compensate for its attenuation at larger n_bins and keep the
-        # effective update weight consistent across bit depths (more bins require proportionally larger 
+        sens *= 2 / sens.size
+
+        # FIX: scales the SSIM gradient to compensate for its attenuation at larger n_bins and keep the
+        # effective update weight consistent across bit depths (more bins require proportionally larger
         # changes for the same effect).
         sens *= 256**(2*(np.log(n_bins) / np.log(256)-1))
 
@@ -956,11 +1100,13 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> Tupl
         all_mssim.append(mssim)
     return np.stack(all_sens, axis=-1).squeeze(), np.stack(all_mssim)
 
+
 def compute_rmse(image1: np.ndarray, image2: np.ndarray) -> float:
     """ Compute the root-mean-square error between two images. """
     return np.sqrt(np.mean((image1 - image2) ** 2))
 
-def compute_metrics_from_paths(images: ImageListType, options: Options):
+
+def compute_metrics_from_paths(images: ImageListType, options: Options) -> Optional[List[np.ndarray]]:
     """Computes the average SSIM and RMSM between the original images and the processed ones
 
     Args:
@@ -974,7 +1120,7 @@ def compute_metrics_from_paths(images: ImageListType, options: Options):
     Returns:
         output (dict): with 'avg_rmse' and 'avg_ssim' if computed.
     """
-    if options.metrics != None : 
+    if options.metrics != None:
         total_rmse = 0
         total_ssim = 0
         output = []
@@ -998,7 +1144,7 @@ def compute_metrics_from_paths(images: ImageListType, options: Options):
             if 'ssim' in options.metrics:
                 _, ssim_value = ssim_sens(orig_im, proc_im)
                 total_ssim += ssim_value.squeeze()
-        
+
         if 'rmse' in options.metrics:
             avg_rmse = total_rmse / len(file_paths)
             print(total_rmse, len(file_paths))
@@ -1009,6 +1155,7 @@ def compute_metrics_from_paths(images: ImageListType, options: Options):
             print(f"Average SSIM: {avg_ssim}")
             output.append(avg_ssim)
         return output
+    return None
 
 
 def get_images_spectra(images: ImageListType, magnitudes: Optional[ImageListIO] = None, phases: Optional[ImageListIO] = None) -> Union[List[np.ndarray], ImageListType]:
@@ -1038,8 +1185,8 @@ def rescale_image(image: np.ndarray, target_min: Optional[float] = 0, target_max
 
     Args:
         image (np.ndarray): Input image
-        target_min (float) : Target minimum value in the output image.
-        target_max (float) : Target maximum value in the output image.
+        target_min (float): Target minimum value in the output image.
+        target_max (float): Target maximum value in the output image.
 
     Returns:
         (np.ndarray): Rescaled image
@@ -1056,7 +1203,7 @@ def rescale_image(image: np.ndarray, target_min: Optional[float] = 0, target_max
     return image
 
 
-def rescale_images(images: ImageListType, rescaling_option: int = 1, legacy_mode: bool = False) -> ImageListType:
+def rescale_images(images: ImageListType, rescaling_option: Literal[1, 2, 3] = 1, legacy_mode: bool = False) -> ImageListType:
     """
     Rescales the values of images so that they fall between 0 and 255. There are 3 options:
         1) Each image has its own min and max (no rescaling)
@@ -1065,10 +1212,11 @@ def rescale_images(images: ImageListType, rescaling_option: int = 1, legacy_mode
 
         Args:
             images : list of images
-            rescaling (optional) : Determines the type of rescaling.
+            rescaling_option: (optional) : Determines the type of rescaling.
                 0 : No rescaling
                 1 : Rescaling absolute max/min (Default)
                 2 : Rescaling average max/min
+            legacy_mode (bool): If true, only the absolute max/min values are rescaled.
 
         Returns :
             A list of rescaled images
@@ -1168,7 +1316,7 @@ def im3D(image: np.ndarray):
         image (np.ndarray) with 3D
 
     """
-    return np.stack((image,) * 1, axis=-1) if image.ndim != 3 else image
+    return np.stack((image,), axis=-1) if image.ndim != 3 else image
 
 
 def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins=256) -> np.ndarray:
@@ -1194,42 +1342,6 @@ def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins=256) -> 
         count[:, channel], _ = np.histogram(image[:, :, channel][mask[:, :, channel]], bins=n_bins, range=(0, n_bins))
     return count
 
-
-
-# Extra utilities :
-def floyd_steinberg_dithering(image : np.ndarray, depth : int = 256) -> np.ndarray:
-        """
-        Implements the dithering algorithm presented in :
-            R.W. Floyd, L. Steinberg, An adaptive algorithm for spatial grey scale.
-            Proceedings of the Society of Information Display 17, 75Ð77 (1976).
-        
-        Args:
-            image (np.ndarray): An image of floats ranging from 0 to 1.
-            depth (optional) : The number of gray shades. (Default = 256)
-            
-        Returns:
-            processed_image (np.ndarray): image matrix containing integer values [1, depth], indicating which luminance value should be used for every pixel.     
-                Output uses the smallest integer dtype that fits all values.
-        """
-        if not isinstance(image, np.ndarray) or np.issubdtype(image.dtype, np.integer):
-            raise TypeError('image should be a np.ndarray of floats ranging from 0 to 1')
-        if not isinstance(depth, int):
-            raise TypeError('depth should be an integer')
-
-        tim = image * (depth - 1.0)
-        for xx in np.arange(1,image.shape[1]-1,1):
-            for yy in np.arange(1,image.shape[0]-1,1): # exchange with the following
-                oldpixel = tim[yy,xx]
-                newpixel = MatlabOperators.round(tim[yy,xx])
-                quant_error = oldpixel - newpixel
-                tim[yy,xx+1] = tim[yy,xx+1] + 7/16 * quant_error
-                tim[yy+1,xx-1] = tim[yy+1,xx-1] + 3/16 * quant_error
-                tim[yy+1,xx] = tim[yy+1,xx] + 5/16 * quant_error
-                tim[yy+1,xx+1] = tim[yy+1,xx+1] + 1/16 * quant_error
-
-        tim = np.clip(MatlabOperators.round(tim), 0, depth-1)
-        uint_image = tim.astype(np.min_scalar_type(int(tim.max()))).squeeze()
-        return uint_image
 
 def gaussian_ellipsoidal_mask(ims, grayTone=127, RGB=False, cutoffA=0.5, cutoffB=0.75, offsetA=0, offsetB=0):
     """
