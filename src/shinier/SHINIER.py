@@ -6,7 +6,6 @@ from typing import Optional, Dict, Any, List
 import numpy as np
 import sys
 from shinier import ImageDataset, Options, ImageProcessor
-from shinier.utils import compute_metrics_from_images
 from PIL import Image
 
 def prompt_str(label: str, validator=None, default=None) -> Optional[str]:
