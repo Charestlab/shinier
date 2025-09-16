@@ -10,12 +10,12 @@ class Options:
 
     Args:
     ----------------------------------------------INPUT/OUTPUT images folders-------------------------------------------------
-        images_format (str): png, tif, jpg (default = tif)
+        images_format (str): png, tif, tiff, jpg, jpeg (default = tif)
         input_folder (Union[str, Path]): relative or absolute path of the image folder (default = ./INPUT)
         output_folder (Union[str, Path]): relative or absolute path where processed images will be saved (default = ./OUTPUT)
 
     -------------------------------------------MASKS and FIGURE-GROUND separation----------------------------------------------
-        masks_format (str): png, tif, jpg (default = tif)
+        masks_format (str): png, tif, tiff, jpg, jpeg (default = tif)
         masks_folder (Union[str, Path]): relative or absolute path of mask (default = ./MASKS)
 
         whole_image (int): Default = 1
@@ -45,7 +45,6 @@ class Options:
         dithering (Optional[int]): Default = 1, dithering before final conversion to uint8
             0 = no dithering
             1 = noisy bit dithering (Allard R. & Faubert J. (2008))
-            2 = Floyd-Steinberg dithering (Floyd R. & Steinberg L. (1976))
 
         conserve_memory (Optional[bool]): If True (default), uses a temporary directory to store images
             and keeps only one image in memory at a time. If True and input_data is a list of NumPy arrays,
@@ -190,10 +189,10 @@ class Options:
         if self.masks_folder is not None:
             if not self.masks_folder.is_dir():
                 raise ValueError(f"{self.masks_folder} folder does not exists")
-        if self.images_format not in ['png', 'tif', 'jpg']:
-            raise ValueError("images format must be either 'png', 'tif' or 'jpg'")
-        if self.masks_format not in ['png', 'tif', 'jpg'] and self.whole_image == 3 :
-            raise ValueError("masks format muse be either 'png', 'tif' or 'jpg' if whole_image == 3")
+        if self.images_format not in ['png', 'tif', 'tiff', 'jpg', 'jpeg']:
+            raise ValueError("images format must be either 'png', 'tif', 'tiff', 'jpg' or 'jpeg'")
+        if self.masks_format not in ['png', 'tif', 'tiff', 'jpg', 'jpeg'] and self.whole_image == 3 :
+            raise ValueError("masks format muse be either 'png', 'tif', 'tiff', 'jpg' or 'jpeg' if whole_image == 3")
         if self.whole_image not in [1, 2, 3]:
             raise ValueError("whole_image must be 1, 2 or 3. See Options")
         if self.background not in range(0,256) and self.background != 300:
