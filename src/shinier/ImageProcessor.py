@@ -9,14 +9,14 @@ from shinier.utils import (
     ImageListType, separate, imhist, im3D,
     rescale_images, get_images_spectra, ssim_sens, cart2pol,
     pol2cart, float01_to_uint, uint_to_float01, noisy_bit_dithering,
-    exact_histogram, compute_metrics_from_paths, Bcolors, MatlabOperators)
+    exact_histogram, exact_histogram_with_noise, Bcolors, MatlabOperators, compute_rmse)
 
 
 class ImageProcessor:
     """Base class for image processing."""
-    def __init__(self, dataset: ImageDataset, verbose: bool = True):
+    def __init__(self, dataset: ImageDataset, options: Optional[Options] = None, verbose: bool = True):
         self.dataset: ImageDataset = dataset
-        self.options: Options = dataset.options
+        self.options: Optional[Options] = dataset.options or getattr(dataset, "options", None)
         self.current_image: Optional[np.ndarray] = None
         self.current_masks: Optional[np.ndarray] = None
         self.bool_masks: List = [None] * len(self.dataset.images)
@@ -36,10 +36,20 @@ class ImageProcessor:
         }
         self.seed = self.options.seed
         self.process()
-        self.computed_metrics = compute_metrics_from_paths(self.dataset, self.options)
-        self.dataset.save_images()
         self.dataset.print_log()
-        self.dataset.close()
+        # self.computed_metrics = compute_metrics_from_paths(self.dataset, self.options)
+        if not self.dataset.images.has_list_array:
+            self.dataset.save_images()
+            self.dataset.close()
+        else:
+            print(f'{Bcolors.WARNING}To get the output images, you must instantiate ImageProcessor and call get_results() method. \n\tE.g.: output_images = ImageProcessor(dataset=my_dataset).get_results(){Bcolors.ENDC}')
+
+    def get_results(self):
+        """Return list of processed np.ndarray if input was arrays, otherwise None."""
+        if getattr(self.dataset.images, "file_paths", [None])[0] is None:
+            return self.dataset.images.data
+        else:
+            return
 
     def _get_relevant_input_output(self):
         # Get the caller from the stack
@@ -117,28 +127,28 @@ class ImageProcessor:
                 now = datetime.now()
                 self.seed = int(now.timestamp())
             np.random.seed(self.seed)
-            self.dataset.processing_steps.append(f'seed={self.seed}')
-            print(f'Use this seed for reproducibility: {self.seed}')
+            self.dataset.processing_logs.append(f'seed={self.seed}')
+            print(f'{Bcolors.WARNING}Use this seed for reproducibility: {self.seed}{Bcolors.ENDC}')
         if self.options.mode == 1:
-            print('Applying luminance matching...')
+            print(f'{Bcolors.OKGREEN}Applying luminance matching...{Bcolors.ENDC}')
+            self.dataset.processing_logs.append('lum_match')
             self.lum_match(target_lum=self.options.target_lum, safe_values=self.options.safe_lum_match)
-            self.dataset.processing_steps.append('lum_match')
         if self.options.mode in [2, 5, 6]:
-            print('Applying histogram matching...')
+            print(f'{Bcolors.OKGREEN}Applying histogram matching...{Bcolors.ENDC}')
+            self.dataset.processing_logs.append('hist_match')
             self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
-            self.dataset.processing_steps.append('hist_match')
         if self.options.mode in [3, 5, 7]:
-            print('Applying spatial frequency matching...')
+            print(f'{Bcolors.OKGREEN}Applying spatial frequency matching...{Bcolors.ENDC}')
+            self.dataset.processing_logs.append('sf_match')
             self.fourier_match(target_spectrum=self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='sf')
-            self.dataset.processing_steps.append('sf_match')
         if self.options.mode in [4, 6, 8]:
-            print('Applying spectrum matching...')
+            print(f'{Bcolors.OKGREEN}Applying spectrum matching...{Bcolors.ENDC}')
+            self.dataset.processing_logs.append('spec_match')
             self.fourier_match(target_spectrum=self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='spec')
-            self.dataset.processing_steps.append('spec_match')
         if self.options.mode in [7, 8]:
-            print('Applying histogram matching...')
+            print(f'{Bcolors.OKGREEN}Applying histogram matching...{Bcolors.ENDC}')
+            self.dataset.processing_logs.append('hist_match')
             self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
-            self.dataset.processing_steps.append('hist_match')
 
     def only_dithering(self):
         input_collection, input_name, output_collection, output_name = self._get_relevant_input_output()
@@ -187,14 +197,14 @@ class ImageProcessor:
             original_min_max.append((im[self.bool_masks[idx]].min(), im[self.bool_masks[idx]].max()))
         target_mean, target_std = (np.mean(original_means), np.mean(original_stds)) if target_lum == (0, 0) else target_lum
         predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
-        print(f"Target values: M = {target_mean:.4f}, SD = {target_std:.4f}") if self.verbose else None
+
         if safe_values and (any(predicted_min<0) or any(predicted_max>255)):
             max_range = predicted_max.max() - predicted_min.min()
             scaling_factor = min(1, (255 - 1e-6) / max_range)  # Safety margin of 1e-6 to avoid precision issues
             target_std *= scaling_factor
             predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
             target_mean = target_mean + (255 - np.max(predicted_max))
-            print(f"Adjusted target values for safe values: M = {target_mean:.4f}, SD = {target_std:.4f}") if self.verbose else None
+            print(f"{Bcolors.OKBLUE}Adjusted target values for safe values: M = {target_mean:.4f}, SD = {target_std:.4f}{Bcolors.ENDC}") if self.verbose else None
             predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
             if (any(predicted_min < 0) or any(predicted_max > 255)):
                 raise Exception(f'Out-of-range values detected: mins = {list(predicted_min)}, maxs = {list(predicted_max)}')
@@ -203,7 +213,9 @@ class ImageProcessor:
             im2 = im.copy().astype(float)
             M = MatlabOperators.mean2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.mean(im2[self.bool_masks[idx]])
             SD = MatlabOperators.std2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.std(im2[self.bool_masks[idx]])
-            print(f'Image #{idx}:\n\tOriginal:\t\tM = {M:.4f}, SD = {SD:.4f}') if self.verbose else None
+            im_name = f'#{idx}' if self.dataset.images.file_paths[idx] is None else self.dataset.images.file_paths[idx]
+            print(f'{Bcolors.OKGREEN}Image {im_name}:{Bcolors.ENDC}')
+            print(f'{Bcolors.OKBLUE}\tOriginal:\t\t\t\tM = {M:.4f}, SD = {SD:.4f}{Bcolors.ENDC}') if self.verbose else None
 
             # Standardization
             if original_stds[idx] != 0:
@@ -213,7 +225,7 @@ class ImageProcessor:
 
             M = MatlabOperators.mean2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.mean(im2[self.bool_masks[idx]])
             SD = MatlabOperators.std2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.std(im2[self.bool_masks[idx]])
-            print(f'\tStandardized:\tM = {M:.4f}, SD = {SD:.4f}') if self.verbose else None
+            # print(f'\t{Bcolors.OKBLUE}Standardized (float):\tM = {M:.4f}, SD = {SD:.4f}{Bcolors.ENDC}') if self.verbose else None
             mx, mn = np.max(im2[self.bool_masks[idx]]), np.min(im2[self.bool_masks[idx]])
             clipping_needed = mn<0 or mx>255
             print(f"{Bcolors.WARNING}Warning: Clipping applied because values of image #{idx} are outside the [0, 255] range: [{mn}, {mx}]. Results of lum_match might not be exact{Bcolors.ENDC}") if self.verbose and clipping_needed else None
@@ -222,10 +234,14 @@ class ImageProcessor:
             # Save resulting image
             M = MatlabOperators.mean2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.mean(im2[self.bool_masks[idx]])
             SD = MatlabOperators.std2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.std(im2[self.bool_masks[idx]])
-            print(f'\tFinal:\t\t\tM = {M:.4f}, SD = {SD:.4f}') if self.verbose else None
-            print(f'\tTarget values:\tM = {target_mean:.4f}, SD = {target_std:.4f}\n') if self.verbose else None
+            print(f'\t{Bcolors.OKBLUE}Standardized (uint8):\tM = {M:.4f}, SD = {SD:.4f}{Bcolors.ENDC}') if self.verbose else None
+            print(f'\t{Bcolors.OKBLUE}Target values:\t\t\tM = {target_mean:.4f}, SD = {target_std:.4f}{Bcolors.ENDC}') if self.verbose else None
+            if M != target_mean or SD != target_std:
+                print(f'\t{Bcolors.WARNING}* Discrepancies between Target and Standardized values are due to the conversion of floats into integers{Bcolors.ENDC}') if self.verbose else None
+            print('\n')
             self.dataset.images[idx] = im2 #update the dataset
             self.dataset.images.drange = (0, 255)
+            self.dataset.processing_logs.append(f'Image {im_name}:\n\tObserved: M = {M:.4f}, SD = {SD:.4f}\n\tExpected: M = {target_mean:.4f}, SD = {target_std:.4f}')
 
         self.dataset.images = self._apply_post_processing(
             output_name='images',
@@ -245,6 +261,13 @@ class ImageProcessor:
                 If 1, uses the SSIM optimization method of Avanaki (2009).
             n_bins (int): Number of gray levels (default is 256).
         """
+
+        def _get_hist(image: np.ndarray, mask: np.ndarray, n_bins=256, normalized: bool = False):
+            hist_data = imhist(image, self.bool_masks[idx], n_bins=n_bins)
+            if normalized:
+                hist_data = hist_data/hist_data.sum()
+            return hist_data
+
         def _avg_hist(images: ImageListType, normalized: bool=True) -> np.ndarray:
             n_channels = 1 if images.n_dims == 2 else 3
             n_bins = max(images.drange) + 1
@@ -259,44 +282,6 @@ class ImageProcessor:
                 average /= average.sum()
 
             return average
-
-        # Cumulative distribution function : gives the proportion of pixel equal or under the value of a bin for each channel
-        def _count_cdf(hist_count: np.ndarray, normalized: bool=True) -> np.ndarray:
-            cdf = np.cumsum(hist_count, axis=0).astype(np.float64)
-            if normalized:
-                for channel in range(hist_count.shape[1]):
-                    cdf[:, channel] /= cdf[-1, channel]
-            return cdf
-
-        def _match_count_cdf(image: np.ndarray, mask: np.ndarray, target_cdf: np.ndarray, noise_level: float, n_bins: int = 256):
-            noise = np.random.uniform(-noise_level/2, noise_level/2, size=image.shape)
-
-            # Exact histogram specification requires the addition of noise to convert discrete into continuous pixel values
-            noisy_image = image + noise
-            source_hist = imhist(noisy_image, mask, n_bins=n_bins)
-            source_cdf = _count_cdf(source_hist)
-            image = im3D(image)
-            new_im = np.zeros(image.shape)
-            n_bits = int(np.log2(n_bins))
-
-            if np.issubdtype(image.dtype, np.floating):
-                image = image.astype(f'uint{n_bits}')
-            elif np.iinfo(image.dtype).bits != n_bits:
-                raise TypeError(f"image.dtype is {image.dtype} but n_bins argument = {n_bins}")
-
-            for channel in range(image.shape[-1]):
-                # Map source intensities to target intensities
-                mapping = np.interp(source_cdf[:, channel], target_cdf[:, channel], np.arange(n_bins))
-                mapping = np.clip(mapping, 0, n_bins-1)  # Ensure valid intensity values
-
-                # Data and mask of the channel
-                channel_data = image[:, :, channel]
-                channel_mask = mask[..., channel] if mask.ndim == 3 else mask
-
-                new_channel = channel_data.copy()
-                new_channel[channel_mask] = mapping[channel_data[channel_mask]]
-                new_im[:, :, channel] = new_channel
-            return new_im.astype(image.dtype).squeeze()
 
         # Get appropriate image collection
         input_collection, input_name, output_collection, output_name = self._get_relevant_input_output()
@@ -319,7 +304,7 @@ class ImageProcessor:
                     if drange == (0, 1):
                         buffer_collection[idx] = float01_to_uint(image, allow_clipping=True, bit_size=bit_size)
                     else:
-                        print('Why does this happen?')
+                        print(f'{Bcolors.WARNING}Why would this happen?{Bcolors.ENDC}')
 
                 elif dtype == np.uint8:
                     buffer_collection[idx] = (image / 255.0 * (2 ** bit_size - 1)).astype(np.dtype(f'uint{bit_size}'))
@@ -334,40 +319,49 @@ class ImageProcessor:
             if target_hist.shape[0] != n_bins:
                 raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
 
-        if hist_specification:
-            target_cdf = _count_cdf(target_hist)
+        # If hist_optim disable, will run only one loop (n_iter = 1)
+        n_iter = self.options.iterations if hist_optim else 1  # Number of iterations for SSIM optimization (default = 10)
+        step_size = self.options.step_size  # Step size (default = 34)
 
         # Match the histogram
-        n_iter = self.options.iterations  # Number of iterations for SSIM optimization (default = 10)
-        step_size = self.options.step_size  # Step size (default = 34)
         for idx, image in enumerate(buffer_collection):
-            if hist_optim:
-                image = im3D(image)
-                X = image
-                M = np.prod(image.shape)/image.shape[2]
-                for iter in range(n_iter):
-                    print(f'Image #{idx +1}, iteration #{iter + 1}: ') if self.verbose else None
+            im_name = f'#{idx}' if self.dataset.images.file_paths[idx] is None else self.dataset.images.file_paths[idx]
+            print(f'{Bcolors.OKGREEN}Image {im_name}:{Bcolors.ENDC}')
 
-                    if hist_specification:
-                        Y = _match_count_cdf(image=X, mask=self.bool_masks[idx], target_cdf=target_cdf, noise_level=noise_level, n_bins=n_bins)
-                    else:
-                        Y, OA = exact_histogram(image=X, target_hist=target_hist, binary_mask=self.bool_masks[idx])
-                        print(f'    Ordering accuracy per channel = {OA}') if self.verbose else None
+            image = im3D(image)
+            X = image
+            M = np.prod(image.shape)/image.shape[2]
+            for iter in range(n_iter): # n_iter = 1 when hist_optim == 0
+                print(f'{Bcolors.OKGREEN}\tIteration #{iter + 1}: {Bcolors.ENDC}') if self.verbose and n_iter > 1 else None
 
-                    sens, ssim = ssim_sens(image, Y, n_bins=n_bins)
-                    print(f'    Mean SSIM = {np.mean(ssim):.4f}') if self.verbose else None
+                if hist_specification:
+                    Y = exact_histogram_with_noise(image=X, binary_mask=self.bool_masks[idx], target_hist=target_hist, noise_level=noise_level, n_bins=n_bins)
+                else:
+                    Y, OA = exact_histogram(image=X, target_hist=target_hist, binary_mask=self.bool_masks[idx], verbose=self.verbose)
+                    print(f'{Bcolors.OKBLUE}\ttOrdering accuracy per channel = {OA}{Bcolors.ENDC}') if self.verbose else None
+
+                sens, ssim = ssim_sens(image, Y, n_bins=n_bins)
+                print(f'{Bcolors.OKBLUE}\t\tMean SSIM = {np.mean(ssim):.4f}{Bcolors.ENDC}') if self.verbose and hist_optim else None
+                if hist_optim:
                     ssim_update = sens * step_size * M
                     X = Y + ssim_update # X float64, Y uint8/uint16
                     X = np.clip(X, 0, 2**bit_size - 1).astype(np.uint16) if bit_size == 16 else np.clip(X, 0, 2**bit_size - 1)
-                new_image = X.astype(np.uint16) if bit_size == 16 else X.astype(np.uint8)
-            else:
-                if hist_specification == 1:
-                    new_image = _match_count_cdf(image=image, mask=self.bool_masks[idx], target_cdf=target_cdf, noise_level=noise_level, n_bins=n_bins)
+                    if iter == n_iter-1:
+                        new_image = X.astype(np.uint16) if bit_size == 16 else X.astype(np.uint8)
                 else:
-                    new_image, OA = exact_histogram(image=image, target_hist=target_hist, binary_mask=self.bool_masks[idx])
-                    print(f'Ordering accuracy per channel = {OA}') if self.verbose else None
+                    new_image = Y.astype(np.uint16) if bit_size == 16 else Y.astype(np.uint8)
 
             buffer_collection[idx] = new_image
+
+            # Compute statistics
+            final_hist = _get_hist(new_image, mask=self.bool_masks[idx], n_bins=n_bins, normalized=True)
+            corr = np.corrcoef(final_hist.flatten(), target_hist.flatten())
+            rmse = compute_rmse(final_hist.flatten(), target_hist.flatten())
+            print(f'{Bcolors.OKBLUE}\tCorrelation between transformed and target histogram: {corr[0, 1]:.4f}{Bcolors.ENDC}') if self.verbose else None
+            print(f'{Bcolors.OKBLUE}\tRMS error between transformed and target histogram: {rmse:.4f}{Bcolors.ENDC}') if self.verbose else None
+            print(f'{Bcolors.OKBLUE}\tSSIM index between transformed and original image: {np.mean(ssim):.4f}{Bcolors.ENDC}') if self.verbose else None
+            self.dataset.processing_logs.append(f'Image {im_name}:\n\tCorrelation between transformed and target histogram: {corr[0, 1]:.4f}\n\tRMS error between transformed and target histogram: {rmse:.4f}\n\tSSIM index between transformed and original image: {np.mean(ssim):.4f}')
+
 
         output_collection = self._apply_post_processing(output_name=output_name, output_collection=buffer_collection, dithering=self.options.dithering)
         self._set_relevant_output(output_collection, output_name)

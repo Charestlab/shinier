@@ -23,9 +23,9 @@ ImageListType = Union[str, Path, List[Union[str, Path]], List[np.ndarray]]
 
 class Bcolors:
     HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
+    OKBLUE = '\033[94m'  # Processing values
     OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
+    OKGREEN = '\033[92m'  # Processing steps
     WARNING = '\033[93m'
     FAIL = '\033[91m'
     ENDC = '\033[0m'
@@ -76,6 +76,7 @@ class ImageListIO:
         self._temp_dir = Path(tempfile.mkdtemp()) if self.conserve_memory else None
         self.dtype: Optional[type] = None  # Initial state when loading images
         self.drange: Optional[tuple] = None
+        self.has_list_array: bool = False
         self._initialize_collection(input_data)
 
     def __getitem__(self, idx: int) -> np.ndarray:
@@ -133,6 +134,15 @@ class ImageListIO:
 
     def _initialize_collection(self, input_data: ImageListType) -> None:
         """ Initialize the image collection from input data. """
+
+        # Type checks
+        if not (isinstance(input_data, (str, Path)) or (isinstance(input_data, list) and all(isinstance(d, (np.ndarray, str, Path)) for d in input_data))):
+            raise ValueError("Input must be str|Path (glob) or list of str|Path|np.ndarray")
+        if isinstance(input_data, list) and all(isinstance(d, np.ndarray) for d in input_data):
+            if not all(d.dtype in [np.uint8, np.bool] for d in input_data):
+                raise ValueError("List of images must all be dtype=uint8")
+
+        # Initialize collection
         if isinstance(input_data, (str, Path)):
             # Convert to Path if input_data is a string
             input_path = Path(input_data)
@@ -151,16 +161,18 @@ class ImageListIO:
         elif isinstance(input_data, list):
             if all(isinstance(item, np.ndarray) for item in input_data):
                 if self.conserve_memory:
-                    # Save images to temp folder as .npy files
-                    self.file_paths = []
-                    for idx, image in enumerate(input_data):
-                        image = self._validate_image(image)
-                        base_name = f'image_{idx}.npy'
-                        image_path = self._temp_dir / base_name
-                        np.save(image_path, image)
-                        self.file_paths.append(image_path)
-                    self._reset_data()
+                    raise ValueError('Cannot enable conserve memory option while providing a list of images')
+                    # # Save images to temp folder as .npy files
+                    # self.file_paths = []
+                    # for idx, image in enumerate(input_data):
+                    #     image = self._validate_image(image)
+                    #     base_name = f'image_{idx}.npy'
+                    #     image_path = self._temp_dir / base_name
+                    #     np.save(image_path, image)
+                    #     self.file_paths.append(image_path)
+                    # self._reset_data()
                 else:
+                    self.has_list_array = True
                     self.data = [self._validate_image(image) for image in input_data]
                     if self.file_paths.__len__() == 0:
                         self.file_paths = [None] * len(input_data)
@@ -174,11 +186,13 @@ class ImageListIO:
         if not self.data or all(d is None for d in self.data):
             if self.conserve_memory:
                 # Only load the first image to initialize attributes
-                self._reset_data() # Data will not be stored in self.data when conserve_memory is True
+                self._reset_data()  # Data will not be stored in self.data when conserve_memory is True
                 self.data[0] = self._validate_image(self._load_image(self.file_paths[0]))
-            else:
-                # Load all images into self.data
+            elif not self.data and all([isinstance(fp, (str, Path)) for fp in self.file_paths]):
+                # Load all images into self.data --- This could not happen:
                 self.data = [self._validate_image(self._load_image(fpath)) for fpath in self.file_paths]
+            elif not all([isinstance(d, np.ndarray) for d in self.data]):
+                raise ValueError('Input data should be either a list of np.ndarray or a glob pattern or a list of Path.')
         self.reference_size = self.data[0].shape[:2]
         self.n_dims = self.data[0].ndim
 
@@ -544,6 +558,100 @@ def pixel_order(image: np.ndarray) -> Tuple[np.ndarray, Union[float, list]]:
         OA = OA[0]
 
     return np.stack(im_sort, axis=-1), OA
+
+
+def exact_histogram_with_noise(image: np.ndarray, target_hist: np.ndarray, binary_mask: Optional[np.ndarray] = None, noise_level: float = 0.1, n_bins: int = 256) -> np.ndarray:
+    """Exact histogram specification by rank allocation (mask-aware, per channel).
+
+    This implements a discrete, “exact” histogram specification: masked pixels are
+    ranked (with small amount of noise for tie-breaking), then assigned to output levels so
+    that the counts per level match `target_hist` as closely as possible
+    (exact up to rounding and mask size). Unmasked pixels are left unchanged.
+
+    Args:
+        image (np.ndarray): Input image, 2D (H,W) or 3D (H,W,C). Any numeric dtype.
+            If Float, values are used only for ranking; the output levels are in
+            the integer range [0, n_bins-1].
+        target_hist (np.ndarray): Target histogram counts or weights with shape
+            (n_bins, C). If weights, they are normalized internally to the number
+            of masked pixels in each channel.
+        binary_mask (np.ndarray): Boolean mask, shape (H,W) or (H,W,C). True indicates
+            pixels to be histogram-specified. If 2D, it is applied to all channels.
+        noise_level (float): Level of noise used only to break ties
+            in ranking. Set to a small value like 1e-3 (relative to input scale).
+            Use 0 to disable noise (less robust when many ties).
+        n_bins (int): Number of discrete output levels (e.g., 256, 65536).
+
+    Returns:
+        np.ndarray: Output image with masked pixels reassigned to match the target
+        histogram, dtype chosen from {uint8, uint16, uint32} according to
+        `n_bins`. Unmasked pixels keep their original values (cast to output dtype).
+
+
+    Reference: Coltuc, Dinu; Bolon, Philippe; Chassery, Jean-Marc. Exact Histogram Specification. IEEE Transactions on Image Processing, Vol. 15, No. 5, May 2006, pp. 1143-1152. doi:10.1109/TIP.2005.864170
+    """
+    # Ensure 3D (H,W,C)
+    im = im3D(image)  # your helper: returns (H,W,C)
+    H, W, C = im.shape
+    mask = im3D(binary_mask) if binary_mask is not None else np.zeros_like(im, dtype=bool)
+    mask = np.broadcast_to(mask, (H, W, C)) if mask.shape[2] == 1 and C > 1 else mask
+
+    # Validate target histogram shape
+    if target_hist.shape[0] != n_bins:
+        raise ValueError(f"target_hist must have shape (n_bins, C) with n_bins={n_bins}; "
+                         f"got {target_hist.shape[0]} bins.")
+    if target_hist.shape[1] != C:
+        raise ValueError(f"target_hist has {target_hist.shape[1]} channels, but image has {C}.")
+
+    n_bits = int(np.log2(n_bins))
+    if n_bins not in (256, 65536, 4294967296) and 2 ** n_bits != n_bins:
+        raise ValueError(f"n_bins must be a power of two; got {n_bins}.")
+    out_dtype = f'uint{n_bits}'
+    out = np.empty((H, W, C), dtype=out_dtype)
+
+    # --- Per-channel exact allocation ---
+    for c in range(C):
+        ch_mask = mask[:, :, c].astype(bool)
+        idx = np.flatnonzero(ch_mask.ravel())
+        if idx.size == 0:
+            raise ValueError(f"Mask for channel {c} has no True elements.")
+
+        th = np.maximum(target_hist[:, c].astype(np.float64), 0.0)
+        s = th.sum()
+        if s <= 0.0:
+            raise ValueError(f"Target histogram for channel {c} sums to zero.")
+
+        # Values used for ranking (float); add small jitter to break ties
+        x = im[..., c].ravel()[idx].astype(np.float32)
+        x = x + np.random.uniform(-noise_level, noise_level, size=x.shape).astype(np.float32)
+
+        order = np.argsort(x, kind="mergesort")  # stable rank order
+
+        # Desired integer counts per level (unbiased rounding)
+        desired = th / s * idx.size
+        base = np.floor(desired).astype(np.int64)
+        rem = idx.size - int(base.sum())
+        if rem != 0:
+            frac = desired - base
+            add_idx = np.argsort(-frac)[:abs(rem)]
+            base[add_idx] += np.sign(rem)
+
+        # Assign contiguous blocks of ranks to output levels 0..n_bins-1
+        assign = np.empty(idx.size, dtype=out_dtype)
+        start = 0
+        for level, k in enumerate(base):
+            if k > 0:
+                assign[order[start:start + k]] = np.asarray(level, dtype=out_dtype)
+                start += k
+        if start != idx.size:  # should not happen; strict fill
+            raise RuntimeError(f"Rounding error while assigning ranks in channel {c}.")
+
+        # Write back masked pixels; copy-through others (cast)
+        ch_out = np.asarray(im[..., c], dtype=out_dtype).ravel()
+        ch_out[idx] = assign
+        out[..., c] = ch_out.reshape(H, W)
+
+    return out.squeeze()
 
 
 def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.ndarray = None, verbose: bool = True) -> Tuple[np.ndarray, List]:
@@ -1104,58 +1212,6 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> tupl
 def compute_rmse(image1: np.ndarray, image2: np.ndarray) -> float:
     """ Compute the root-mean-square error between two images. """
     return np.sqrt(np.mean((image1 - image2) ** 2))
-
-
-def compute_metrics_from_paths(images: ImageListType, options: Options) -> Optional[List[np.ndarray]]:
-    """Computes the average SSIM and RMSM between the original images and the processed ones
-
-    Args:
-        images (ImageListType): images after being processed
-        options (Options):
-            as_gray (bool): If the input images and RGB or grayscale. If True, images are converted to grayscale upon loading.
-            input_folder (Union[str, Path]): relative or absolute path of the image folder (default = ./INPUT)
-            images_format (str): png, tif, jpg (default = 'tif')
-            metrics (List[str], optional): Metrics to compute. Defaults to ['rmse', 'ssim'].
-
-    Returns:
-        output (dict): with 'avg_rmse' and 'avg_ssim' if computed.
-    """
-    if options.metrics != None:
-        total_rmse = 0
-        total_ssim = 0
-        output = []
-        image_paths = Path(options.input_folder) / f"*.{options.images_format}"
-        directory = image_paths.parent
-        pattern = image_paths.name
-        file_paths = sorted(directory.glob(pattern))
-
-        for image_path, proc_im in zip(file_paths, images.images):
-            # 1 : Load original image
-            with Image.open(image_path) as image:
-                if options.as_gray:
-                    orig_im = np.array(image.convert('L'))
-                else:
-                    orig_im = np.array(image.convert('RGB'))
-
-            # 2 : Compute the metrics
-            if 'rmse' in options.metrics:
-                rmse_value = compute_rmse(orig_im, proc_im)
-                total_rmse += rmse_value
-            if 'ssim' in options.metrics:
-                _, ssim_value = ssim_sens(orig_im, proc_im)
-                total_ssim += ssim_value.squeeze()
-
-        if 'rmse' in options.metrics:
-            avg_rmse = total_rmse / len(file_paths)
-            print(total_rmse, len(file_paths))
-            print(f"Average RMSE: {avg_rmse:}")
-            output.append(avg_rmse)
-        if 'ssim' in options.metrics:
-            avg_ssim = total_ssim / len(file_paths)
-            print(f"Average SSIM: {avg_ssim}")
-            output.append(avg_ssim)
-        return output
-    return None
 
 
 def get_images_spectra(images: ImageListType, magnitudes: Optional[ImageListIO] = None, phases: Optional[ImageListIO] = None) -> Union[List[np.ndarray], ImageListType]:

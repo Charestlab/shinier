@@ -57,9 +57,6 @@ class Options:
                             while integrating new optimizations. (conserve_memory = False, as_gray = False, dithering = 0,
                             hist_specification = 1, safe_lum_match = False)
 
-        metrics (Optional[List[str]]) : Metrics giving after images are processed. (Default = ['rmse', 'ssim'])
-                                        The structural similarity index measure (SSIM) and root mean square (RMSE) averages are available.
-                                        If the list is given empty, no index will be given.
 
     --------------------------------------------------HISTOGRAM matching--------------------------------------------------------
         hist_specification (int): Default = 0
@@ -109,11 +106,11 @@ class Options:
             self,
 
             images_format: str = 'tif',
-            input_folder: Union[str, Path] = Path('./../../INPUT'),
-            output_folder: Union[str, Path] = Path('./../../OUTPUT'),
+            input_folder: Union[str, Path] = Path('./../INPUT'),
+            output_folder: Union[str, Path] = Path('./../OUTPUT'),
 
             masks_format: str = 'tif',
-            masks_folder: Optional[Union[str, Path]] = Path("./../../MASK") if Path("./../../MASK").is_dir() and any(Path("./../../MASK").iterdir()) else None,
+            masks_folder: Optional[Union[str, Path]] = Path("./../MASK") if Path("./../MASK").is_dir() and any(Path("./../MASK").iterdir()) else None,
             whole_image: int = 1,
             background: Union[int, float] = 300,
 
@@ -123,7 +120,6 @@ class Options:
             conserve_memory: bool = True,
             seed: Optional[int] = None,
             legacy_mode: bool = False,
-            metrics: Optional[List[str]] = ['rmse', 'ssim'],
 
             safe_lum_match: bool = False,
             target_lum: Optional[Iterable[Union[int, float]]] = (0, 0),
@@ -134,7 +130,7 @@ class Options:
             step_size: int = 34,
             target_hist: Optional[np.ndarray[int]] = None,
 
-            rescaling: int = 1,
+            rescaling: Optional[int] = None,
             target_spectrum: Optional[np.ndarray[float]] = None
     ):
         self.images_format = images_format
@@ -153,7 +149,6 @@ class Options:
         self.conserve_memory = conserve_memory if mode in [5,6,7,8] else False
         self.seed = seed
         self.legacy_mode = legacy_mode
-        self.metrics = metrics
 
         self.safe_lum_match = safe_lum_match
         self.target_lum = target_lum
@@ -164,7 +159,7 @@ class Options:
         self.step_size = step_size
         self.target_hist = target_hist
 
-        self.rescaling = 0 if mode == 1 else rescaling
+        self.rescaling = rescaling if rescaling is not None else 0
         self.target_spectrum = target_spectrum
 
         # Override validation and
@@ -211,8 +206,6 @@ class Options:
             raise TypeError("seed must be an integer value or None.")
         if not isinstance(self.legacy_mode, bool):
             raise TypeError("legacy_mode must be a boolean value.")
-        if not isinstance(self.metrics, list) or set(self.metrics) - {"rmse", "ssim"} or len(self.metrics) != len(set(self.metrics)):
-            raise ValueError("metrics must be a list containing only 'rmse', 'ssim', both, or empty")
 
         if not isinstance(self.legacy_mode, bool):
             raise TypeError("legacy_mode must be a boolean value.")
@@ -249,7 +242,7 @@ class Options:
             if not np.issubdtype(self.target_hist.dtype, np.integer):
                 raise TypeError("target_hist must contain integer values (pixel counts per bin).")
 
-        if self.rescaling != 0 and self.mode in [1, 2]:
+        if self.rescaling != 0 and self.mode in [1, 2]:  # TODO: Shouldn't we prevent rescaling anytime lum and hist match are applied?
             raise ValueError("Should not apply rescaling after luminance or histogram matching.")
         if self.rescaling not in [0, 1, 2]:
             raise ValueError("Rescaling must be 0, 1, or 2. See Options")

@@ -15,7 +15,7 @@ class ImageDataset:
 
     Args:
         images (ImageListType): List of images. If not provided, images will be loaded from `input_folder` as defined in the Options class.
-        masks (ImageListType): List of masks, each specifying the parts of the image that should be taken into account. 
+        masks (ImageListType): List of masks, each specifying the parts of the image that should be taken into account.
             If not provided, they will be loaded from `masks_folder` as defined in the Options class.
         options (Optional[Options]): Instance of the Options class. If not provided, Options will be instantiated with default values.
 
@@ -26,7 +26,7 @@ class ImageDataset:
         n_masks (int): Number of masks.
         images_name (List[str]): List of image file names.
         masks_name (List[str]): List of mask file names.
-        processing_steps (List[str]): List of processing steps applied to the dataset.
+        processing_logs (List[str]): List of processing steps applied to the dataset along with relevant image metrics and information.
         options (Options): Configuration options for the dataset.
     """
     def __init__(
@@ -36,7 +36,7 @@ class ImageDataset:
         options: Optional[Options] = None
     ):
         self.options = options if options else Options()  # Instantiate with default values if not provided.
-        self.processing_steps = [] #TODO: use it for versioning instead of numbers?
+        self.processing_logs = []
 
         # Load images if not provided
         self.images = ImageListIO(
@@ -46,7 +46,7 @@ class ImageDataset:
             save_dir = self.options.output_folder
         )
         self.n_images = len(self.images)
-        self.images_name = [path.name for path in self.images.file_paths]
+        self.images_name = [path.name for path in self.images.file_paths if path is not None]
         self.images._n_channels = self.images[0].shape[-1]
 
         if self.options.whole_image == 3 and self.options.masks_folder != None and self.options.masks_format != None:
@@ -119,7 +119,7 @@ class ImageDataset:
 
         # Write each step to a new line in the file
         with open(filename, 'w') as file:
-            for step in self.processing_steps:
+            for step in self.processing_logs:
                 file.write(step + '\n')
 
     def close(self):
