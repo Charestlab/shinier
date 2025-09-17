@@ -63,11 +63,11 @@ class ImageListIO:
         self,
         input_data: ImageListType,
         conserve_memory: bool = True,
-        as_gray: bool = False,
+        as_gray: Literal[0, 1, 2] = False,
         save_dir: Optional[str] = None
     ) -> None:
         self.conserve_memory: bool = conserve_memory
-        self.as_gray: bool = as_gray
+        self.as_gray: Literal[0, 1, 2] = as_gray
         self.save_dir: Path = Path(save_dir or Path.cwd())
         self.data: List[Optional[np.ndarray]] = []
         self.file_paths: List[Path] = []
@@ -102,6 +102,7 @@ class ImageListIO:
         self.dtype = new_image.dtype
         self._update_drange()
         new_image = self._validate_image(new_image)
+        new_image = self._to_gray(new_image)
         if self.conserve_memory:
             self._reset_data()
             self._save_image(idx, new_image, save_dir=self._temp_dir)
@@ -131,6 +132,14 @@ class ImageListIO:
             if self.dtype != image.dtype:
                 raise ValueError(f"Image dtype {image.dtype} does not match collection dtype {self.dtype}.")
         return image
+
+    def _to_gray(self, image: np.ndarray):
+        gray_map = {1: 'equal', 2: 'perceptual'}
+        if image.ndim == 3:
+            if self.as_gray > 0:
+                image = rgb2gray(image, conversion_type=gray_map[self.as_gray])
+        return image
+
 
     def _initialize_collection(self, input_data: ImageListType) -> None:
         """ Initialize the image collection from input data. """
@@ -162,18 +171,9 @@ class ImageListIO:
             if all(isinstance(item, np.ndarray) for item in input_data):
                 if self.conserve_memory:
                     raise ValueError('Cannot enable conserve memory option while providing a list of images')
-                    # # Save images to temp folder as .npy files
-                    # self.file_paths = []
-                    # for idx, image in enumerate(input_data):
-                    #     image = self._validate_image(image)
-                    #     base_name = f'image_{idx}.npy'
-                    #     image_path = self._temp_dir / base_name
-                    #     np.save(image_path, image)
-                    #     self.file_paths.append(image_path)
-                    # self._reset_data()
                 else:
                     self.has_list_array = True
-                    self.data = [self._validate_image(image) for image in input_data]
+                    self.data = [self._to_gray(self._validate_image(image)) for image in input_data]
                     if self.file_paths.__len__() == 0:
                         self.file_paths = [None] * len(input_data)
             elif all(isinstance(item, (str, Path)) for item in input_data):
@@ -220,11 +220,11 @@ class ImageListIO:
                 self.dtype = image.dtype
             else:
                 with Image.open(image_path) as pil_image:
-                    if self.as_gray:
-                        pil_image = pil_image.convert(self.DEFAULT_GRAY_MODE)
-                    else:
-                        pil_image = pil_image.convert(self.DEFAULT_COLOR_MODE)
+                    # Load as RGB and convert to grayscale if required
+                    pil_image = pil_image.convert(self.DEFAULT_COLOR_MODE)
                     image = np.array(pil_image)
+                    image = self._to_gray(image)
+
                 self.dtype = image.dtype
             self._update_drange()
         except IOError as e:
@@ -1208,11 +1208,9 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> tupl
         all_mssim.append(mssim)
     return np.stack(all_sens, axis=-1).squeeze(), np.stack(all_mssim)
 
-
 def compute_rmse(image1: np.ndarray, image2: np.ndarray) -> float:
     """ Compute the root-mean-square error between two images. """
     return np.sqrt(np.mean((image1 - image2) ** 2))
-
 
 def get_images_spectra(images: ImageListType, magnitudes: Optional[ImageListIO] = None, phases: Optional[ImageListIO] = None) -> Union[List[np.ndarray], ImageListType]:
     """
