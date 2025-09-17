@@ -64,7 +64,7 @@ class ImageDataset:
         self.magnitudes, self.phases, self.buffer = None, None, None
 
         # Create placeholders for buffer if options.mode include hist_match or fourier_match
-        if options.mode >= 2:
+        if options.mode >= 2 and options.mode is not 9:
             # Create placeholders for buffer
             input_data = [np.zeros(self.images[0].shape, dtype=bool) for idx in range(len(self.images))]
             self.buffer = ImageListIO(
@@ -75,7 +75,7 @@ class ImageDataset:
             )
 
             # Create placeholders for spectra
-            if options.mode >= 3:
+            if options.mode >= 3 and options.mode is not 9:
                 self.magnitudes = ImageListIO(
                     input_data=input_data,
                     conserve_memory=self.options.conserve_memory,

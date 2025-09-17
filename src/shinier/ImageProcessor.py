@@ -149,12 +149,17 @@ class ImageProcessor:
             print(f'{Bcolors.OKGREEN}Applying histogram matching...{Bcolors.ENDC}')
             self.dataset.processing_logs.append('hist_match')
             self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
+        if self.options.mode == 9:
+            print(f'{Bcolors.OKGREEN}Applying dithering only...{Bcolors.ENDC}')
+            print('Applying dithering...')
+            self.only_dithering()
+            self.dataset.processing_logs.append('only_dithering')
 
     def only_dithering(self):
+        """ Applies the noisy-bit dithering to the input images. """
         input_collection, input_name, output_collection, output_name = self._get_relevant_input_output()
-        buffer_collection = self.dataset.buffer
 
-        buffer_collection = self._apply_post_processing(output_name, buffer_collection, dithering=True)
+        buffer_collection = self._apply_post_processing(output_name, output_collection, dithering=True)
         self._set_relevant_output(buffer_collection, output_name)
 
     def lum_match(self, target_lum: Optional[Iterable[Union[float, int]]] = (0, 0), safe_values: bool = False):
