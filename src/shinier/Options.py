@@ -1,5 +1,5 @@
 # Global imports
-from typing import Union, Optional, Iterable, List
+from typing import Union, Optional, Iterable, List, Literal
 from pathlib import Path
 import numpy as np
 
@@ -18,7 +18,7 @@ class Options:
         masks_format (str): png, tif, tiff, jpg, jpeg (default = tif)
         masks_folder (Union[str, Path]): relative or absolute path of mask (default = ./MASKS)
 
-        whole_image (int): Default = 1
+        whole_image (Literal): Default = 1
             1 = whole image (default)
             2 = figure-ground separated (input images as mask(s))
             3 = figure-ground separated (based on mask(s))
@@ -28,7 +28,7 @@ class Options:
             basically, all regions of that lum are treated as background
 
     ------------------------------------------SHINIER MODE, COLORS, RAM management---------------------------------------------
-        mode (int): Default = 8
+        mode (Literal): Default = 8
             1 = lum_match only
             2 = hist_match only
             3 = sf_match only
@@ -39,8 +39,11 @@ class Options:
             8 = spec_match & hist_match (default)
             9 = only dithering
 
-        as_gray (Optional[bool]): If True, images are converted to grayscale upon loading.
-            Defaults to False.
+        as_gray (Optional[int]): Images are converted into grayscale. Default is no conversion (default = 0).
+            0 = No conversion applied
+            1 = An equal weighted sum of red, green and blue pixels is applied.
+            2 = A weighted sum of red, green and blue pixels is applied to better represent human perception
+                of red, green and blue than equal weights. See http://poynton.ca/PDFs/ColorFAQ.pdf
 
         dithering (Optional[int]): Default = 1, dithering before final conversion to uint8
             0 = no dithering
@@ -58,18 +61,18 @@ class Options:
 
 
     --------------------------------------------------HISTOGRAM matching--------------------------------------------------------
-        hist_specification (int): Default = 0
+        hist_specification (Literal): Default = 0
             0 = Exact specification without noise (see Coltuc, Bolon & Chassery, 2006)
             1 = Exact specification with noise (legacy code)
 
-        hist_optim (int): Default = 0
+        hist_optim (Literal): Default = 0
             0 = no SSIM optimization
             1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 35), see below)
 
         iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
         step_size (int): Step size for SSIM optimization in hist_optim. Default is 35. (Avanaki (2009) uses 67)
 
-        target_hist (Optional[np.ndarray[int]]): Target histogram to use for histogram or fourier matching. Should be a
+        target_hist (Optional[np.ndarray]): Target histogram counts (int) or weights (float) to use for histogram or fourier matching. Should be a
             numpy array of shape (256,) or (65536,) for 8-bit or 16-bit images, or as required by the processing function.
             Default is None.
             E.g.,
@@ -86,7 +89,7 @@ class Options:
             The mean must be in [0, 255], and the standard deviation must be ≥ 0.
 
     --------------------------------------------------FOURIER matching--------------------------------------------------------
-        rescaling (int): Default = 1. Post-processing applied after sf_match or spec_match only.
+        rescaling (Literal): Default = 1. Post-processing applied after sf_match or spec_match only.
             0 = no rescaling
             1 = rescale to min and max of all images (default)
             2 = rescale to average min and max values across all images
@@ -110,12 +113,12 @@ class Options:
 
             masks_format: str = 'tif',
             masks_folder: Optional[Union[str, Path]] = Path("./../MASK") if Path("./../MASK").is_dir() and any(Path("./../MASK").iterdir()) else None,
-            whole_image: int = 1,
+            whole_image: Literal[1, 2, 3] = 1,
             background: Union[int, float] = 300,
 
-            mode: int = 8,
-            as_gray: bool = False,
-            dithering: bool = 1,
+            mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8,
+            as_gray: Literal[0, 1, 2] = 0,
+            dithering: Literal[1, 2] = 1,
             conserve_memory: bool = True,
             seed: Optional[int] = None,
             legacy_mode: bool = False,
@@ -123,13 +126,13 @@ class Options:
             safe_lum_match: bool = False,
             target_lum: Optional[Iterable[Union[int, float]]] = (0, 0),
 
-            hist_specification: int = 0,
-            hist_optim: int = 0,
+            hist_specification: Literal[0, 1] = 0,
+            hist_optim: Literal[0, 1] = 0,
             iterations: int = 10,
             step_size: int = 34,
-            target_hist: Optional[np.ndarray[int]] = None,
+            target_hist: Optional[np.ndarray] = None,
 
-            rescaling: Optional[int] = None,
+            rescaling: Optional[Literal[0, 1, 2]] = None,
             target_spectrum: Optional[np.ndarray[float]] = None
     ):
         self.images_format = images_format
@@ -166,7 +169,7 @@ class Options:
             self._validate_options()
         else:
             self.conserve_memory = False
-            self.as_gray = True
+            self.as_gray = 1
             self.dithering = False
             self.hist_specification = 1
             self.safe_lum_match = False
@@ -195,8 +198,8 @@ class Options:
 
         if self.mode not in [1, 2, 3, 4, 5, 6, 7, 8, 9]:
             raise ValueError("Invalid mode selected. See Options")
-        if not isinstance(self.as_gray, bool):
-            raise TypeError("as_gray must be a boolean value.")
+        if self.as_gray not in [0, 1, 2]:
+            raise TypeError("as_gray must be an int equal to 0, 1 or 2.")
         if not isinstance(self.dithering, bool):
             raise ValueError("dithering must be a boolean value.")
         if not isinstance(self.conserve_memory, bool):
