@@ -57,7 +57,7 @@ class Options:
         seed (Optional[Int]): Optional seed to initialize the PRNG.
 
         legacy_mode (bool): If True, ensures compatibility with older versions and workflows, preserving previous functionalities
-                            while integrating new optimizations. (conserve_memory = False, as_gray = False, dithering = 0,
+                            while integrating new optimizations. (conserve_memory = False, as_gray = 2, dithering = 0,
                             hist_specification = 1, safe_lum_match = False)
 
 
@@ -170,7 +170,7 @@ class Options:
             self._validate_options()
         else:
             self.conserve_memory = False
-            self.as_gray = 1
+            self.as_gray = 2
             self.dithering = 0
             self.hist_specification = 1
             self.safe_lum_match = False
@@ -234,12 +234,12 @@ class Options:
                 raise TypeError("target_hist must be a numpy.ndarray.")
             if self.as_gray:
                 if self.target_hist.ndim != 1:
-                    raise ValueError("For grayscale images (as_gray=True), target_hist must be 1D (shape (256,) or (65536,)).")
+                    raise ValueError("For grayscale images (as_gray is 1 or 2), target_hist must be 1D (shape (256,) or (65536,)).")
                 if self.target_hist.shape[0] not in [256, 65536]:
                     raise ValueError("target_hist must have 256 or 65536 values (for 8 or 16 bits).")
             else:
                 if self.target_hist.ndim != 2:
-                    raise ValueError("For color images (as_gray=False), target_hist must be 2D (shape (256, 3) or (65536, 3)).")
+                    raise ValueError("For color images (as_gray = 0), target_hist must be 2D (shape (256, 3) or (65536, 3)).")
                 if self.target_hist.shape[0] not in [256, 65536] or self.target_hist.shape[1] != 3:
                     raise ValueError("target_hist must have shape (256, 3) or (65536, 3) for RGB images.")
             if not np.issubdtype(self.target_hist.dtype, np.integer):
