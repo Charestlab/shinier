@@ -7,6 +7,7 @@ import numpy as np
 import sys
 from shinier import ImageDataset, Options, ImageProcessor
 from PIL import Image
+from datetime import datetime
 
 def prompt_str(label: str, validator=None, default=None) -> Optional[str]:
     """Prompt the user for a string input.
@@ -262,29 +263,31 @@ def SHINIER_CLI(images = None, masks = None) -> Options:
 
     # --------- Global Preferences (custom profile only) ---------
     if prof == 3:
-        as_gray = prompt_yes_no("\nLoad as grayscale?", default = False)
+        as_gray = prompt_choice("\nLoad as grayscale?",
+                                ["No conversion applied",
+                                 "Equal weighted grayscaling",
+                                 "Perceptual weighted grayscaling"],
+                                 default = 0)
+        print("as gray", as_gray, "minus 1", as_gray - 1)
+        
         if as_gray is not None: 
-            kwargs["as_gray"] = as_gray
+            kwargs["as_gray"] = as_gray - 1 # prompt_choice is 1-based
 
         conserve = prompt_yes_no("\nConserve memory (temp dir, 1 image in RAM)?", default = True)
         if conserve is not None: 
             kwargs["conserve_memory"] = conserve
         
-        dith = prompt_yes_no("\nApply dithering before final uint8 cast?", default = True) if mode != 9 else True
+        dith = prompt_choice("\nApply dithering before final uint8 cast?",
+                             ["No dithering",
+                              "Noisy-bit dithering",
+                              "Floyd-Steinberg dithering"], default = 2) if mode != 9 else 2
         if dith is not None: 
-            kwargs["dithering"] = dith
+            kwargs["dithering"] = dith - 1 # prompt_choice is 1-based
 
-        seed = prompt_int("Random seed")
+        now = datetime.now()
+        seed = prompt_int("Random seed", default = int(now.timestamp()))
         if seed is not None: 
             kwargs["seed"] = seed
-
-        # Metrics
-        msel = prompt_choice("\nMetrics (empty = Options defaults)", ["rmse", "ssim", "none", "rmse+ssim"], default = 4)
-        if msel is not None:
-            if msel == 1: kwargs["metrics"] = ["rmse"]
-            elif msel == 2: kwargs["metrics"] = ["ssim"]
-            elif msel == 3: kwargs["metrics"] = []
-            else: kwargs["metrics"] = ["rmse","ssim"]
 
     # --------- Mode-specific Options (custom profile only) ---------
     if prof == 3:
