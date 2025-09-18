@@ -39,7 +39,7 @@ class Options:
             8 = spec_match & hist_match (default)
             9 = only dithering
 
-        as_gray (Optional[int]): Images are converted into grayscale. Default is no conversion (default = 0).
+        as_gray (Optional[int]): Images are converted into grayscale then uint8. Default is no conversion (default = 0).
             0 = No conversion applied
             1 = An equal weighted sum of red, green and blue pixels is applied.
             2 = A weighted sum of red, green and blue pixels is applied to better represent human perception
