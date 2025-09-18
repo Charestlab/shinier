@@ -742,7 +742,7 @@ def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.
     return im_out.squeeze(), OA
 
 
-def floyd_steinberg_dithering(image: np.ndarray, depth: int = 256) -> np.ndarray:
+def floyd_steinberg_dithering(image: np.ndarray, depth: int = 256, legacy_mode: bool = False) -> np.ndarray:
     """
     Implements the dithering algorithm presented in :
         R.W. Floyd, L. Steinberg, An adaptive algorithm for spatial grey scale.
@@ -751,6 +751,7 @@ def floyd_steinberg_dithering(image: np.ndarray, depth: int = 256) -> np.ndarray
     Args:
         image (np.ndarray): An image of floats ranging from 0 to 1.
         depth (optional) : The number of gray shades. (Default = 256)
+        legacy_mode (bool) : If True, uses Matlab's rounding algorithm.
 
     Returns:
         processed_image (np.ndarray): image matrix containing integer values [1, depth], indicating which luminance value should be used for every pixel.
@@ -772,12 +773,14 @@ def floyd_steinberg_dithering(image: np.ndarray, depth: int = 256) -> np.ndarray
             tim[yy+1,xx] = tim[yy+1,xx] + 5/16 * quant_error
             tim[yy+1,xx+1] = tim[yy+1,xx+1] + 1/16 * quant_error
 
-    tim = np.clip(MatlabOperators.round(tim), 0, depth-1)
-    uint_image = tim.astype(np.min_scalar_type(int(tim.max()))).squeeze()
+
+    r_tim = MatlabOperators.round(tim) if legacy_mode else np.round(tim)
+    rc_tim = np.clip(r_tim, 0, depth-1)
+    uint_image = rc_tim.astype(np.min_scalar_type(int(rc_tim.max()))).squeeze()
     return uint_image
 
 
-def noisy_bit_dithering(image: np.ndarray, depth: int = 256) -> np.ndarray:
+def noisy_bit_dithering(image: np.ndarray, depth: int = 256, legacy_mode: bool = False) -> np.ndarray:
     """
     Implements the dithering algorithm presented in :
         Allard, R., Faubert, J. (2008) The noisy-bit method for digital displays:
@@ -787,6 +790,7 @@ def noisy_bit_dithering(image: np.ndarray, depth: int = 256) -> np.ndarray:
     Args:
         image (np.ndarray): An image of floats ranging from 0 to 1.
         depth (optional) : The number of gray shades. (Default = 256)
+        legacy_mode (bool) : If True, uses Matlab's rounding algorithm.
 
     Returns:
         processed_image (np.ndarray): image matrix containing integer values [1, depth], indicating which luminance value should be used for every pixel.
@@ -815,8 +819,10 @@ def noisy_bit_dithering(image: np.ndarray, depth: int = 256) -> np.ndarray:
 
     # tim = np.uint8(np.fmax(np.fmin(np.around(tim + np.random.random(np.shape(im)) - 0.5), depth - 1.0), 0.0))
     processed_image = processed_image + np.random.random(np.shape(image)) - 0.5
-    tim = np.clip(MatlabOperators.round(processed_image), 0, depth-1)
-    uint_image = tim.astype(np.min_scalar_type(int(tim.max()))).squeeze()
+    r_tim = MatlabOperators.round(processed_image) if legacy_mode else np.round(processed_image)
+    rc_tim = np.clip(r_tim, 0, depth-1)
+
+    uint_image = rc_tim.astype(np.min_scalar_type(int(rc_tim.max()))).squeeze()
     return uint_image
 
 

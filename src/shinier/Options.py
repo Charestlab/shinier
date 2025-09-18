@@ -45,9 +45,10 @@ class Options:
             2 = A weighted sum of red, green and blue pixels is applied to better represent human perception
                 of red, green and blue than equal weights. See http://poynton.ca/PDFs/ColorFAQ.pdf
 
-        dithering (Optional[int]): Default = 1, dithering before final conversion to uint8
+        dithering (Literal): Default = 1, dithering before final conversion to uint8
             0 = no dithering
             1 = noisy bit dithering (Allard R. & Faubert J. (2008))
+            2 = Floyd-Steinberg dithering (Floyd R.W. & Steinberg L., 1976)
 
         conserve_memory (Optional[bool]): If True (default), uses a temporary directory to store images
             and keeps only one image in memory at a time. If True and input_data is a list of NumPy arrays,
@@ -118,7 +119,7 @@ class Options:
 
             mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8,
             as_gray: Literal[0, 1, 2] = 0,
-            dithering: Literal[1, 2] = 1,
+            dithering: Literal[0, 1, 2] = 1,
             conserve_memory: bool = True,
             seed: Optional[int] = None,
             legacy_mode: bool = False,
@@ -170,7 +171,7 @@ class Options:
         else:
             self.conserve_memory = False
             self.as_gray = 1
-            self.dithering = False
+            self.dithering = 0
             self.hist_specification = 1
             self.safe_lum_match = False
 
@@ -200,8 +201,8 @@ class Options:
             raise ValueError("Invalid mode selected. See Options")
         if self.as_gray not in [0, 1, 2]:
             raise TypeError("as_gray must be an int equal to 0, 1 or 2.")
-        if not isinstance(self.dithering, bool):
-            raise ValueError("dithering must be a boolean value.")
+        if self.dithering not in [0, 1, 2]:
+            raise ValueError("dithering must be an int equal to 0, 1 or 2.")
         if not isinstance(self.conserve_memory, bool):
             raise TypeError("conserve_memory must be a boolean value.")
         if self.seed is not None and not isinstance(self.seed, int):
@@ -253,3 +254,5 @@ class Options:
                 raise TypeError('The target spectrum must be a numpy array of np.float64.')
             if np.issubdtype(self.target_spectrum.dtype, np.floating):
                 raise TypeError('The target spectrum must be a numpy array of np.float64.')
+        if self.mode == 9 and self.dithering == 0:
+            raise ValueError("The dithering option cannot be 0 for mode 9. Should be either 1 or 2.")

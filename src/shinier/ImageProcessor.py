@@ -6,9 +6,9 @@ import numpy as np
 
 from shinier import ImageDataset, Options
 from shinier.utils import (
-    ImageListType, separate, imhist, im3D,
-    rescale_images, get_images_spectra, ssim_sens, cart2pol,
-    pol2cart, float01_to_uint, uint_to_float01, noisy_bit_dithering,
+    ImageListType, separate, imhist, im3D, cart2pol, pol2cart,
+    rescale_images, get_images_spectra, ssim_sens,
+    float01_to_uint, uint_to_float01, noisy_bit_dithering, floyd_steinberg_dithering,
     exact_histogram, exact_histogram_with_noise, Bcolors, MatlabOperators, compute_rmse)
 
 
@@ -72,7 +72,10 @@ class ImageProcessor:
                         image = uint_to_float01(image)
                     elif np.issubdtype(dtype, np.floating) and drange != (0, 1):
                         image = image/max(drange)
-                    output_collection[idx] = noisy_bit_dithering(image, 256)
+                    if dithering == 1:
+                        output_collection[idx] = noisy_bit_dithering(image=image, depth=256, legacy_mode=self.options.legacy_mode)
+                    elif dithering == 2:
+                        output_collection[idx] = floyd_steinberg_dithering(image=image, depth=256, legacy_mode=self.options.legacy_mode)
                 dtype = output_collection.dtype
                 drange = output_collection.drange
 
@@ -156,10 +159,9 @@ class ImageProcessor:
             self.dataset.processing_logs.append('only_dithering')
 
     def only_dithering(self):
-        """ Applies the noisy-bit dithering to the input images. """
+        """ Applies dithering to the input images. """
         input_collection, input_name, output_collection, output_name = self._get_relevant_input_output()
-
-        buffer_collection = self._apply_post_processing(output_name, output_collection, dithering=True)
+        buffer_collection = self._apply_post_processing(output_name, output_collection, dithering=self.options.dithering)
         self._set_relevant_output(buffer_collection, output_name)
 
     def lum_match(self, target_lum: Optional[Iterable[Union[float, int]]] = (0, 0), safe_values: bool = False):
@@ -393,67 +395,6 @@ class ImageProcessor:
             List of images matched on the rotational average.
         """
 
-        def _sf_match(input_collection: ImageListType, output_collection: ImageListType, magnitudes: ImageListType, phases: ImageListType, target_spectrum: np.ndarray):
-            target_spectrum = im3D(target_spectrum)
-            x_size, y_size, n_channels = target_spectrum.shape[:3]
-
-            #  Returns the frequencies of the image, bins range from -0.5f to 0.5f (0.5f is the Nyquist frequency) 1/y_size is the distance between each pixel in the image
-            f1 = np.fft.fftshift(np.fft.fftfreq(x_size, d=1 / x_size))
-            f2 = np.fft.fftshift(np.fft.fftfreq(y_size, d=1 / y_size))
-            nyquistLimit = np.floor(max(x_size, y_size) / 2)
-            XX, YY = np.meshgrid(f1, f2)
-            r, theta = cart2pol(XX, YY)
-
-            # Map of the bins of the frequencies
-            r = MatlabOperators.round(r) if self.options.legacy_mode else np.round(r, decimals=0)
-
-            # Need to be a 1D array of integers for the bincount function
-            r1 = r.flatten().astype(np.uint16)
-
-            # Match spatial frequency on rotational average of the magnitude spectrum
-            for idx in range(len(input_collection)):
-                matched_image = []
-                magnitude = im3D(magnitudes[idx])
-                phase = im3D(phases[idx])
-                for channel in range(n_channels):
-                    fft_image = magnitude[:, :, channel]
-                    source_rotational_avg = np.bincount(r1, weights=fft_image.flatten())
-                    target_rotational_avg = np.bincount(r1, weights=target_spectrum[:, :, channel].flatten())
-                    coefficient = target_rotational_avg / source_rotational_avg
-
-                    # For where in r the value is j, apply the coefficient of index j to cmat
-                    cmat = np.zeros_like(r)
-                    for j in range(len(coefficient)):
-                        cmat[r == j] = coefficient[j]
-
-                    # Remove frequencies higher than the Nyquist frequency
-                    cmat[r > nyquistLimit] = 0
-
-                    # Compute new magnitude and convert back to image
-                    new_magnitude = fft_image * cmat
-
-                    [XX, YY] = pol2cart(new_magnitude, phase[:, :, channel])
-                    new = XX + YY * 1j  # 1j = sqrt(-1)
-                    output = np.real(np.fft.ifft2(np.fft.ifftshift(new)))
-                    matched_image.append(output)
-                output_collection[idx] = np.stack(matched_image, axis=-1).squeeze()
-            return output_collection
-
-        def _spec_match(output_collection: ImageListType, phases : ImageListType, target_spectrum: np.ndarray):
-            target_spectrum = im3D(target_spectrum)
-            x_size, y_size, n_channels = target_spectrum.shape[:3]
-
-            # Match spatial frequency on rotational average of the magnitude spectrum
-            for idx in range(len(phases)):
-                matched_image = []
-                phase = im3D(phases[idx])
-                for channel in range(n_channels):
-                    XX, YY = pol2cart(target_spectrum[:, :, channel], phase[:, :, channel])
-                    new = XX + YY * 1j  # 1j = sqrt(-1)
-                    output = np.real(np.fft.ifft2(np.fft.ifftshift(new)))
-                    matched_image.append(output)
-                output_collection[idx] = np.stack(matched_image, axis=-1).squeeze()
-            return output_collection
 
         # Get proper input and output image collections
         input_collection, input_name, output_collection, output_name = self._get_relevant_input_output()
@@ -475,9 +416,9 @@ class ImageProcessor:
 
         # Apply the relevant Fourier match
         if matching_type == 'sf':
-            buffer_collection = _sf_match(input_collection=input_collection, output_collection=buffer_collection, magnitudes=self.dataset.magnitudes, phases=self.dataset.phases, target_spectrum=target_spectrum)
+            buffer_collection = self.sf_match(input_collection=input_collection, output_collection=buffer_collection, magnitudes=self.dataset.magnitudes, phases=self.dataset.phases, target_spectrum=target_spectrum)
         elif matching_type == 'spec':
-            buffer_collection = _spec_match(output_collection=buffer_collection, phases=self.dataset.phases, target_spectrum=target_spectrum)
+            buffer_collection = self.spec_match(output_collection=buffer_collection, phases=self.dataset.phases, target_spectrum=target_spectrum)
 
         # buffer_collection dtype is np.float64 and drange is close but out of [0, 1] before rescaling of any sort
         if self.options.rescaling:
@@ -489,3 +430,146 @@ class ImageProcessor:
         buffer_collection = self._apply_post_processing(output_name, buffer_collection, dithering=self.options.dithering)
         self._set_relevant_output(buffer_collection, output_name)
 
+    @staticmethod
+    def sf_match(input_collection: ImageListType, output_collection: ImageListType, magnitudes: ImageListType,
+                 phases: ImageListType, target_spectrum: np.ndarray) -> ImageListType:
+        """Match spatial frequencies of input images to a target rotational spectrum.
+
+        This function performs spatial frequency (SF) matching by adjusting the
+        rotational average of the Fourier amplitude of each input image so that
+        it matches the target spectrum. Each input image's magnitude spectrum
+        is scaled relative to the target spectrum, while preserving its original
+        phase, and then reconstructed in the spatial domain.
+
+        Args:
+            input_collection (ImageListType): Collection of input images to be
+                spatial frequency-matched.
+            output_collection (ImageListType): Collection where processed images
+                will be stored. Must be pre-allocated with the same length as
+                `input_collection`.
+            magnitudes (ImageListType): Precomputed Fourier magnitude spectra
+                of the input images. Each entry must be aligned with the
+                corresponding entry in `input_collection`.
+            phases (ImageListType): Precomputed Fourier phase spectra of the
+                input images. Each entry must be aligned with the
+                corresponding entry in `input_collection`.
+            target_spectrum (np.ndarray): Target magnitude spectrum to which the
+                input images should be matched. Should be a 2D or 3D array
+                compatible with the image dimensions, typically of shape
+                (H, W, C).
+
+        Returns:
+            ImageListType: The `output_collection` containing the SF-matched
+            images.
+
+        Notes:
+            - Frequencies beyond the Nyquist limit are set to zero to avoid aliasing.
+            - The adjustment is performed separately for each channel.
+            - Uses `cart2pol` and `pol2cart` to switch between Cartesian and polar
+              representations of the Fourier domain.
+
+        """
+        target_spectrum = im3D(target_spectrum)
+        x_size, y_size, n_channels = target_spectrum.shape[:3]
+
+        #  Returns the frequencies of the image, bins range from -0.5f to 0.5f (0.5f is the Nyquist frequency) 1/y_size is the distance between each pixel in the image
+        f1 = np.fft.fftshift(np.fft.fftfreq(x_size, d=1 / x_size))
+        f2 = np.fft.fftshift(np.fft.fftfreq(y_size, d=1 / y_size))
+        nyquistLimit = np.floor(max(x_size, y_size) / 2)
+        XX, YY = np.meshgrid(f1, f2)
+        r, theta = cart2pol(XX, YY)
+
+        # Map of the bins of the frequencies
+        r = MatlabOperators.round(r) if self.options.legacy_mode else np.round(r, decimals=0)
+
+        # Need to be a 1D array of integers for the bincount function
+        r1 = r.flatten().astype(np.uint16)
+
+        # Match spatial frequency on rotational average of the magnitude spectrum
+        for idx in range(len(input_collection)):
+            matched_image = []
+            magnitude = im3D(magnitudes[idx])
+            phase = im3D(phases[idx])
+            for channel in range(n_channels):
+                fft_image = magnitude[:, :, channel]
+                source_rotational_avg = np.bincount(r1, weights=fft_image.flatten())
+                target_rotational_avg = np.bincount(r1, weights=target_spectrum[:, :, channel].flatten())
+                coefficient = target_rotational_avg / source_rotational_avg
+
+                # For where in r the value is j, apply the coefficient of index j to cmat
+                cmat = np.zeros_like(r)
+                for j in range(len(coefficient)):
+                    cmat[r == j] = coefficient[j]
+
+                # Remove frequencies higher than the Nyquist frequency
+                cmat[r > nyquistLimit] = 0
+
+                # Compute new magnitude and convert back to image
+                new_magnitude = fft_image * cmat
+
+                [XX, YY] = pol2cart(new_magnitude, phase[:, :, channel])
+                new = XX + YY * 1j  # 1j = sqrt(-1)
+                output = np.real(np.fft.ifft2(np.fft.ifftshift(new)))
+                matched_image.append(output)
+            output_collection[idx] = np.stack(matched_image, axis=-1).squeeze()
+        return output_collection
+
+    @staticmethod
+    def spec_match(output_collection: ImageListType,
+                   phases: ImageListType,
+                   target_spectrum: np.ndarray) -> ImageListType:
+        """Match the full magnitude spectrum of images to a target spectrum.
+
+        This function reconstructs images whose Fourier magnitude is replaced
+        by the `target_spectrum`, while preserving the original Fourier phase.
+        The inverse FFT is then used to obtain spatial-domain images with the
+        desired spectral characteristics.
+
+        Args:
+            output_collection (ImageListType): Collection where processed images
+                will be stored. Must be pre-allocated with the same length as
+                `phases`.
+            phases (ImageListType): Fourier phase spectra of the input images.
+                Each entry must be aligned with the corresponding output image.
+            target_spectrum (np.ndarray): Target magnitude spectrum to be applied.
+                Should be a 2D or 3D array of shape (H, W, C), where C is the
+                number of channels.
+
+        Returns:
+            ImageListType: The `output_collection` containing the spectrum-matched
+            images.
+
+        Notes:
+            - Phase information from each input image is preserved.
+            - The output is real-valued because only magnitude is replaced.
+
+        """
+
+        # Ensure the target spectrum is 3D (H, W, C)
+        target_spectrum = im3D(target_spectrum)
+        x_size, y_size, n_channels = target_spectrum.shape[:3]
+
+        # Iterate over each image (each entry in the phase collection)
+        for idx in range(len(phases)):
+            matched_image = []
+
+            # Convert the stored phase to 3D array
+            phase = im3D(phases[idx])
+
+            # Process each channel separately
+            for channel in range(n_channels):
+                # Convert polar (magnitude + phase) back to Cartesian
+                XX, YY = pol2cart(target_spectrum[:, :, channel], phase[:, :, channel])
+
+                # Combine into a complex Fourier spectrum
+                new = XX + YY * 1j  # 1j = sqrt(-1)
+
+                # Inverse FFT to go back to spatial domain (real-valued image)
+                output = np.real(np.fft.ifft2(np.fft.ifftshift(new)))
+
+                matched_image.append(output)
+
+            # Stack the channels and save into the output collection
+            output_collection[idx] = np.stack(matched_image, axis=-1).squeeze()
+
+        return output_collection
