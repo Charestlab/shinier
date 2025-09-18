@@ -102,7 +102,7 @@ class Options:
                 from shinier.utils import cart2pol
                 fftim = np.fft.fftshift(np.fft.fft2(im))
                 rho, theta = cart2pol(np.real(fftim), np.imag(fftim))
-                tarmget_spectrum = rho
+                target_spectrum = rho
 
     """
     def __init__(
