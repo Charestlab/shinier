@@ -108,11 +108,11 @@ class Options:
     def __init__(
             self,
 
-            images_format: str = 'tif',
+            images_format: str = 'png',
             input_folder: Union[str, Path] = Path('./../INPUT'),
             output_folder: Union[str, Path] = Path('./../OUTPUT'),
 
-            masks_format: str = 'tif',
+            masks_format: str = 'png',
             masks_folder: Optional[Union[str, Path]] = Path("./../MASK") if Path("./../MASK").is_dir() and any(Path("./../MASK").iterdir()) else None,
             whole_image: Literal[1, 2, 3] = 1,
             background: Union[int, float] = 300,
