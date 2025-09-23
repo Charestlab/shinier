@@ -13,6 +13,7 @@ import shutil
 import tempfile
 from itertools import chain
 from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
 
 # Local package imports
 from shinier import Options
@@ -22,15 +23,16 @@ ImageListType = Union[str, Path, List[Union[str, Path]], List[np.ndarray]]
 
 
 class Bcolors:
-    HEADER = '\033[95m'
+    HEADER = '\033[95m'  # Processing steps
     OKBLUE = '\033[94m'  # Processing values
     OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'  # Processing steps
+    OKGREEN = '\033[92m'  # Ok values
     WARNING = '\033[93m'
-    FAIL = '\033[91m'
+    FAIL = '\033[91m'  # Problematic values
     ENDC = '\033[0m'
-    BOLD = '\033[1m'
+    BOLD = '\033[1m'  # Iteration
     UNDERLINE = '\033[4m'
+    SECTION = '\033[4m\033[1m'  # Image loop
 
 
 class ImageListIO:
@@ -102,7 +104,7 @@ class ImageListIO:
         self.dtype = new_image.dtype
         self._update_drange()
         new_image = self._validate_image(new_image)
-        new_image = self._to_gray(new_image)
+        # new_image = self._to_gray(new_image)
         if self.conserve_memory:
             self._reset_data()
             self._save_image(idx, new_image, save_dir=self._temp_dir)
@@ -138,6 +140,7 @@ class ImageListIO:
         if image.ndim == 3:
             if self.as_gray > 0:
                 image = rgb2gray(image, conversion_type=gray_map[self.as_gray])
+                image = uint8_plus(image)
         return image
 
 
@@ -174,6 +177,8 @@ class ImageListIO:
                 else:
                     self.has_list_array = True
                     self.data = [self._to_gray(self._validate_image(image)) for image in input_data]
+                    self._update_drange()
+
                     if self.file_paths.__len__() == 0:
                         self.file_paths = [None] * len(input_data)
             elif all(isinstance(item, (str, Path)) for item in input_data):
@@ -397,6 +402,57 @@ class MatlabOperators:
         """Replicates MATLAB's rem function (remainder operation with sign matching dividend)."""
         return np.remainder(x, y)
 
+def spectrum_plot(spectrum: np.ndarray,
+                  cmap: str = "gray",
+                  log: bool = True,
+                  gamma: float = 1.0,
+                  with_colorbar: bool = True):
+    """Display a Fourier magnitude spectrum with optional log and gamma scaling."""
+    spec = np.abs(spectrum).astype(np.float64)
+
+    # log scaling
+    if log:
+        spec = np.log1p(spec)
+
+    # stretch to [0,1]
+    spec = (spec - spec.min()) / (spec.max() - spec.min())
+
+    # gamma correction
+    if gamma != 1.0:
+        spec = spec ** gamma
+
+    plt.imshow(spec, cmap=cmap)
+    if with_colorbar:
+        plt.colorbar()
+    plt.show()
+def stretch(arr: np.ndarray) -> np.ndarray:
+    """Stretch an array to the range [0, 1].
+
+    This rescales the input array so that its minimum maps to 0 and its
+    maximum maps to 1. Works for any number of dimensions (grayscale,
+    color images, or higher-dimensional data).
+
+    Args:
+        arr (np.ndarray): Input array of any shape and numeric dtype.
+
+    Returns:
+        np.ndarray: Array of the same shape as input, dtype float64,
+        with values scaled to [0, 1].
+
+    Notes:
+        - If the array has constant values (max == min), returns an array
+          of zeros (to avoid division by zero).
+        - Output is float64 for numerical stability. Cast to float32 if
+          needed for memory/performance reasons.
+    """
+    arr = np.asarray(arr, dtype=np.float64)
+    min_val = arr.min()
+    max_val = arr.max()
+
+    if np.isclose(max_val, min_val):
+        return np.zeros_like(arr, dtype=np.float64)
+
+    return (arr - min_val) / (max_val - min_val)
 
 def convolve_1d(arr: np.ndarray, kernel: np.ndarray, axis: int) -> np.ndarray:
     """Apply 1D convolution with reflect padding along a chosen axis.
@@ -703,11 +759,11 @@ def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.
         raise ValueError("Input image must have 1 or 3 channels.")
 
     # Assign strict order to pixels
-    print(f"{Bcolors.OKGREEN}Assigning strict order to pixels{Bcolors.ENDC}") if verbose else None
+    # print(f"{Bcolors.HEADER}Assigning strict order to pixels{Bcolors.ENDC}") if verbose else None
     im_sort, OA = pixel_order(image)
 
     # Process each channel separately
-    print(f"{Bcolors.OKGREEN}Main exact_histogram loop{Bcolors.ENDC}") if verbose else None
+    # print(f"{Bcolors.HEADER}Main exact_histogram loop{Bcolors.ENDC}") if verbose else None
     im_out = image.copy()
     for channel in range(n_channels):
         # Work only on the masked (foreground) pixels
@@ -775,7 +831,7 @@ def floyd_steinberg_dithering(image: np.ndarray, depth: int = 256, legacy_mode: 
 
 
     r_tim = MatlabOperators.round(tim) if legacy_mode else np.round(tim)
-    rc_tim = np.clip(r_tim, 0, depth-1)
+    rc_tim = np.rint(np.clip(r_tim, 0, depth-1))
     uint_image = rc_tim.astype(np.min_scalar_type(int(rc_tim.max()))).squeeze()
     return uint_image
 
@@ -819,14 +875,14 @@ def noisy_bit_dithering(image: np.ndarray, depth: int = 256, legacy_mode: bool =
 
     # tim = np.uint8(np.fmax(np.fmin(np.around(tim + np.random.random(np.shape(im)) - 0.5), depth - 1.0), 0.0))
     processed_image = processed_image + np.random.random(np.shape(image)) - 0.5
-    r_tim = MatlabOperators.round(processed_image) if legacy_mode else np.round(processed_image)
-    rc_tim = np.clip(r_tim, 0, depth-1)
+    c_tim = np.clip(processed_image, 0, depth-1)
+    rc_tim = MatlabOperators.round(c_tim) if legacy_mode else np.rint(c_tim)
 
     uint_image = rc_tim.astype(np.min_scalar_type(int(rc_tim.max()))).squeeze()
     return uint_image
 
 
-def uint_to_float01(image: np.ndarray, allow_clipping: bool = True) -> np.ndarray:
+def uint_to_float01(image: np.ndarray, apply_clipping: bool = True) -> np.ndarray:
     """
     Convert an N-bit unsigned integer (uintN) image to a floating-point image with values ranging from 0 to 1.
 
@@ -834,14 +890,14 @@ def uint_to_float01(image: np.ndarray, allow_clipping: bool = True) -> np.ndarra
 
     Args:
         image (np.ndarray): Input image as a NumPy array with floating-point values.
-        allow_clipping (bool): If True, clip values outside the range [0, 1].
+        apply_clipping (bool): If True, clip values outside the range [0, 1].
                                If False, raises an error if values are out of range.
 
     Returns:
         np.ndarray: The converted image as a NumPy array with dtype float64.
 
     Raises:
-        ValueError: If `allow_clipping` is False and the image contains values outside the range [0, 1].
+        ValueError: If `apply_clipping` is False and the image contains values outside the range [0, 1].
     """
     if not isinstance(image, np.ndarray) or not np.issubdtype(image.dtype, np.integer):
         raise TypeError('image should be a np.ndarray of integers')
@@ -854,17 +910,17 @@ def uint_to_float01(image: np.ndarray, allow_clipping: bool = True) -> np.ndarra
     image = image.astype(np.float64) / n_levels
 
     # Check if values are within [0, 255]
-    if not allow_clipping and (image_min < 0 or image_max > 1):
+    if not apply_clipping and (image_min < 0 or image_max > 1):
         raise ValueError("Image contains values outside the range [0, 1]. Consider enabling clipping.")
 
     # Clip values if allowed
-    image_clipped = np.clip(image, 0, 1) if allow_clipping else image
+    image_clipped = np.clip(image, 0, 1) if apply_clipping else image
 
     # Convert to uint8
     return image_clipped.astype(np.float64)
 
 
-def float01_to_uint(image: np.ndarray, allow_clipping: bool = True, bit_size: int = 8) -> np.ndarray:
+def float01_to_uint(image: np.ndarray, apply_clipping: bool = True, apply_rounding: bool = True, bit_size: int = 8) -> np.ndarray:
     """
     Convert a floating-point image to an n-bit unsigned integer (uintN) image.
 
@@ -872,15 +928,16 @@ def float01_to_uint(image: np.ndarray, allow_clipping: bool = True, bit_size: in
 
     Args:
         image (np.ndarray): Input image as a NumPy array with floating-point values.
-        allow_clipping (bool): If True, clip values outside the range [0, n_levels].
+        apply_clipping (bool): If True, clip values outside the range [0, n_levels].
                                If False, raises an error if values are out of range.
+        apply_rounding (bool): If True, round values using np.rint
         bit_size (int): Bit size of the unsigned integer.
 
     Returns:
         np.ndarray: The converted image as a NumPy array with dtype uintN.
 
     Raises:
-        ValueError: If `allow_clipping` is False and the image contains values outside the range [0, n_levels].
+        ValueError: If `apply_clipping` is False and the image contains values outside the range [0, n_levels].
     """
 
     if not isinstance(image, np.ndarray) or not np.issubdtype(image.dtype, np.floating):
@@ -907,14 +964,17 @@ def float01_to_uint(image: np.ndarray, allow_clipping: bool = True, bit_size: in
     image = image * n_levels
 
     # Check if values are within [0, n_levels]
-    if not allow_clipping and (image.min() < 0 or image.max() > n_levels):
+    if not apply_clipping and (image.min() < 0 or image.max() > n_levels):
         raise ValueError(f"Image contains values outside the range [0, {n_levels}]. Consider enabling clipping.")
 
     # Clip values if allowed
-    image_clipped = np.clip(image, dtype_info.min, dtype_info.max) if allow_clipping else image
+    image_clipped = np.clip(image, dtype_info.min, dtype_info.max) if apply_clipping else image
+
+    # Round values if allowed
+    image_rounded = np.rint(image_clipped) if apply_rounding else image
 
     # Convert to uint8
-    return image_clipped.astype(target_dtype)
+    return image_rounded.astype(target_dtype)
 
 
 def pol2cart(magnitude: np.ndarray, angle: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -1301,10 +1361,22 @@ def rescale_images(images: ImageListType, rescaling_option: Literal[1, 2, 3] = 1
         for idx, image in enumerate(images):
             new_image = image.copy().astype(float)
             new_image = (new_image - mn)/(mx - mn) * 255
-            images[idx] = MatlabOperators.uint8(new_image) if legacy_mode else np.clip(new_image, 0, 255).astype(np.uint8)
+            images[idx] = MatlabOperators.uint8(new_image) if legacy_mode else uint8_plus(new_image)
 
     return images
 
+def uint8_plus(image: np.ndarray) -> np.ndarray:
+    """
+    Apply clipping, banker's rounding and uint8 transformations.
+
+    Args:
+        image (np.nearray): Image to be converted. Assume that the input image is already in the proper range [0, 255].
+
+    Returns:
+        image (np.nearray)
+
+    """
+    return np.rint(np.clip(image, 0, 255)).astype('uint8')
 
 def apply_median_blur(image: np.ndarray, kernel_size: int = 3) -> np.ndarray:
     """
@@ -1402,56 +1474,3 @@ def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins=256) -> 
         count[:, channel], _ = np.histogram(image[:, :, channel][mask[:, :, channel]], bins=n_bins, range=(0, n_bins))
     return count
 
-
-def gaussian_ellipsoidal_mask(ims, grayTone=127, RGB=False, cutoffA=0.5, cutoffB=0.75, offsetA=0, offsetB=0):
-    """
-    Applies a smooth, ellipsoidal Gaussian mask to a list of images.
-
-    The mask is defined by an ellipse with configurable axes and offsets, and is blurred using a Gaussian kernel.
-    The masked region blends the image towards a specified gray tone, with optional support for RGB images.
-
-    Args:
-        ims : list or array-like
-            List of input images (as numpy arrays or PIL Images) to be masked.
-        grayTone : int, optional
-            The gray tone (0-255) to blend towards in the masked region. Default is 127.
-        RGB : bool, optional
-            If True, treats images as RGB (3-channel). If False, treats as grayscale. Default is False.
-        cutoffA : float, optional
-            Semi-axis length of the ellipse along the x-direction (normalized to [0,1]). Default is 0.5.
-        cutoffB : float, optional
-            Semi-axis length of the ellipse along the y-direction (normalized to [0,1]). Default is 0.75.
-        offsetA : float, optional
-            Offset of the ellipse center along the x-direction (normalized to [-1,1]). Default is 0.
-        offsetB : float, optional
-            Offset of the ellipse center along the y-direction (normalized to [-1,1]). Default is 0.
-
-    Returns:
-        out : list of PIL.Image
-            List of masked images as PIL Image objects, with the ellipsoidal mask applied.
-
-    Notes:
-        - The mask smoothly blends the image towards the specified gray tone inside the ellipse.
-        - The mask is blurred using a Gaussian kernel for smooth transitions.
-        - For RGB images, the mask is applied to all channels.
-    """
-    def gaussian_blur(a, s=5):
-        r = int(3*s)
-        x = np.arange(-r, r+1)
-        k = np.exp(-0.5*(x/s)**2); k /= k.sum()
-        a = np.pad(a, ((0,0),(r,r)), mode='reflect')
-        a = np.apply_along_axis(lambda v: np.convolve(v, k, mode='valid'), 1, a)
-        a = np.pad(a, ((r,r),(0,0)), mode='reflect')
-        a = np.apply_along_axis(lambda v: np.convolve(v, k, mode='valid'), 0, a)
-        return a
-    out = []
-    for im in ims:
-        im = np.asarray(im); H, W = im.shape[:2]; f = im.astype(np.float64)/255.0
-        xv, yv = np.meshgrid(np.linspace(0,1,W), np.linspace(0,1,H))
-        m = ((((2*xv-1-offsetA)**2)/(cutoffA**2) + ((2*yv-1-offsetB)**2)/(cutoffB**2)) < 1).astype(np.float64)
-        m = gaussian_blur(m); mx = m.max(); m = m/(mx if mx>0 else 1.0)
-        f = m[...,None]*(f-0.5)+0.5 if (RGB and f.ndim==3 and f.shape[2]==3) else m*(f-0.5)+0.5
-        a = f*255.0; g = 127 - grayTone
-        o = np.where(a!=255.0, a-g, 255.0)
-        out.append(Image.fromarray(np.clip(o,0,255).astype(np.uint8)))
-    return out

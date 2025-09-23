@@ -39,7 +39,7 @@ class Options:
             8 = spec_match & hist_match (default)
             9 = only dithering
 
-        as_gray (Optional[int]): Images are converted into grayscale. Default is no conversion (default = 0).
+        as_gray (Optional[int]): Images are converted into grayscale then uint8. Default is no conversion (default = 0).
             0 = No conversion applied
             1 = An equal weighted sum of red, green and blue pixels is applied.
             2 = A weighted sum of red, green and blue pixels is applied to better represent human perception
@@ -129,12 +129,14 @@ class Options:
 
             hist_specification: Literal[0, 1] = 0,
             hist_optim: Literal[0, 1] = 0,
-            iterations: int = 10,
+            hist_iterations: int = 10,
             step_size: int = 34,
             target_hist: Optional[np.ndarray] = None,
 
             rescaling: Optional[Literal[0, 1, 2]] = None,
-            target_spectrum: Optional[np.ndarray[float]] = None
+            target_spectrum: Optional[np.ndarray[float]] = None,
+            iterations: int = 5
+
     ):
         self.images_format = images_format
         self.input_folder = Path(input_folder).resolve()
@@ -158,12 +160,13 @@ class Options:
 
         self.hist_specification = hist_specification
         self.hist_optim = hist_optim
-        self.iterations = iterations
+        self.hist_iterations = hist_iterations
         self.step_size = step_size
         self.target_hist = target_hist
 
         self.rescaling = rescaling if rescaling is not None else 0
         self.target_spectrum = target_spectrum
+        self.iterations = iterations if mode in [5,6,7,8] else 1
 
         # Override validation and
         if not self.legacy_mode:
@@ -225,6 +228,8 @@ class Options:
             raise ValueError("hist_specification must be 0 or 1. See Options")
         if self.hist_optim not in [0, 1]:
             raise ValueError("Optim must be 0 or 1. See Options")
+        if self.hist_iterations < 1:
+            raise ValueError("hist_iterations must be at least 1. See Options")
         if self.iterations < 1:
             raise ValueError("Iterations must be at least 1. See Options")
         if self.step_size < 1:

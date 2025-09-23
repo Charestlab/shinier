@@ -7,7 +7,7 @@ import numpy as np
 from shinier import ImageDataset, Options
 from shinier.utils import (
     ImageListType, separate, imhist, im3D, cart2pol, pol2cart,
-    rescale_images, get_images_spectra, ssim_sens,
+    rescale_images, get_images_spectra, ssim_sens, spectrum_plot,
     float01_to_uint, uint_to_float01, noisy_bit_dithering, floyd_steinberg_dithering,
     exact_histogram, exact_histogram_with_noise, Bcolors, MatlabOperators, compute_rmse)
 
@@ -16,7 +16,7 @@ class ImageProcessor:
     """Base class for image processing."""
     def __init__(self, dataset: ImageDataset, options: Optional[Options] = None, verbose: bool = True):
         self.dataset: ImageDataset = dataset
-        self.options: Optional[Options] = dataset.options or getattr(dataset, "options", None)
+        self.options: Optional[Options] = options or getattr(dataset, "options", None)
         self.current_image: Optional[np.ndarray] = None
         self.current_masks: Optional[np.ndarray] = None
         self.bool_masks: List = [None] * len(self.dataset.images)
@@ -132,31 +132,33 @@ class ImageProcessor:
             np.random.seed(self.seed)
             self.dataset.processing_logs.append(f'seed={self.seed}')
             print(f'{Bcolors.WARNING}Use this seed for reproducibility: {self.seed}{Bcolors.ENDC}')
-        if self.options.mode == 1:
-            print(f'{Bcolors.OKGREEN}Applying luminance matching...{Bcolors.ENDC}')
-            self.dataset.processing_logs.append('lum_match')
-            self.lum_match(target_lum=self.options.target_lum, safe_values=self.options.safe_lum_match)
-        if self.options.mode in [2, 5, 6]:
-            print(f'{Bcolors.OKGREEN}Applying histogram matching...{Bcolors.ENDC}')
-            self.dataset.processing_logs.append('hist_match')
-            self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
-        if self.options.mode in [3, 5, 7]:
-            print(f'{Bcolors.OKGREEN}Applying spatial frequency matching...{Bcolors.ENDC}')
-            self.dataset.processing_logs.append('sf_match')
-            self.fourier_match(target_spectrum=self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='sf')
-        if self.options.mode in [4, 6, 8]:
-            print(f'{Bcolors.OKGREEN}Applying spectrum matching...{Bcolors.ENDC}')
-            self.dataset.processing_logs.append('spec_match')
-            self.fourier_match(target_spectrum=self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='spec')
-        if self.options.mode in [7, 8]:
-            print(f'{Bcolors.OKGREEN}Applying histogram matching...{Bcolors.ENDC}')
-            self.dataset.processing_logs.append('hist_match')
-            self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
-        if self.options.mode == 9:
-            print(f'{Bcolors.OKGREEN}Applying dithering only...{Bcolors.ENDC}')
-            print('Applying dithering...')
-            self.only_dithering()
-            self.dataset.processing_logs.append('only_dithering')
+
+        for iter in range(self.options.iterations):
+            if self.options.mode == 1:
+                print(f'{Bcolors.SECTION}Applying luminance matching...{Bcolors.ENDC}')
+                self.dataset.processing_logs.append('lum_match')
+                self.lum_match(target_lum=self.options.target_lum, safe_values=self.options.safe_lum_match)
+            if self.options.mode in [2, 5, 6]:
+                print(f'{Bcolors.SECTION}Applying histogram matching...(iter={iter}){Bcolors.ENDC}')
+                self.dataset.processing_logs.append('hist_match')
+                self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
+            if self.options.mode in [3, 5, 7]:
+                print(f'{Bcolors.SECTION}Applying spatial frequency matching...(iter={iter}){Bcolors.ENDC}')
+                self.dataset.processing_logs.append('sf_match')
+                self.fourier_match(target_spectrum=self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='sf')
+            if self.options.mode in [4, 6, 8]:
+                print(f'{Bcolors.SECTION}Applying spectrum matching...(iter={iter}){Bcolors.ENDC}')
+                self.dataset.processing_logs.append('spec_match')
+                self.fourier_match(target_spectrum=self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='spec')
+            if self.options.mode in [7, 8]:
+                print(f'{Bcolors.SECTION}Applying histogram matching...(iter={iter}){Bcolors.ENDC}')
+                self.dataset.processing_logs.append('hist_match')
+                self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
+            if self.options.mode == 9:
+                print(f'{Bcolors.SECTION}Applying dithering only...{Bcolors.ENDC}')
+                self.only_dithering()
+                self.dataset.processing_logs.append('only_dithering')
+
 
     def only_dithering(self):
         """ Applies dithering to the input images. """
@@ -211,7 +213,7 @@ class ImageProcessor:
             target_std *= scaling_factor
             predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
             target_mean = target_mean + (255 - np.max(predicted_max))
-            print(f"{Bcolors.OKBLUE}Adjusted target values for safe values: M = {target_mean:.4f}, SD = {target_std:.4f}{Bcolors.ENDC}") if self.verbose else None
+            print(f"{Bcolors.WARNING}Adjusted target values for safe values: M = {target_mean:.4f}, SD = {target_std:.4f}{Bcolors.ENDC}") if self.verbose else None
             predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
             if (any(predicted_min < 0) or any(predicted_max > 255)):
                 raise Exception(f'Out-of-range values detected: mins = {list(predicted_min)}, maxs = {list(predicted_max)}')
@@ -221,7 +223,7 @@ class ImageProcessor:
             M = MatlabOperators.mean2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.mean(im2[self.bool_masks[idx]])
             SD = MatlabOperators.std2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.std(im2[self.bool_masks[idx]])
             im_name = f'#{idx}' if self.dataset.images.file_paths[idx] is None else self.dataset.images.file_paths[idx]
-            print(f'{Bcolors.OKGREEN}Image {im_name}:{Bcolors.ENDC}')
+            print(f'{Bcolors.BOLD}Image {im_name}:{Bcolors.ENDC}')
             print(f'{Bcolors.OKBLUE}\tOriginal:\t\t\t\tM = {M:.4f}, SD = {SD:.4f}{Bcolors.ENDC}') if self.verbose else None
 
             # Standardization
@@ -241,9 +243,11 @@ class ImageProcessor:
             # Save resulting image
             M = MatlabOperators.mean2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.mean(im2[self.bool_masks[idx]])
             SD = MatlabOperators.std2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.std(im2[self.bool_masks[idx]])
-            print(f'\t{Bcolors.OKBLUE}Standardized (uint8):\tM = {M:.4f}, SD = {SD:.4f}{Bcolors.ENDC}') if self.verbose else None
+            not_equal = M != target_mean or SD != target_std
+            color = Bcolors.FAIL if not_equal else Bcolors.OKGREEN
+            print(f'\t{color}Standardized (uint8):\tM = {M:.4f}, SD = {SD:.4f}{Bcolors.ENDC}') if self.verbose else None
             print(f'\t{Bcolors.OKBLUE}Target values:\t\t\tM = {target_mean:.4f}, SD = {target_std:.4f}{Bcolors.ENDC}') if self.verbose else None
-            if M != target_mean or SD != target_std:
+            if not_equal:
                 print(f'\t{Bcolors.WARNING}* Discrepancies between Target and Standardized values are due to the conversion of floats into integers{Bcolors.ENDC}') if self.verbose else None
             print('\n')
             self.dataset.images[idx] = im2 #update the dataset
@@ -277,7 +281,7 @@ class ImageProcessor:
 
         def _avg_hist(images: ImageListType, normalized: bool=True) -> np.ndarray:
             n_channels = 1 if images.n_dims == 2 else 3
-            n_bins = max(images.drange) + 1
+            n_bins = max(images.drange) + 1 if not np.issubdtype(images.dtype, 'float') else 256  # TODO: Imposing 256 but is this ok for all use case?
             hist_sum = np.zeros((n_bins, n_channels))
             for idx, im in enumerate(images):
                 self._get_mask(idx) # Prepare the mask if it does not already exist. Default mask is all True.
@@ -309,12 +313,12 @@ class ImageProcessor:
             if to_convert:
                 if np.issubdtype(dtype, np.floating):
                     if drange == (0, 1):
-                        buffer_collection[idx] = float01_to_uint(image, allow_clipping=True, bit_size=bit_size)
+                        buffer_collection[idx] = float01_to_uint(image, apply_clipping=True, apply_rounding=True, bit_size=bit_size)
                     else:
                         print(f'{Bcolors.WARNING}Why would this happen?{Bcolors.ENDC}')
 
                 elif dtype == np.uint8:
-                    buffer_collection[idx] = (image / 255.0 * (2 ** bit_size - 1)).astype(np.dtype(f'uint{bit_size}'))
+                    buffer_collection[idx] = float01_to_uint(image/255, apply_clipping=True, apply_rounding=True, bit_size=bit_size)
             else:
                 buffer_collection[idx] = image
 
@@ -327,36 +331,37 @@ class ImageProcessor:
                 raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
 
         # If hist_optim disable, will run only one loop (n_iter = 1)
-        n_iter = self.options.iterations if hist_optim else 1  # Number of iterations for SSIM optimization (default = 10)
+        n_iter = self.options.hist_iterations+1 if hist_optim else 1  # See important note below to explain the +1. Also, note that the number of iterations for SSIM optimization (default = 10)
         step_size = self.options.step_size  # Step size (default = 34)
 
         # Match the histogram
         for idx, image in enumerate(buffer_collection):
             im_name = f'#{idx}' if self.dataset.images.file_paths[idx] is None else self.dataset.images.file_paths[idx]
-            print(f'{Bcolors.OKGREEN}Image {im_name}:{Bcolors.ENDC}')
+            print(f'{Bcolors.BOLD}Image {im_name}:{Bcolors.ENDC}')
 
             image = im3D(image)
             X = image
             M = np.prod(image.shape)/image.shape[2]
             for iter in range(n_iter): # n_iter = 1 when hist_optim == 0
-                print(f'{Bcolors.OKGREEN}\tIteration #{iter + 1}: {Bcolors.ENDC}') if self.verbose and n_iter > 1 else None
+                print(f'{Bcolors.BOLD}\tIteration #{iter+1}: {Bcolors.ENDC}') if self.verbose and n_iter > 1 and iter < n_iter - 1 else None
 
-                if hist_specification:
+                if hist_specification == 1:
                     Y = exact_histogram_with_noise(image=X, binary_mask=self.bool_masks[idx], target_hist=target_hist, noise_level=noise_level, n_bins=n_bins)
                 else:
                     Y, OA = exact_histogram(image=X, target_hist=target_hist, binary_mask=self.bool_masks[idx], verbose=self.verbose)
-                    print(f'{Bcolors.OKBLUE}\ttOrdering accuracy per channel = {OA}{Bcolors.ENDC}') if self.verbose else None
-
+                    print(f'{Bcolors.OKBLUE}\t\tOrdering accuracy per channel = {OA}{Bcolors.ENDC}') if self.verbose and (n_iter == 1 or (n_iter > 1 and iter < n_iter - 1)) else None
                 sens, ssim = ssim_sens(image, Y, n_bins=n_bins)
-                print(f'{Bcolors.OKBLUE}\t\tMean SSIM = {np.mean(ssim):.4f}{Bcolors.ENDC}') if self.verbose and hist_optim else None
-                if hist_optim:
+                print(f'{Bcolors.OKBLUE}\t\tMean SSIM = {np.mean(ssim):.4f}{Bcolors.ENDC}') if self.verbose and hist_optim and (n_iter == 1 or (n_iter > 1 and iter < n_iter - 1)) else None
+                if hist_optim and iter < n_iter - 1:
                     ssim_update = sens * step_size * M
                     X = Y + ssim_update # X float64, Y uint8/uint16
-                    X = np.clip(X, 0, 2**bit_size - 1).astype(np.uint16) if bit_size == 16 else np.clip(X, 0, 2**bit_size - 1)
-                    if iter == n_iter-1:
-                        new_image = X.astype(np.uint16) if bit_size == 16 else X.astype(np.uint8)
-                else:
-                    new_image = Y.astype(np.uint16) if bit_size == 16 else Y.astype(np.uint8)
+                    X = np.rint(np.clip(X, 0, 2 ** bit_size - 1)).astype(f'uint{bit_size}')
+
+
+            # Important Note:
+            # - Must use Y as this is the one that matches the target histogram.
+            # - n_iter is adjusted to +1 to assure the proper number of optimization steps is run.
+            new_image = np.rint(np.clip(Y, 0, 2**bit_size - 1)).astype(f'uint{bit_size}')
 
             buffer_collection[idx] = new_image
 
@@ -364,8 +369,12 @@ class ImageProcessor:
             final_hist = _get_hist(new_image, mask=self.bool_masks[idx], n_bins=n_bins, normalized=True)
             corr = np.corrcoef(final_hist.flatten(), target_hist.flatten())
             rmse = compute_rmse(final_hist.flatten(), target_hist.flatten())
-            print(f'{Bcolors.OKBLUE}\tCorrelation between transformed and target histogram: {corr[0, 1]:.4f}{Bcolors.ENDC}') if self.verbose else None
-            print(f'{Bcolors.OKBLUE}\tRMS error between transformed and target histogram: {rmse:.4f}{Bcolors.ENDC}') if self.verbose else None
+
+            not_equal = np.abs(corr[0, 1] - 1) > 0.001 or rmse > 0.001
+            color = Bcolors.FAIL if not_equal else Bcolors.OKGREEN
+
+            print(f'{color}\tCorrelation between transformed and target histogram: {corr[0, 1]:.4f}{Bcolors.ENDC}') if self.verbose else None
+            print(f'{color}\tRMS error between transformed and target histogram: {rmse:.4f}{Bcolors.ENDC}') if self.verbose else None
             print(f'{Bcolors.OKBLUE}\tSSIM index between transformed and original image: {np.mean(ssim):.4f}{Bcolors.ENDC}') if self.verbose else None
             self.dataset.processing_logs.append(f'Image {im_name}:\n\tCorrelation between transformed and target histogram: {corr[0, 1]:.4f}\n\tRMS error between transformed and target histogram: {rmse:.4f}\n\tSSIM index between transformed and original image: {np.mean(ssim):.4f}')
 
@@ -416,9 +425,12 @@ class ImageProcessor:
 
         # Apply the relevant Fourier match
         if matching_type == 'sf':
-            buffer_collection = self.sf_match(input_collection=input_collection, output_collection=buffer_collection, magnitudes=self.dataset.magnitudes, phases=self.dataset.phases, target_spectrum=target_spectrum)
+            buffer_collection = self.sf_match(
+                input_collection=input_collection, output_collection=buffer_collection, magnitudes=self.dataset.magnitudes,
+                phases=self.dataset.phases, target_spectrum=target_spectrum)
         elif matching_type == 'spec':
-            buffer_collection = self.spec_match(output_collection=buffer_collection, phases=self.dataset.phases, target_spectrum=target_spectrum)
+            buffer_collection = self.spec_match(
+                output_collection=buffer_collection, phases=self.dataset.phases, target_spectrum=target_spectrum)
 
         # buffer_collection dtype is np.float64 and drange is close but out of [0, 1] before rescaling of any sort
         if self.options.rescaling:
@@ -430,8 +442,7 @@ class ImageProcessor:
         buffer_collection = self._apply_post_processing(output_name, buffer_collection, dithering=self.options.dithering)
         self._set_relevant_output(buffer_collection, output_name)
 
-    @staticmethod
-    def sf_match(input_collection: ImageListType, output_collection: ImageListType, magnitudes: ImageListType,
+    def sf_match(self, input_collection: ImageListType, output_collection: ImageListType, magnitudes: ImageListType,
                  phases: ImageListType, target_spectrum: np.ndarray) -> ImageListType:
         """Match spatial frequencies of input images to a target rotational spectrum.
 
@@ -469,6 +480,12 @@ class ImageProcessor:
               representations of the Fourier domain.
 
         """
+
+        def rot_avg(arr2d: np.ndarray, radius: np.ndarray) -> np.ndarray:
+            """Mean magnitude per radius bin (annular average)."""
+            sums = np.bincount(radius, weights=arr2d.ravel())
+            return sums / ann_counts
+
         target_spectrum = im3D(target_spectrum)
         x_size, y_size, n_channels = target_spectrum.shape[:3]
 
@@ -483,39 +500,64 @@ class ImageProcessor:
         r = MatlabOperators.round(r) if self.options.legacy_mode else np.round(r, decimals=0)
 
         # Need to be a 1D array of integers for the bincount function
-        r1 = r.flatten().astype(np.uint16)
+        r_int = r.astype(np.int32)
+        r1 = r_int.ravel()
+
+        # Precompute counts per radius (for true rotational *averages*, not sums)
+        ann_counts = np.bincount(r1)
+        ann_counts[ann_counts == 0] = 1  # protect against divide-by-zero
 
         # Match spatial frequency on rotational average of the magnitude spectrum
         for idx in range(len(input_collection)):
+            im_name = f'#{idx}' if self.dataset.images.file_paths[idx] is None else self.dataset.images.file_paths[idx]
+            print(f'{Bcolors.BOLD}Image {im_name}:{Bcolors.ENDC}') if self.verbose else None
+
             matched_image = []
             magnitude = im3D(magnitudes[idx])
             phase = im3D(phases[idx])
             for channel in range(n_channels):
                 fft_image = magnitude[:, :, channel]
-                source_rotational_avg = np.bincount(r1, weights=fft_image.flatten())
-                target_rotational_avg = np.bincount(r1, weights=target_spectrum[:, :, channel].flatten())
-                coefficient = target_rotational_avg / source_rotational_avg
+
+                # Rotational averages (target vs source) as MEANS over annuli
+                target_ra = rot_avg(target_spectrum[:, :, channel], radius=r1)
+                source_ra = rot_avg(fft_image, radius=r1)
+
+                # Per-radius scale coefficients; avoid divide-by-zero on empty/zero annuli
+                coeff = target_ra / np.maximum(source_ra, 1e-12)
 
                 # For where in r the value is j, apply the coefficient of index j to cmat
-                cmat = np.zeros_like(r)
-                for j in range(len(coefficient)):
-                    cmat[r == j] = coefficient[j]
-
+                cmat = coeff[r_int]
                 # Remove frequencies higher than the Nyquist frequency
-                cmat[r > nyquistLimit] = 0
+                cmat[r_int > nyquistLimit] = 0  # zero beyond Nyquist
 
                 # Compute new magnitude and convert back to image
                 new_magnitude = fft_image * cmat
 
-                [XX, YY] = pol2cart(new_magnitude, phase[:, :, channel])
+                XX, YY = pol2cart(new_magnitude, phase[:, :, channel])
                 new = XX + YY * 1j  # 1j = sqrt(-1)
                 output = np.real(np.fft.ifft2(np.fft.ifftshift(new)))
                 matched_image.append(output)
+
+                # Comparison: obtained vs target rotational averages (up to Nyquist)
+                obtained_ra = rot_avg(new_magnitude, radius=r1)
+                R = int(min(len(obtained_ra), len(target_ra), nyquistLimit + 1))
+                t = target_ra[:R]
+                o = obtained_ra[:R]
+                corr = np.corrcoef(t, o)[0, 1] if R > 1 else np.nan
+                rmse = compute_rmse(t, o)
+                print(f'{Bcolors.BOLD}\tChannel {channel}:{Bcolors.ENDC}') if self.verbose and n_channels > 1 else None
+
+                not_equal = np.abs(corr - 1) > 0.001 or rmse > 0.001
+                color = Bcolors.FAIL if not_equal else Bcolors.OKGREEN
+                print(f'{color}\t\tCorrelation between transformed and target rot-avg: {corr:.4f}{Bcolors.ENDC}') if self.verbose else None
+                print(f'{color}\t\tRMS error between transformed and target rot-avg: {rmse:.4f}{Bcolors.ENDC}') if self.verbose else None
+                self.dataset.processing_logs.append(f'Image {im_name} - Channel {channel}:\n\tCorrelation between transformed and target rot-avg: {corr:.4f}\n\tRMS error between transformed and target rot-avg: {rmse:.4f}')
+
+
             output_collection[idx] = np.stack(matched_image, axis=-1).squeeze()
         return output_collection
 
-    @staticmethod
-    def spec_match(output_collection: ImageListType,
+    def spec_match(self, output_collection: ImageListType,
                    phases: ImageListType,
                    target_spectrum: np.ndarray) -> ImageListType:
         """Match the full magnitude spectrum of images to a target spectrum.
@@ -551,6 +593,9 @@ class ImageProcessor:
 
         # Iterate over each image (each entry in the phase collection)
         for idx in range(len(phases)):
+            im_name = f'#{idx}' if self.dataset.images.file_paths[idx] is None else self.dataset.images.file_paths[idx]
+            print(f'{Bcolors.BOLD}Image {im_name}:{Bcolors.ENDC}') if self.verbose else None
+
             matched_image = []
 
             # Convert the stored phase to 3D array
@@ -568,6 +613,23 @@ class ImageProcessor:
                 output = np.real(np.fft.ifft2(np.fft.ifftshift(new)))
 
                 matched_image.append(output)
+
+                # Comparison: obtained vs target spectrum
+                obtained_mag = np.abs(np.fft.fftshift(np.fft.fft2(output)))
+
+                # Flatten for metrics
+                t = target_spectrum[:, :, channel].flatten().astype(np.float64)
+                o = obtained_mag.ravel().astype(np.float64, copy=False)
+
+                corr = float(np.corrcoef(t, o)[0, 1]) if t.size > 1 else float('nan')
+                rmse = compute_rmse(t, o)
+                print(f'{Bcolors.BOLD}\tChannel {channel}:{Bcolors.ENDC}') if self.verbose and n_channels > 1 else None
+
+                not_equal = np.abs(corr - 1) > 0.001 or rmse > 0.001
+                color = Bcolors.FAIL if not_equal else Bcolors.OKGREEN
+                print(f'{color}\t\tCorrelation between transformed and target spectrum: {corr:.4f}{Bcolors.ENDC}') if self.verbose else None
+                print(f'{color}\t\tRMS error between transformed and target spectrum: {rmse:.4f}{Bcolors.ENDC}') if self.verbose else None
+                self.dataset.processing_logs.append(f'Image {im_name} - Channel {channel}:\n\tCorrelation between transformed and target spectrum: {corr:.4f}\n\tRMS error between transformed and target spectrum: {rmse:.4f}')
 
             # Stack the channels and save into the output collection
             output_collection[idx] = np.stack(matched_image, axis=-1).squeeze()
