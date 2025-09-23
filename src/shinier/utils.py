@@ -402,7 +402,7 @@ class MatlabOperators:
         """Replicates MATLAB's rem function (remainder operation with sign matching dividend)."""
         return np.remainder(x, y)
 
-def show_spectrum(spectrum: np.ndarray,
+def spectrum_plot(spectrum: np.ndarray,
                   cmap: str = "gray",
                   log: bool = True,
                   gamma: float = 1.0,

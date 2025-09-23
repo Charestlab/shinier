@@ -7,7 +7,7 @@ import numpy as np
 from shinier import ImageDataset, Options
 from shinier.utils import (
     ImageListType, separate, imhist, im3D, cart2pol, pol2cart,
-    rescale_images, get_images_spectra, ssim_sens, show_spectrum,
+    rescale_images, get_images_spectra, ssim_sens, spectrum_plot,
     float01_to_uint, uint_to_float01, noisy_bit_dithering, floyd_steinberg_dithering,
     exact_histogram, exact_histogram_with_noise, Bcolors, MatlabOperators, compute_rmse)
 
@@ -132,30 +132,33 @@ class ImageProcessor:
             np.random.seed(self.seed)
             self.dataset.processing_logs.append(f'seed={self.seed}')
             print(f'{Bcolors.WARNING}Use this seed for reproducibility: {self.seed}{Bcolors.ENDC}')
-        if self.options.mode == 1:
-            print(f'{Bcolors.SECTION}Applying luminance matching...{Bcolors.ENDC}')
-            self.dataset.processing_logs.append('lum_match')
-            self.lum_match(target_lum=self.options.target_lum, safe_values=self.options.safe_lum_match)
-        if self.options.mode in [2, 5, 6]:
-            print(f'{Bcolors.SECTION}Applying histogram matching...{Bcolors.ENDC}')
-            self.dataset.processing_logs.append('hist_match')
-            self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
-        if self.options.mode in [3, 5, 7]:
-            print(f'{Bcolors.SECTION}Applying spatial frequency matching...{Bcolors.ENDC}')
-            self.dataset.processing_logs.append('sf_match')
-            self.fourier_match(target_spectrum=self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='sf')
-        if self.options.mode in [4, 6, 8]:
-            print(f'{Bcolors.SECTION}Applying spectrum matching...{Bcolors.ENDC}')
-            self.dataset.processing_logs.append('spec_match')
-            self.fourier_match(target_spectrum=self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='spec')
-        if self.options.mode in [7, 8]:
-            print(f'{Bcolors.SECTION}Applying histogram matching...{Bcolors.ENDC}')
-            self.dataset.processing_logs.append('hist_match')
-            self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
-        if self.options.mode == 9:
-            print(f'{Bcolors.SECTION}Applying dithering only...{Bcolors.ENDC}')
-            self.only_dithering()
-            self.dataset.processing_logs.append('only_dithering')
+
+        for iter in range(self.options.iterations):
+            if self.options.mode == 1:
+                print(f'{Bcolors.SECTION}Applying luminance matching...{Bcolors.ENDC}')
+                self.dataset.processing_logs.append('lum_match')
+                self.lum_match(target_lum=self.options.target_lum, safe_values=self.options.safe_lum_match)
+            if self.options.mode in [2, 5, 6]:
+                print(f'{Bcolors.SECTION}Applying histogram matching...(iter={iter}){Bcolors.ENDC}')
+                self.dataset.processing_logs.append('hist_match')
+                self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
+            if self.options.mode in [3, 5, 7]:
+                print(f'{Bcolors.SECTION}Applying spatial frequency matching...(iter={iter}){Bcolors.ENDC}')
+                self.dataset.processing_logs.append('sf_match')
+                self.fourier_match(target_spectrum=self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='sf')
+            if self.options.mode in [4, 6, 8]:
+                print(f'{Bcolors.SECTION}Applying spectrum matching...(iter={iter}){Bcolors.ENDC}')
+                self.dataset.processing_logs.append('spec_match')
+                self.fourier_match(target_spectrum=self.options.target_spectrum, rescaling_option=self.options.rescaling, matching_type='spec')
+            if self.options.mode in [7, 8]:
+                print(f'{Bcolors.SECTION}Applying histogram matching...(iter={iter}){Bcolors.ENDC}')
+                self.dataset.processing_logs.append('hist_match')
+                self.hist_match(target_hist=self.options.target_hist, hist_optim=self.options.hist_optim, hist_specification=self.options.hist_specification)
+            if self.options.mode == 9:
+                print(f'{Bcolors.SECTION}Applying dithering only...{Bcolors.ENDC}')
+                self.only_dithering()
+                self.dataset.processing_logs.append('only_dithering')
+
 
     def only_dithering(self):
         """ Applies dithering to the input images. """
@@ -244,7 +247,7 @@ class ImageProcessor:
             color = Bcolors.FAIL if not_equal else Bcolors.OKGREEN
             print(f'\t{color}Standardized (uint8):\tM = {M:.4f}, SD = {SD:.4f}{Bcolors.ENDC}') if self.verbose else None
             print(f'\t{Bcolors.OKBLUE}Target values:\t\t\tM = {target_mean:.4f}, SD = {target_std:.4f}{Bcolors.ENDC}') if self.verbose else None
-            if ok:
+            if not_equal:
                 print(f'\t{Bcolors.WARNING}* Discrepancies between Target and Standardized values are due to the conversion of floats into integers{Bcolors.ENDC}') if self.verbose else None
             print('\n')
             self.dataset.images[idx] = im2 #update the dataset
@@ -328,7 +331,7 @@ class ImageProcessor:
                 raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
 
         # If hist_optim disable, will run only one loop (n_iter = 1)
-        n_iter = self.options.iterations+1 if hist_optim else 1  # See important note below to explain the +1. Also, note that the number of iterations for SSIM optimization (default = 10)
+        n_iter = self.options.hist_iterations+1 if hist_optim else 1  # See important note below to explain the +1. Also, note that the number of iterations for SSIM optimization (default = 10)
         step_size = self.options.step_size  # Step size (default = 34)
 
         # Match the histogram
