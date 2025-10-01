@@ -196,7 +196,7 @@ def SHINIER_CLI(images = None, masks = None) -> Options:
     else:
         kwargs["input_folder"] = None
     
-    fmt = prompt_str("\nImages format [png/tif/tiff/jpg/jpeg]", validator=_validator_image_fmt, default="tif")
+    fmt = prompt_str("\nImages format [png/tif/tiff/jpg/jpeg]", validator=_validator_image_fmt, default="png")
     if fmt is not None: 
         kwargs["images_format"] = fmt
 
@@ -224,7 +224,7 @@ def SHINIER_CLI(images = None, masks = None) -> Options:
                     mdir = prompt_str("\nMasks folder", validator=_validator_dir_exists, default='shinier/MASK')
                     if mdir is not None: 
                         kwargs["masks_folder"] = Path(mdir).expanduser().resolve()
-                    mfmt = prompt_str("\nMasks format [png/tif/tiff/jpg/jpeg]", validator=_validator_mask_fmt, default="tif")
+                    mfmt = prompt_str("\nMasks format [png/tif/tiff/jpg/jpeg]", validator=_validator_mask_fmt, default="png")
                     if mfmt is not None: 
                         kwargs["masks_format"] = mfmt
                 else:
@@ -343,6 +343,7 @@ def SHINIER_CLI(images = None, masks = None) -> Options:
     # Build Options object
     try:
         opts = Options(**kwargs)
+        print("options", opts)
     except Exception as e:
         print(f"\n Invalid configuration: {e}\n", file=sys.stderr)
         raise
