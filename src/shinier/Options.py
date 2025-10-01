@@ -136,7 +136,7 @@ class Options:
 
             rescaling: Optional[Literal[0, 1, 2, 3]] = 2,
             target_spectrum: Optional[np.ndarray] = None,
-            iterations: int = 5
+            iterations: int = 2
 
     ):
         self.images_format = images_format
