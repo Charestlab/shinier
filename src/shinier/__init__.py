@@ -14,4 +14,5 @@ __email__ = "n.dupuis.roy@gmail.com"
 # For direct importation
 from .Options import Options
 from .ImageDataset import ImageDataset
+from .ImageListIO import ImageListIO
 from .ImageProcessor import ImageProcessor

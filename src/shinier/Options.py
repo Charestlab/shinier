@@ -90,10 +90,11 @@ class Options:
             The mean must be in [0, 255], and the standard deviation must be ≥ 0.
 
     --------------------------------------------------FOURIER matching--------------------------------------------------------
-        rescaling (Literal): Default = 1. Post-processing applied after sf_match or spec_match only.
+        rescaling (Literal): Default = 2. Post-processing applied after sf_match or spec_match only.
             0 = no rescaling
-            1 = rescale to min and max of all images (default)
-            2 = rescale to average min and max values across all images
+            1 : Rescaling each image so that it stretches to [0, 1]
+            2 : Rescaling absolute max/min (Default)
+            3 : Rescaling average max/min
 
         target_spectrum: Optional[np.ndarray[float]]: Target magnitude spectrum.
             Same size as the images of float values. If None, the target magnitude
@@ -133,8 +134,8 @@ class Options:
             step_size: int = 34,
             target_hist: Optional[np.ndarray] = None,
 
-            rescaling: Optional[Literal[0, 1, 2]] = None,
-            target_spectrum: Optional[np.ndarray[float]] = None,
+            rescaling: Optional[Literal[0, 1, 2, 3]] = 2,
+            target_spectrum: Optional[np.ndarray] = None,
             iterations: int = 5
 
     ):
@@ -164,7 +165,7 @@ class Options:
         self.step_size = step_size
         self.target_hist = target_hist
 
-        self.rescaling = rescaling if rescaling is not None else 0
+        self.rescaling = 0 if self.mode in [1, 2] else rescaling if rescaling is not None else 2
         self.target_spectrum = target_spectrum
         self.iterations = iterations if mode in [5,6,7,8] else 1
 
@@ -252,8 +253,8 @@ class Options:
 
         if self.rescaling != 0 and self.mode in [1, 2]:  # TODO: Shouldn't we prevent rescaling anytime lum and hist match are applied?
             raise ValueError("Should not apply rescaling after luminance or histogram matching.")
-        if self.rescaling not in [0, 1, 2]:
-            raise ValueError("Rescaling must be 0, 1, or 2. See Options")
+        if self.rescaling not in [0, 1, 2, 3]:
+            raise ValueError("Rescaling must be 0, 1, 2 or 3. See Options")
         if self.target_spectrum is not None :
             if not isinstance(self.target_spectrum, np.ndarray):
                 raise TypeError('The target spectrum must be a numpy array of np.float64.')

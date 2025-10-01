@@ -6,8 +6,8 @@ from pathlib import Path
 
 # Local imports
 from shinier import Options
-from shinier.utils import ImageListIO, ImageListType
-
+from .ImageListIO import ImageListIO
+from .ImageListIO import ImageListType
 
 class ImageDataset:
     """
@@ -46,7 +46,7 @@ class ImageDataset:
             save_dir = self.options.output_folder
         )
         self.n_images = len(self.images)
-        self.images_name = [path.name for path in self.images.file_paths if path is not None]
+        self.images_name = [path.name for path in self.images.src_paths if path is not None]
         self.images._n_channels = self.images[0].shape[-1]
 
         if self.options.whole_image == 3 and self.options.masks_folder != None and self.options.masks_format != None:
@@ -58,13 +58,13 @@ class ImageDataset:
                 save_dir = self.options.masks_folder
             )
             self.n_masks = len(self.masks)
-            self.masks_name = [path.name for path in self.masks.file_paths]
+            self.masks_name = [path.name for path in self.masks.src_paths]
 
         # Create placeholders for magnitudes and phases if options.mode in [3, 4, 5, 6, 7, 8]
         self.magnitudes, self.phases, self.buffer = None, None, None
 
         # Create placeholders for buffer if options.mode include hist_match or fourier_match
-        if options.mode >= 2 and options.mode is not 9:
+        if options.mode >= 1:
             # Create placeholders for buffer
             input_data = [np.zeros(self.images[0].shape, dtype=bool) for idx in range(len(self.images))]
             self.buffer = ImageListIO(
@@ -75,7 +75,7 @@ class ImageDataset:
             )
 
             # Create placeholders for spectra
-            if options.mode >= 3 and options.mode is not 9:
+            if options.mode >= 3 and options.mode != 9:
                 self.magnitudes = ImageListIO(
                     input_data=input_data,
                     conserve_memory=self.options.conserve_memory,
@@ -126,7 +126,9 @@ class ImageDataset:
         self.images.close()
         if self.options.whole_image == 3 and self.options.masks_folder != None and self.options.masks_format != None:
             self.masks.close()
-        if self.magnitudes is not None:
+        if hasattr(self, 'magnitudes') and self.magnitudes is not None:
             self.magnitudes.close()
             self.phases.close()
+        if hasattr(self, 'buffer') and self.buffer is not None:
+            self.buffer.close()
 

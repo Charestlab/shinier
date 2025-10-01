@@ -8,15 +8,12 @@ from pathlib import Path
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from typing import Any, Optional, Tuple, Union, NewType, List, Iterator, Callable, Literal
-from PIL import Image, ImageFilter
-import shutil
-import tempfile
+from PIL import Image
 from itertools import chain
-from matplotlib import pyplot as plt
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # Local package imports
-from shinier import Options
 
 # Type definition
 ImageListType = Union[str, Path, List[Union[str, Path]], List[np.ndarray]]
@@ -25,7 +22,7 @@ ImageListType = Union[str, Path, List[Union[str, Path]], List[np.ndarray]]
 class Bcolors:
     HEADER = '\033[95m'  # Processing steps
     OKBLUE = '\033[94m'  # Processing values
-    OKCYAN = '\033[96m'
+    OKCYAN = '\033[96m'  # Internal notes
     OKGREEN = '\033[92m'  # Ok values
     WARNING = '\033[93m'
     FAIL = '\033[91m'  # Problematic values
@@ -33,270 +30,6 @@ class Bcolors:
     BOLD = '\033[1m'  # Iteration
     UNDERLINE = '\033[4m'
     SECTION = '\033[4m\033[1m'  # Image loop
-
-
-class ImageListIO:
-    """
-    Class to manage a list of images with read and write capabilities.
-    Inspired by the skimage.io.ImageCollection class.
-
-    Args:
-        input_data (ImageListType):
-            File pattern, list of file paths, or list of in-memory NumPy arrays.
-        conserve_memory (Optional[bool]): If True (default), uses a temporary directory to store images
-            and keeps only one image in memory at a time. If True and input_data is a list of NumPy arrays,
-            images are first saved as .npy in a temporary directory, and they are loaded in memory one at a time upon request.
-        as_gray (Optional[bool]): If True, images are converted to grayscale upon loading.
-            Defaults to False.
-        save_dir (Optional[str]): Directory to save final images. Defaults to the
-            current working directory if not specified.
-
-    Attributes:
-        data: The list of images.
-        file_paths: The list of file paths or identifiers.
-        reference_size: Reference image size (x, y) for validation.
-        n_dims: Number of dimensions of the image
-    """
-
-    DEFAULT_GRAY_MODE = 'L'
-    DEFAULT_COLOR_MODE = 'RGB'
-
-    def __init__(
-        self,
-        input_data: ImageListType,
-        conserve_memory: bool = True,
-        as_gray: Literal[0, 1, 2] = False,
-        save_dir: Optional[str] = None
-    ) -> None:
-        self.conserve_memory: bool = conserve_memory
-        self.as_gray: Literal[0, 1, 2] = as_gray
-        self.save_dir: Path = Path(save_dir or Path.cwd())
-        self.data: List[Optional[np.ndarray]] = []
-        self.file_paths: List[Path] = []
-        self.reference_size: Optional[Tuple[int, int]] = None
-        self.n_dims: Optional[int] = None
-        self._temp_dir = Path(tempfile.mkdtemp()) if self.conserve_memory else None
-        self.dtype: Optional[type] = None  # Initial state when loading images
-        self.drange: Optional[tuple] = None
-        self.has_list_array: bool = False
-        self._initialize_collection(input_data)
-
-    def __getitem__(self, idx: int) -> np.ndarray:
-        """ Access an image by index. """
-        if idx < -len(self.file_paths) or idx >= len(self.file_paths):
-            raise IndexError("Index out of range.")
-        if idx < 0:
-            idx = len(self.file_paths) + idx
-        if self.data[idx] is None:
-            if self.conserve_memory:
-                # If conserve memory, keep only one image in memory
-                self._reset_data()
-                self.data[idx] = self._validate_image(self._load_image(self.file_paths[idx]))
-            else:
-                raise ValueError(f"Data at index {idx} is None. This should not happen when conserve_memory is False.")
-        return self.data[idx]
-
-    def __setitem__(self, idx: int, new_image: np.ndarray) -> None:
-        """ Modify an image at a given index. """
-        if idx < 0 or idx >= len(self.file_paths):
-            raise IndexError("Index out of range.")
-
-        self.dtype = new_image.dtype
-        self._update_drange()
-        new_image = self._validate_image(new_image)
-        # new_image = self._to_gray(new_image)
-        if self.conserve_memory:
-            self._reset_data()
-            self._save_image(idx, new_image, save_dir=self._temp_dir)
-        self.data[idx] = new_image
-
-    def __len__(self) -> int:
-        """ Get the number of images in the collection. """
-        return len(self.file_paths)
-
-    def __iter__(self) -> Iterator[np.ndarray]:
-        """ Iterate over the images in the collection. """
-        for idx in range(len(self.file_paths)):
-            yield self[idx]
-
-    def _validate_image(self, image: np.ndarray) -> np.ndarray:
-        """ Validate the image and return it. """
-        image_size = (image.shape[1], image.shape[0])
-        if self.reference_size is None:
-            self.reference_size = image_size
-            self.n_dims = image.ndim
-        elif self.reference_size != image_size:
-            raise ValueError(f"Image size {image_size} does not match reference size {self.reference_size}.")
-        if self.dtype is None:
-            self.dtype = image.dtype
-            self._update_drange()
-        else:
-            if self.dtype != image.dtype:
-                raise ValueError(f"Image dtype {image.dtype} does not match collection dtype {self.dtype}.")
-        return image
-
-    def _to_gray(self, image: np.ndarray):
-        gray_map = {1: 'equal', 2: 'perceptual'}
-        if image.ndim == 3:
-            if self.as_gray > 0:
-                image = rgb2gray(image, conversion_type=gray_map[self.as_gray])
-                image = uint8_plus(image)
-        return image
-
-
-    def _initialize_collection(self, input_data: ImageListType) -> None:
-        """ Initialize the image collection from input data. """
-
-        # Type checks
-        if not (isinstance(input_data, (str, Path)) or (isinstance(input_data, list) and all(isinstance(d, (np.ndarray, str, Path)) for d in input_data))):
-            raise ValueError("Input must be str|Path (glob) or list of str|Path|np.ndarray")
-        if isinstance(input_data, list) and all(isinstance(d, np.ndarray) for d in input_data):
-            if not all(d.dtype in [np.uint8, np.bool] for d in input_data):
-                raise ValueError("List of images must all be dtype=uint8")
-
-        # Initialize collection
-        if isinstance(input_data, (str, Path)):
-            # Convert to Path if input_data is a string
-            input_path = Path(input_data)
-
-            # Handle cases with wildcards
-            if "*" in str(input_path):  # Check if it's a glob pattern
-                directory = input_path.parent
-                pattern = input_path.name
-                self.file_paths = sorted(directory.glob(pattern))
-            else:
-                self.file_paths = [input_path] if input_path.is_file() else sorted(input_path.glob("*"))
-
-            if not self.file_paths:
-                raise FileNotFoundError(f"No files found matching pattern '{input_data}'")
-
-        elif isinstance(input_data, list):
-            if all(isinstance(item, np.ndarray) for item in input_data):
-                if self.conserve_memory:
-                    raise ValueError('Cannot enable conserve memory option while providing a list of images')
-                else:
-                    self.has_list_array = True
-                    self.data = [self._to_gray(self._validate_image(image)) for image in input_data]
-                    self._update_drange()
-
-                    if self.file_paths.__len__() == 0:
-                        self.file_paths = [None] * len(input_data)
-            elif all(isinstance(item, (str, Path)) for item in input_data):
-                self.file_paths = [Path(item) for item in input_data]
-            else:
-                raise TypeError("input_data must be a file pattern, list of file paths, or list of NumPy arrays.")
-        else:
-            raise TypeError("input_data must be a file pattern, list of file paths, or list of NumPy arrays.")
-
-        if not self.data or all(d is None for d in self.data):
-            if self.conserve_memory:
-                # Only load the first image to initialize attributes
-                self._reset_data()  # Data will not be stored in self.data when conserve_memory is True
-                self.data[0] = self._validate_image(self._load_image(self.file_paths[0]))
-            elif not self.data and all([isinstance(fp, (str, Path)) for fp in self.file_paths]):
-                # Load all images into self.data --- This could not happen:
-                self.data = [self._validate_image(self._load_image(fpath)) for fpath in self.file_paths]
-            elif not all([isinstance(d, np.ndarray) for d in self.data]):
-                raise ValueError('Input data should be either a list of np.ndarray or a glob pattern or a list of Path.')
-        self.reference_size = self.data[0].shape[:2]
-        self.n_dims = self.data[0].ndim
-
-    def _update_drange(self) -> None:
-        """Update numeric dynamic range based on current self.dtype."""
-        if self.dtype is None:
-            self.drange = None
-            return
-        if np.issubdtype(self.dtype, np.bool_) or self.dtype is bool:
-            self.drange = (0, 1)
-        elif np.issubdtype(self.dtype, np.integer):
-            info = np.iinfo(self.dtype)
-            self.drange = (int(info.min), int(info.max))
-        elif np.issubdtype(self.dtype, np.floating):
-            # Do not assume a fixed range for floats
-            self.drange = None
-        else:
-            self.drange = None
-
-    def _load_image(self, image_path: Path) -> np.ndarray:
-        """ Load an image from a file path. """
-        try:
-            if image_path.suffix == ".npy":
-                image = np.load(image_path)
-                self.dtype = image.dtype
-            else:
-                with Image.open(image_path) as pil_image:
-                    # Load as RGB and convert to grayscale if required
-                    pil_image = pil_image.convert(self.DEFAULT_COLOR_MODE)
-                    image = np.array(pil_image)
-                    image = self._to_gray(image)
-
-                self.dtype = image.dtype
-            self._update_drange()
-        except IOError as e:
-            raise IOError(f"Failed to load image from {image_path}: {e}")
-
-        return np.array(image)
-
-    def _save_image(self, idx: int, image: np.ndarray, save_dir: Optional[Path] = None) -> None:
-        """ Save an image to the temporary directory. """
-        save_dir = Path(save_dir or self._temp_dir or self.file_paths[idx].parent or Path.cwd())
-        save_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            base_name = self.file_paths[idx].name
-            image_path = save_dir / base_name
-            file_format = self._get_file_format(image_path)
-            self.file_paths[idx] = image_path # Update file path
-            try:
-                if file_format == '.npy':
-                    np.save(image_path, image.squeeze())
-                else:
-                    image = Image.fromarray(image.squeeze())
-                    image.save(image_path, format=file_format)
-            except (IOError, TypeError) as e:
-                raise IOError(f"Failed to save image at index {idx} to {image_path}: {e}")
-        except AttributeError as e:
-            raise AttributeError(f"Failed to save image at index {idx}: {e}")
-
-    def _reset_data(self) -> None:
-        """ Reset data attribute with placeholders. """
-        self.data = [None] * len(self.file_paths)
-
-    @staticmethod
-    def _get_file_format(image_path: Path) -> str:
-        """ Get the file format based on the file extension. """
-        ext = image_path.suffix.lower()
-        format_mapping = {
-            '.jpg': 'JPEG', '.jpeg': 'JPEG', '.png': 'PNG',
-            '.bmp': 'BMP', '.tiff': 'TIFF', '.tif': 'TIFF', '.npy': '.npy'
-        }
-        return format_mapping.get(ext, 'TIFF')
-
-    def final_save_all(self) -> None:
-        """ Save images to save_dir. If needed (self.conserve_memory) loads images and clears up temp files. """
-        for idx in range(len(self.file_paths)):
-            image = self._load_image(self._temp_dir / f'image_{idx}.npy') if self.conserve_memory else self[idx]
-            self._save_image(idx, image, save_dir=self.save_dir)
-
-        # Clean up temporary directory
-        self._cleanup_temp_dir()
-
-    def _cleanup_temp_dir(self) -> None:
-        """ Clean up temporary directory if it exists. """
-        # if self._temp_dir and self._temp_dir.is_dir():
-        try:
-            if self._temp_dir:
-                shutil.rmtree(self._temp_dir, ignore_errors=True)
-                self._temp_dir = None
-        except Exception as e:
-            # Log or handle the exception appropriately
-            print(f"Failed to delete temporary directory {self._temp_dir}: {e}")
-
-    def close(self) -> None:
-        self.__del__()
-
-    def __del__(self) -> None:
-        """ Clean up temporary directory upon object destruction. """
-        self._cleanup_temp_dir()
 
 
 class MatlabOperators:
@@ -402,6 +135,197 @@ class MatlabOperators:
         """Replicates MATLAB's rem function (remainder operation with sign matching dividend)."""
         return np.remainder(x, y)
 
+
+def imhist_plot(
+    img: np.ndarray,
+    bins: int = 256,
+    figsize=(8, 6),
+    dpi=100,
+    normalize: bool = False,
+    title: Optional[str] = None,
+):
+    """
+    Display an image on top and a compact horizontal histogram underneath.
+    A grayscale gradient bar (0..255) is placed *flush* under the histogram x-axis.
+
+    Args:
+        img: np.ndarray, shape (H, W) or (H, W, C). Supports uint8, float in [0,1] or [0,255].
+        bins: number of histogram bins (default 256).
+        figsize, dpi: matplotlib figure size and dpi.
+        normalize: if True, plot histograms as densities (area=1). Otherwise raw counts.
+        title: optional string title.
+
+    Returns:
+        (fig, (ax_img, ax_bar, ax_hist))
+    """
+    # ---- normalize image to uint8, ignore alpha if present ----
+    arr = np.asarray(img)
+    if arr.ndim == 3 and arr.shape[2] >= 4:
+        arr = arr[..., :3]  # drop alpha
+
+    if np.issubdtype(arr.dtype, np.floating):
+        a, b = float(np.nanmin(arr)), float(np.nanmax(arr))
+        if b <= 1.0:  # assume [0,1]
+            arr = np.clip(arr, 0, 1) * 255.0
+        arr = np.clip(np.rint(arr), 0, 255).astype(np.uint8)
+    elif not np.issubdtype(arr.dtype, np.integer):
+        arr = np.clip(arr.astype(np.float64), 0, 255)
+        arr = np.rint(arr).astype(np.uint8)
+
+    # handle grayscale vs RGB for display
+    is_rgb = (arr.ndim == 3 and arr.shape[2] == 3)
+    if arr.ndim == 2:
+        arr_rgb_for_show = np.stack([arr]*3, axis=-1)   # show as gray-to-RGB
+    else:
+        arr_rgb_for_show = arr
+
+    # ---- histograms ----
+    edges = np.linspace(0, 256, bins + 1, dtype=np.float64)
+    centers = (edges[:-1] + edges[1:]) / 2.0
+    if is_rgb:
+        Hr, _ = np.histogram(arr[..., 0].ravel(), bins=edges, density=normalize)
+        Hg, _ = np.histogram(arr[..., 1].ravel(), bins=edges, density=normalize)
+        Hb, _ = np.histogram(arr[..., 2].ravel(), bins=edges, density=normalize)
+        Hmax = max(Hr.max(), Hg.max(), Hb.max()) if not normalize else 1.0
+    else:
+        Hy, _ = np.histogram(arr.ravel(), bins=edges, density=normalize)
+        Hmax = Hy.max() if not normalize else 1.0
+
+    # ---- figure & axes (make histogram width match image width) ----
+    fig = plt.figure(figsize=figsize, dpi=dpi, constrained_layout=False)
+    gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3.5, 1.4], hspace=0.12)
+
+    ax_img  = fig.add_subplot(gs[0])
+    ax_hist = fig.add_subplot(gs[1])
+
+    # Image on top
+    ax_img.imshow(arr_rgb_for_show, interpolation='nearest')
+    ax_img.axis('off')
+    if title:
+        ax_img.set_title(title, fontsize=11)
+
+    # Ensure histogram axes have EXACT same left/right as image axes
+    fig.canvas.draw()  # compute positions
+    img_pos  = ax_img.get_position()
+    hist_pos = ax_hist.get_position()
+    ax_hist.set_position([img_pos.x0, hist_pos.y0, img_pos.width, hist_pos.height])
+
+    # Plot histogram(s)
+    if is_rgb:
+        ax_hist.plot(centers, Hr, lw=1.5, color='red',   label='R')
+        ax_hist.plot(centers, Hg, lw=1.5, color='green', label='G')
+        ax_hist.plot(centers, Hb, lw=1.5, color='blue',  label='B')
+        ax_hist.legend(frameon=False, fontsize=9, loc='upper right')
+    else:
+        ax_hist.plot(centers, Hy, lw=1.5, color='black', label='Y')
+        ax_hist.legend(frameon=False, fontsize=9, loc='upper right')
+
+    ax_hist.set_xlim(0, 255)
+    ax_hist.set_ylim(0, Hmax * 1.05 if Hmax > 0 else 1)
+    ax_hist.set_yticks([])
+    ax_hist.set_xticks([])  # no numbers; we'll show a gradient bar instead
+    for spine in ("top", "right"):
+        ax_hist.spines[spine].set_visible(False)
+
+    # ---- grayscale gradient bar FLUSH under histogram x-axis ----
+    divider = make_axes_locatable(ax_hist)
+    divider = make_axes_locatable(ax_hist)
+    ax_bar = divider.append_axes("bottom", size="5%", pad=0.0)  # was "6mm"
+    gradient = np.linspace(0, 1, 256, dtype=np.float64).reshape(1, -1)
+    ax_bar.imshow(gradient, cmap='gray', aspect='auto', extent=[0, 255, 0, 1])
+    ax_bar.set_xlim(ax_hist.get_xlim())
+    ax_bar.set_xticks([])   # no numbers
+    ax_bar.set_yticks([])
+    for spine in ax_bar.spines.values():
+        spine.set_visible(False)
+
+    return fig, (ax_img, ax_bar, ax_hist)
+
+
+def sf_plot(im: np.ndarray, qplot: bool = True) -> np.ndarray:
+    """
+    Rotational average of the Fourier energy spectrum.
+
+    Parameters
+    ----------
+    im : np.ndarray
+        Image array of shape (H, W) or (H, W, 3). Can be uint8 or float.
+        RGB is converted to luminance (ITU-R BT.601).
+    qplot : bool, default True
+        If True, plot loglog spectrum (cycles/image vs energy).
+
+    Returns
+    -------
+    avg : np.ndarray
+        1D array of rotationally averaged energy for integer radii
+        1..floor(min(H, W)/2), matching the MATLAB implementation.
+    """
+
+    # --- to grayscale float64 ---
+    arr = np.asarray(im)
+    if arr.ndim == 3 and arr.shape[2] >= 3:
+        # MATLAB rgb2gray-like (double precision)
+        r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+        if np.issubdtype(arr.dtype, np.integer):
+            r = r.astype(np.float64); g = g.astype(np.float64); b = b.astype(np.float64)
+        gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
+    else:
+        gray = arr.astype(np.float64, copy=False)
+
+    xs, ys = gray.shape  # xs = rows (y), ys = cols (x)
+
+    # --- Fourier energy (fftshifted) ---
+    fftim = np.abs(np.fft.fftshift(np.fft.fft2(gray))) ** 2
+
+    # --- frequency grids replicating MATLAB logic ---
+    def freq_axis(n: int) -> np.ndarray:
+        # MATLAB:
+        # even n:   -n/2 : n/2-1
+        # odd  n:   -n/2 : n/2-1  (with halves → -2.5,-1.5,...,+1.5 for n=5)
+        if n % 2 == 0:
+            return np.arange(-n//2, n//2, dtype=np.float64)
+        else:
+            # center at half-steps to avoid 0; e.g., n=5 -> -2.5..+1.5
+            half = n // 2
+            return np.arange(-(half + 0.5), half + 0.5, 1.0, dtype=np.float64)
+
+    f2 = freq_axis(xs)  # rows
+    f1 = freq_axis(ys)  # cols
+    XX, YY = np.meshgrid(f1, f2)  # shape (xs, ys)
+
+    # --- polar radius, MATLAB rounding rule ---
+    r = np.hypot(XX, YY)
+    if (xs % 2 == 1) or (ys % 2 == 1):
+        r = np.rint(r) - 1.0
+    else:
+        r = np.rint(r)
+
+    # Non-negative integer bin indices
+    r = np.clip(r, 0, None).astype(np.int64)
+
+    # --- accumarray equivalent: mean energy per radius ---
+    flat_r = r.ravel()
+    flat_e = fftim.ravel()
+    sums = np.bincount(flat_r, weights=flat_e)
+    counts = np.bincount(flat_r)
+    counts[counts == 0] = 1  # guard against divide-by-zero
+    avg_full = sums / counts
+
+    # Match MATLAB: avg = avg(2:floor(min(xs,ys)/2)+1)
+    R = int(np.floor(min(xs, ys) / 2.0))
+    radii = np.arange(1, R + 1)
+    avg = avg_full[1:R + 1]
+
+    if qplot:
+        plt.figure()
+        plt.loglog(radii, avg)
+        plt.xlabel('Spatial frequency (cycles/image)')
+        plt.ylabel('Energy')
+        plt.tight_layout()
+
+    return avg
+
+
 def spectrum_plot(spectrum: np.ndarray,
                   cmap: str = "gray",
                   log: bool = True,
@@ -425,6 +349,8 @@ def spectrum_plot(spectrum: np.ndarray,
     if with_colorbar:
         plt.colorbar()
     plt.show()
+
+
 def stretch(arr: np.ndarray) -> np.ndarray:
     """Stretch an array to the range [0, 1].
 
@@ -453,6 +379,7 @@ def stretch(arr: np.ndarray) -> np.ndarray:
         return np.zeros_like(arr, dtype=np.float64)
 
     return (arr - min_val) / (max_val - min_val)
+
 
 def convolve_1d(arr: np.ndarray, kernel: np.ndarray, axis: int) -> np.ndarray:
     """Apply 1D convolution with reflect padding along a chosen axis.
@@ -710,7 +637,7 @@ def exact_histogram_with_noise(image: np.ndarray, target_hist: np.ndarray, binar
     return out.squeeze()
 
 
-def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.ndarray = None, verbose: bool = True) -> Tuple[np.ndarray, List]:
+def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.ndarray = None, n_bins: Optional[int] = None, verbose: bool = True) -> Tuple[np.ndarray, List]:
     """
     Specify exact image histogram.
 
@@ -718,6 +645,7 @@ def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.
         image (np.ndarray): Input image (8-bit or 16-bit grayscale or RGB).
         target_hist (np.ndarray): Specified histogram.
         binary_mask (np.ndarray): Binary mask to only adjust pixel intensities in the foreground (optional).
+        n_bins (int): If provided, will be used to set L value. This is convenient when using float images.
         verbose (bool): Log information
 
     Returns:
@@ -736,13 +664,18 @@ def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.
     """
 
     # Maximum number of gray levels and image dimensions
-    L = 2 ** np.iinfo(image.dtype).bits if np.issubdtype(image.dtype, np.integer) else None
+    L = n_bins if n_bins is not None else None
+    if L is None and np.issubdtype(image.dtype, np.integer):
+        L = 2 ** np.iinfo(image.dtype).bits
+    if L is None:
+        raise ValueError("L, the expected number of values per channel, must be specified!")
+
     image = im3D(image)  # force a third dimension on image
     x_size, y_size, n_channels = image.shape
 
     # Verify input format
-    if image.dtype not in (np.uint8, np.uint16):
-        raise ValueError("Input image must be 8- or 16-bit.")
+    if image.dtype not in (np.uint8, np.uint16) and not np.issubdtype(image.dtype, np.floating):
+        raise ValueError("Input image must be 8- or 16-bit or float")
     if len(target_hist) != L:
         raise ValueError("Number of histogram bins must match maximum number of gray levels.")
     if target_hist.ndim != 2 or target_hist.shape[1] != n_channels:
@@ -829,11 +762,111 @@ def floyd_steinberg_dithering(image: np.ndarray, depth: int = 256, legacy_mode: 
             tim[yy+1,xx] = tim[yy+1,xx] + 5/16 * quant_error
             tim[yy+1,xx+1] = tim[yy+1,xx+1] + 1/16 * quant_error
 
+    c_tim = np.clip(tim, 0, depth-1)
 
     r_tim = MatlabOperators.round(tim) if legacy_mode else np.round(tim)
     rc_tim = np.rint(np.clip(r_tim, 0, depth-1))
     uint_image = rc_tim.astype(np.min_scalar_type(int(rc_tim.max()))).squeeze()
     return uint_image
+
+
+def soft_clip(arr: np.ndarray,
+              min_value: float = 0.0,
+              max_value: float = 1.0,
+              max_percent: float = 0.05,
+              tol: float = 1e-4,
+              verbose: bool = True) -> np.ndarray:
+    """
+    Softly clip an array to [min_value, max_value] while ensuring that
+    the proportion of clipped values does not exceed `max_percent`.
+
+    If naive clipping would clip more than `max_percent` of values,
+    the function rescales the array to reduce clipping until the
+    clipped proportion is approximately `max_percent`.
+
+    Args:
+        arr (np.ndarray): Input array.
+        min_value (float): Minimum allowed value after clipping.
+        max_value (float): Maximum allowed value after clipping.
+        max_percent (float): Maximum allowed proportion (0–1) of clipped values.
+        tol (float): Optimization stops early if the clipped proportion is within `tol` (default 1e-4) of target
+        verbose (bool): If True, print diagnostic information during processing.
+
+    Returns:
+        np.ndarray: Clipped (and possibly rescaled) array.
+    """
+
+    def _zero_clip_mean_preserving(arr, a, b):
+        x_min = np.min(arr);
+        x_max = np.max(arr)
+        m = np.mean(arr, dtype=np.float64)
+        # If mean is out of bounds, cannot avoid clipping without shifting
+        if not (a <= m <= b):
+            return None  # signal fallback to affine
+        s_up = np.inf if x_max == m else (b - m) / (x_max - m)
+        s_down = np.inf if x_min == m else (m - a) / (m - x_min)
+        s_star = min(1.0, s_up, s_down)
+        return m + s_star * (arr - m)
+
+    if max_percent == 0:
+        print(f'{Bcolors.WARNING}[soft_clip] Special case: 0% clipping allowed.{Bcolors.ENDC}')
+        return _zero_clip_mean_preserving(arr, min_value, max_value)
+
+    max_iter = 50
+
+    # Flatten for clipping proportion calculation
+    flat = arr.ravel()
+    total = flat.size
+
+    # --- Step 1: Naive clipping check ---
+    below = np.sum(flat < min_value)
+    above = np.sum(flat > max_value)
+    clipped_fraction = (below + above) / total
+
+    if verbose:
+        print(f"[soft_clip] Naive clipping would affect "
+              f"{Bcolors.OKBLUE}{clipped_fraction*100:.3f}%{Bcolors.ENDC} of values")
+
+    if clipped_fraction <= max_percent:
+        return np.clip(arr, min_value, max_value)
+
+    # --- Step 2: Rescale to match target ---
+    arr_min, arr_max = np.min(flat), np.max(flat)
+    arr_range = arr_max - arr_min
+    if arr_range == 0:
+        if verbose:
+            print("[soft_clip] Constant array detected — nothing to clip.")
+        return np.clip(arr, min_value, max_value)
+
+    target = max_percent
+    lo, hi = 0.0, 1.0
+    mean_val = np.mean(flat)
+    scaled = arr.copy()
+
+    for i in range(max_iter):
+        mid = (lo + hi) / 2
+        scaled_flat = (flat - mean_val) * mid + mean_val
+
+        below = np.sum(scaled_flat < min_value)
+        above = np.sum(scaled_flat > max_value)
+        frac = (below + above) / total
+
+        if verbose:
+            print(f"[soft_clip] Iter {i:02d}: scale={mid:.5f}, clipped="
+                  f"{Bcolors.OKBLUE}{frac*100:.3f}%{Bcolors.ENDC}")
+
+        # Early stopping if we're close enough to target
+        if abs(frac - target) <= tol:
+            scaled = scaled_flat.reshape(arr.shape)
+            break
+
+        if frac > target:
+            hi = mid  # shrink more
+        else:
+            lo = mid  # allow more
+            scaled = scaled_flat.reshape(arr.shape)
+
+    return np.clip(scaled, min_value, max_value)
 
 
 def noisy_bit_dithering(image: np.ndarray, depth: int = 256, legacy_mode: bool = False) -> np.ndarray:
@@ -920,7 +953,7 @@ def uint_to_float01(image: np.ndarray, apply_clipping: bool = True) -> np.ndarra
     return image_clipped.astype(np.float64)
 
 
-def float01_to_uint(image: np.ndarray, apply_clipping: bool = True, apply_rounding: bool = True, bit_size: int = 8) -> np.ndarray:
+def float01_to_uint(image: np.ndarray, apply_clipping: bool = True, apply_rounding: bool = True, bit_size: int = 8, verbose: bool = True) -> np.ndarray:
     """
     Convert a floating-point image to an n-bit unsigned integer (uintN) image.
 
@@ -932,6 +965,7 @@ def float01_to_uint(image: np.ndarray, apply_clipping: bool = True, apply_roundi
                                If False, raises an error if values are out of range.
         apply_rounding (bool): If True, round values using np.rint
         bit_size (int): Bit size of the unsigned integer.
+        verbose (bool): Warn if clipping needed.
 
     Returns:
         np.ndarray: The converted image as a NumPy array with dtype uintN.
@@ -961,19 +995,23 @@ def float01_to_uint(image: np.ndarray, apply_clipping: bool = True, apply_roundi
     dtype_info = np.iinfo(target_dtype)
 
     n_levels = dtype_info.max
-    image = image * n_levels
 
-    # Check if values are within [0, n_levels]
-    if not apply_clipping and (image.min() < 0 or image.max() > n_levels):
+    # Check if values are within [0, 1]
+    mn, mx = image.min(), image.max()
+    if not apply_clipping and (mn < 0 or mx > 1):
         raise ValueError(f"Image contains values outside the range [0, {n_levels}]. Consider enabling clipping.")
+    if verbose and (mn < 0 or mx > n_levels):
+        txt = 'Values will' + (' ' if apply_clipping else ' not ') + 'be clipped.'
+        print(f'{Bcolors.WARNING}Out of range values: Actual range [{mn}, {mx}] outside of the admitted range [0, 1]\n{txt}{Bcolors.ENDC}')
 
     # Clip values if allowed
-    image_clipped = np.clip(image, dtype_info.min, dtype_info.max) if apply_clipping else image
+    image_clipped = np.clip(image, 0, 1) if apply_clipping else image
+    image_clipped = image_clipped * n_levels
 
     # Round values if allowed
-    image_rounded = np.rint(image_clipped) if apply_rounding else image
+    image_rounded = np.rint(image_clipped) if apply_rounding else image_clipped
 
-    # Convert to uint8
+    # Convert to uintX
     return image_rounded.astype(target_dtype)
 
 
@@ -1129,7 +1167,7 @@ def image_spectrum(image: np.ndarray, rescale: bool = True) -> tuple[np.ndarray,
     """
     image = im3D(image)
     if rescale:
-        image = rescale_image(image)  # [0, 255] -> [0, 1]
+        image = rescale_image(image, 0, 1)  # [0, 255] -> [0, 1]
 
     x_size, y_size, n_channels = image.shape
     phase = np.zeros((x_size, y_size, n_channels))  # Phase FT
@@ -1268,23 +1306,27 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> tupl
         # FIX: scales the SSIM gradient to compensate for its attenuation at larger n_bins and keep the
         # effective update weight consistent across bit depths (more bins require proportionally larger
         # changes for the same effect).
-        sens *= 256**(2*(np.log(n_bins) / np.log(256)-1))
+        # sens *= 256**(2*(np.log(n_bins) / np.log(256)-1))
 
         all_sens.append(sens)
         all_mssim.append(mssim)
     return np.stack(all_sens, axis=-1).squeeze(), np.stack(all_mssim)
 
+
 def compute_rmse(image1: np.ndarray, image2: np.ndarray) -> float:
     """ Compute the root-mean-square error between two images. """
     return np.sqrt(np.mean((image1 - image2) ** 2))
 
-def get_images_spectra(images: ImageListType, magnitudes: Optional[ImageListIO] = None, phases: Optional[ImageListIO] = None) -> Union[List[np.ndarray], ImageListType]:
+
+def get_images_spectra(images: ImageListType, magnitudes: Optional[ImageListType] = None, phases: Optional[ImageListType] = None, rescale: bool = True) -> Union[List[np.ndarray], ImageListType]:
     """
     Get spectrum over list of images
     Args:
         images (ImageListType): List of images.
         magnitudes (Optional[ImageListType]): If provided, inserts new magnitudes into this list.
         phases (Optional[ImageListType]): If provided, inserts new phases into this list.
+        rescale (bool): Determines if input is stretched to [0, 1] range.
+
     Returns:
         magnitudes, phases (Union[List[np.ndarray], ImageListType])
 
@@ -1294,8 +1336,12 @@ def get_images_spectra(images: ImageListType, magnitudes: Optional[ImageListIO] 
     n_channels = 3 if images.n_dims == 3 else 1
     phases = [None] * n_images if phases is None else phases
     magnitudes = [None] * n_images if magnitudes is None else magnitudes
+
+    if images.drange == (0, 255):
+        raise ValueError(f'images should be in the [0, 1] range.')
+
     for idx, image in enumerate(images):
-        magnitudes[idx], phases[idx] = image_spectrum(image)
+        magnitudes[idx], phases[idx] = image_spectrum(image, rescale=rescale)
     return magnitudes, phases
 
 
@@ -1323,7 +1369,7 @@ def rescale_image(image: np.ndarray, target_min: Optional[float] = 0, target_max
     return image
 
 
-def rescale_images(images: ImageListType, rescaling_option: Literal[1, 2, 3] = 1, legacy_mode: bool = False) -> ImageListType:
+def rescale_images(images: ImageListType, rescaling_option: Literal[0, 1, 2, 3] = 2, legacy_mode: bool = False) -> ImageListType:
     """
     Rescales the values of images so that they fall between 0 and 255. There are 3 options:
         1) Each image has its own min and max (no rescaling)
@@ -1334,8 +1380,9 @@ def rescale_images(images: ImageListType, rescaling_option: Literal[1, 2, 3] = 1
             images : list of images
             rescaling_option: (optional) : Determines the type of rescaling.
                 0 : No rescaling
-                1 : Rescaling absolute max/min (Default)
-                2 : Rescaling average max/min
+                1 : Rescaling each image so that it stretches to [0, 1]
+                2 : Rescaling absolute max/min (Default)
+                3 : Rescaling average max/min
             legacy_mode (bool): If true, only the absolute max/min values are rescaled.
 
         Returns :
@@ -1343,8 +1390,8 @@ def rescale_images(images: ImageListType, rescaling_option: Literal[1, 2, 3] = 1
     """
 
     # TODO: Shouldn't the input be a uint8 or at least in the [0 to 255] range already?
-    if rescaling_option not in [0, 1, 2]:
-        raise ValueError(f'The rescaling option must be either [0, 1, 2], now rescaling is : {rescaling_option}')
+    if rescaling_option not in [0, 1, 2, 3]:
+        raise ValueError(f'The rescaling option must be either [0, 1, 2, 3], now rescaling is : {rescaling_option}')
 
     n_images = len(images)
     minimum_values = np.zeros((n_images,))
@@ -1352,31 +1399,42 @@ def rescale_images(images: ImageListType, rescaling_option: Literal[1, 2, 3] = 1
     for idx, image in enumerate(images):
         minimum_values[idx], maximum_values[idx] = np.min(image), np.max(image)
 
-    if rescaling_option == 1:
+    if rescaling_option == 2:
         mn, mx = np.min(minimum_values), np.max(maximum_values)
-    elif rescaling_option == 2:
+    elif rescaling_option == 3:
         mn, mx = np.mean(minimum_values), np.mean(maximum_values)
 
     if rescaling_option:
         for idx, image in enumerate(images):
             new_image = image.copy().astype(float)
-            new_image = (new_image - mn)/(mx - mn) * 255
-            images[idx] = MatlabOperators.uint8(new_image) if legacy_mode else uint8_plus(new_image)
+            if rescaling_option == 1:
+                new_image = stretch(new_image) * 255
+            else:
+                new_image = (new_image - mn)/(mx - mn) * 255
+            images[idx] = MatlabOperators.uint8(new_image) if legacy_mode else new_image
 
     return images
 
-def uint8_plus(image: np.ndarray) -> np.ndarray:
+
+def uint8_plus(image: np.ndarray, verbose: bool = True) -> np.ndarray:
     """
     Apply clipping, banker's rounding and uint8 transformations.
 
     Args:
-        image (np.nearray): Image to be converted. Assume that the input image is already in the proper range [0, 255].
+        image (np.ndarray): Image to be converted. Assume that the input image is already in the proper range [0, 255].
+        verbose (bool): Warn if clipping needed.
 
     Returns:
-        image (np.nearray)
+        image (np.ndarray)
 
     """
+    if verbose:
+        mn, mx = image.min(), image.max()
+        if mn < 0 or mx > 255:
+            print(f'{Bcolors.WARNING}Out of range values: Actual range [{mn}, {mx}] outside of the admitted range [0, 255]\nValues will be clipped.{Bcolors.ENDC}')
+
     return np.rint(np.clip(image, 0, 255)).astype('uint8')
+
 
 def apply_median_blur(image: np.ndarray, kernel_size: int = 3) -> np.ndarray:
     """
@@ -1451,17 +1509,18 @@ def im3D(image: np.ndarray):
     return np.stack((image,), axis=-1) if image.ndim != 3 else image
 
 
-def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins=256) -> np.ndarray:
-    """ Computes the histogram of the image. If RGB image, it provides one hist per channel.
+def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins: int = 256, normalized: bool = False) -> np.ndarray:
+    """Computes the histogram of the image. If RGB image, it provides one hist per channel.
 
         Args:
             image (np.ndarray): Image (ndarray).
             mask (np.ndarray): If a boolean mask is provided, computes the histogram within the mask (ndarray).
             n_bins: Number of bins for the histogram (default is 256).
+            normalized (bool): If yes, the output hist will sum to 1 (default = False)
         Returns:
-            Y (np.ndarray): Histogram counts for each channel.
-            X (np.ndarray): Bin locations for each channel.
+            counts (np.ndarray): Histogram counts for each channel.
     """
+
     # Force a third dimension to image in case it only has two
     image = im3D(image)
 
@@ -1469,8 +1528,11 @@ def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins=256) -> 
     mask = np.ones(image.shape).astype(bool) if mask is None else mask.astype(bool)
     mask = np.stack((mask, ) * image.shape[-1], axis=-1) if mask.ndim < image.ndim else im3D(mask)
     n_channels = image.shape[-1]
-    count = np.zeros((n_bins, n_channels)).astype(np.int64)
+    count = np.zeros((n_bins, n_channels))
     for channel in range(n_channels):
         count[:, channel], _ = np.histogram(image[:, :, channel][mask[:, :, channel]], bins=n_bins, range=(0, n_bins))
-    return count
 
+        if normalized:
+            count[:, channel] = count[:, channel] / count[:, channel].sum()
+
+    return count
