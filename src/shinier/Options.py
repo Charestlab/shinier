@@ -149,13 +149,13 @@ class Options:
         self.whole_image = whole_image
         self.background = background
 
+        self.legacy_mode = legacy_mode
         self.mode = mode
         self.as_gray = 2 if self.legacy_mode else as_gray
         self.dithering = dithering
 
         self.conserve_memory = conserve_memory if mode in [5,6,7,8] else False
         self.seed = seed
-        self.legacy_mode = legacy_mode
 
         self.safe_lum_match = safe_lum_match
         self.target_lum = target_lum
