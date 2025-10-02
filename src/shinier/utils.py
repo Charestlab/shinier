@@ -135,6 +135,15 @@ class MatlabOperators:
         """Replicates MATLAB's rem function (remainder operation with sign matching dividend)."""
         return np.remainder(x, y)
 
+    @staticmethod
+    def rgb2gray(image):
+        """Replicates MATLAB's rgb2gray function (ITU-R rec601)."""
+        if image.ndim == 3:
+            weights = [0.298936021293775, 0.587043074451121, 0.114020904255103]
+            return np.dot(image.astype(np.float64), weights)
+        else:
+            return image
+
 
 def imhist_plot(
     img: np.ndarray,
@@ -268,7 +277,7 @@ def sf_plot(im: np.ndarray, qplot: bool = True) -> np.ndarray:
         r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
         if np.issubdtype(arr.dtype, np.integer):
             r = r.astype(np.float64); g = g.astype(np.float64); b = b.astype(np.float64)
-        gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
+        gray = rgb2gray(arr, conversion_type='rec601')
     else:
         gray = arr.astype(np.float64, copy=False)
 
@@ -1053,15 +1062,31 @@ def cart2pol(x, y) -> Tuple[np.ndarray, np.ndarray]:
 
 def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: Union[str] = 'equal') -> np.ndarray:
     """
-    Convert an RGB image to grayscale.
+    Convert an RGB image to grayscale (luma, Y′) using ITU luma coefficients.
 
-    Args:
-        image (Union[np.ndarray, Image.Image]): The input image.
-        conversion_type (str): If 'perceptual' a weighted sum of the corresponding red, green and blue
-            pixels is applied to better represent human perception of red, green and blue than equal weights. Else,
-            Equal weighted sum is applied. See http://poynton.ca/PDFs/ColorFAQ.pdf
-    Returns:
-        np.ndarray: The grayscale image.
+    Parameters
+    ----------
+    img : np.ndarray
+        RGB image array with last dimension = 3. Assumed to be gamma-encoded R′G′B′ (i.e., *not* linear light), which
+        matches typical sRGB/Rec.709-style images loaded from files.
+    conversion_type : {"equal", "rec601", "rec709", "rec2020"}, default "rec709"
+        Choice of luma standard:
+          - "equal" → Y′ = 0.333 R′ + 0.333 G′ + 0.333 B′
+          - "rec601" → Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′
+          - "rec709" → Y′ = 0.2125 R′ + 0.7154 G′ + 0.0721 B′
+          - "rec2020" → Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′
+
+    Returns
+    -------
+    gray : np.ndarray
+        Grayscale image (same shape as input but last channel removed).
+
+    Notes
+    -----
+    - This computes luma (Y′) from *gamma-encoded* components, as defined by the ITU
+      matrices for Y′CbCr / Y′CbcCrc. For physically linear luminance, you would need
+      to first linearize R′G′B′ using the appropriate transfer function,
+      mix with linear-light coefficients, then re-encode if desired.
     """
     if isinstance(image, Image.Image):
         image = np.array(image)
@@ -1069,8 +1094,12 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: Union[str] 
         raise ValueError(f"Invalid image type {type(image)}. Supported values are Image.Image and np.ndarray")
 
     if image.ndim > 2:
-        if conversion_type == 'perceptual':
+        if '709' in conversion_type:
             weights = [0.2125, 0.7154, 0.0721]
+        elif '601' in conversion_type:
+            weights = [0.298936021293775, 0.587043074451121, 0.114020904255103]
+        elif '2020' in conversion_type:
+            weights = [0.2627, 0.6780, 0.0593]
         else:
             weights = [1/3, 1/3, 1/3]
         return np.dot(image[..., :3].astype(np.float32), weights)

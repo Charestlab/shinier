@@ -42,8 +42,9 @@ class Options:
         as_gray (Optional[int]): Images are converted into grayscale then uint8. Default is no conversion (default = 0).
             0 = No conversion applied
             1 = An equal weighted sum of red, green and blue pixels is applied.
-            2 = A weighted sum of red, green and blue pixels is applied to better represent human perception
-                of red, green and blue than equal weights. See http://poynton.ca/PDFs/ColorFAQ.pdf
+            2 = (legacy mode) Rec.ITU-R 601 is used (see Matlab). Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′
+            3 = Rec.ITU-R 709 is used. Y′ = 0.2126 R′ + 0.7152 G′ + 0.0722 B′
+            4 = Rec.ITU-R 2020 is used. Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′
 
         dithering (Literal): Default = 1, dithering before final conversion to uint8
             0 = no dithering
@@ -119,7 +120,7 @@ class Options:
             background: Union[int, float] = 300,
 
             mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8,
-            as_gray: Literal[0, 1, 2] = 0,
+            as_gray: Literal[0, 1, 2, 3, 4] = 0,
             dithering: Literal[0, 1, 2] = 1,
             conserve_memory: bool = True,
             seed: Optional[int] = None,
@@ -149,7 +150,7 @@ class Options:
         self.background = background
 
         self.mode = mode
-        self.as_gray = as_gray
+        self.as_gray = 2 if self.legacy_mode else as_gray
         self.dithering = dithering
 
         self.conserve_memory = conserve_memory if mode in [5,6,7,8] else False
@@ -203,8 +204,8 @@ class Options:
 
         if self.mode not in [1, 2, 3, 4, 5, 6, 7, 8, 9]:
             raise ValueError("Invalid mode selected. See Options")
-        if self.as_gray not in [0, 1, 2]:
-            raise TypeError("as_gray must be an int equal to 0, 1 or 2.")
+        if self.as_gray not in [0, 1, 2, 3, 4]:
+            raise TypeError("as_gray must be an int equal to 0, 1, 2, 3 or 4.")
         if self.dithering not in [0, 1, 2]:
             raise ValueError("dithering must be an int equal to 0, 1 or 2.")
         if not isinstance(self.conserve_memory, bool):
@@ -240,7 +241,7 @@ class Options:
                 raise TypeError("target_hist must be a numpy.ndarray.")
             if self.as_gray:
                 if self.target_hist.ndim != 1:
-                    raise ValueError("For grayscale images (as_gray is 1 or 2), target_hist must be 1D (shape (256,) or (65536,)).")
+                    raise ValueError("For grayscale images (as_gray is 1, 2, 3, 4), target_hist must be 1D (shape (256,) or (65536,)).")
                 if self.target_hist.shape[0] not in [256, 65536]:
                     raise ValueError("target_hist must have 256 or 65536 values (for 8 or 16 bits).")
             else:

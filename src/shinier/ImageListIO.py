@@ -106,8 +106,9 @@ class ImageListIO:
         as_gray (Optional[int]): Images are converted into grayscale then uint8 on load only. Default is no conversion (default = 0).
             0 = No conversion applied
             1 = An equal weighted sum of red, green and blue pixels is applied.
-            2 = A weighted sum of red, green and blue pixels is applied to better represent human perception
-                of red, green and blue than equal weights. See http://poynton.ca/PDFs/ColorFAQ.pdf
+            2 = (legacy mode) Rec.ITU-R 601 is used (see Matlab). Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′
+            3 = Rec.ITU-R 709 is used. Y′ = 0.2126 R′ + 0.7152 G′ + 0.0722 B′
+            4 = Rec.ITU-R 2020 is used. Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′
         save_dir (Optional[str]): Directory to save final images. Defaults to the
             current working directory if not specified.
 
@@ -126,11 +127,13 @@ class ImageListIO:
         self,
         input_data: ImageListType,
         conserve_memory: bool = True,
-        as_gray: Literal[0, 1, 2] = 0,
+        as_gray: Literal[0, 1, 2, 3, 4] = 0,
         save_dir: Optional[str] = None
     ) -> None:
         self.conserve_memory: bool = conserve_memory
-        self.as_gray: Literal[0, 1, 2] = as_gray
+        self.as_gray: Literal[0, 1, 2, 3, 4] = int(as_gray) if as_gray is not None else 0
+        if self.as_gray not in (0, 1, 2, 3, 4):
+            raise ValueError("as_gray must be 0 (no conversion), 1 (equal), 2 (Rec. ITU-R 601), 3 (Rec. ITU-R 709), 4 (Rec. ITU-R 2020)")
         self.save_dir: Path = Path(save_dir or Path.cwd())
         self.data: List[Optional[np.ndarray]] = []
         self.src_paths: List[Optional[Path]] = []  # immutable provenance
@@ -192,6 +195,7 @@ class ImageListIO:
             yield self[idx]
 
     def readonly_copy(self):
+        """Produce a read-only copy of an instance."""
         cls = self.__class__
         new = cls.__new__(cls)
 
@@ -276,7 +280,7 @@ class ImageListIO:
         return image
 
     def _to_gray(self, image: np.ndarray):
-        gray_map = {1: 'equal', 2: 'perceptual'}
+        gray_map = {1: 'equal', 2: 'rec601', 3: 'rec709', 4: 'rec2020'}
         if image.ndim == 3:
             if self.as_gray > 0:
                 image = rgb2gray(image, conversion_type=gray_map[self.as_gray])

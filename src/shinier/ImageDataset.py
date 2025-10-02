@@ -9,6 +9,7 @@ from shinier import Options
 from .ImageListIO import ImageListIO
 from .ImageListIO import ImageListType
 
+
 class ImageDataset:
     """
     Class to load and manage a collection of images and masks, keeping track of their state throughout image processing.
@@ -69,7 +70,8 @@ class ImageDataset:
             input_data = [np.zeros(self.images[0].shape, dtype=bool) for idx in range(len(self.images))]
             self.buffer = ImageListIO(
                 input_data=input_data,
-                conserve_memory=self.options.conserve_memory,
+                conserve_memory=True,  # <--- FORCE
+                # conserve_memory=self.options.conserve_memory,
                 as_gray=self.options.as_gray,
                 save_dir=self.options.output_folder
             )
@@ -78,12 +80,14 @@ class ImageDataset:
             if options.mode >= 3 and options.mode != 9:
                 self.magnitudes = ImageListIO(
                     input_data=input_data,
-                    conserve_memory=self.options.conserve_memory,
+                    conserve_memory=True,  # <--- FORCE
+                    # conserve_memory=self.options.conserve_memory,
                     as_gray=self.options.as_gray
                 )
                 self.phases = ImageListIO(
                     input_data=input_data,
-                    conserve_memory=self.options.conserve_memory,
+                    conserve_memory=True,  # <--- FORCE
+                    # conserve_memory=self.options.conserve_memory,
                     as_gray=self.options.as_gray
                 )
 
