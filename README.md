@@ -389,30 +389,7 @@ class ImageProcessor:
 
 ---
 
-## 🛠️ Utility Functions
-<
-### `MatlabOperators`
-Class containing MATLAB operator implementations.
-
-```python
-class MatlabOperators:
-    @staticmethod
-    def round(x):           # MATLAB rounding
-    @staticmethod
-    def uint8(x):          # MATLAB uint8 conversion
-    @staticmethod
-    def std2(x):           # MATLAB standard deviation
-    @staticmethod
-    def mean2(x):          # MATLAB mean
-    @staticmethod
-    def double(x):         # MATLAB double precision
-    @staticmethod
-    def single(x):         # MATLAB single precision
-    @staticmethod
-    def rgb2gray(image):   # MATLAB RGB conversion
-```
-
-### Visualization Functions
+## Visualization Functions
 
 ```python
 def imhist_plot(img, bins=256, figsize=(8, 6)):
