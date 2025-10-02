@@ -23,6 +23,8 @@
 
 **SHINIER** is a modern Python implementation of the **SHINE** (Spectrum, Histogram, and Intensity Normalization and Equalization) toolbox, originally developed in MATLAB by [Willenbockel et al. (2010)](https://doi.org/10.3758/BRM.42.3.671).
 
+**Reference** : [Willenbockel, V., Sadr, J., Fiset, D., Horne, G. O., Gosselin, F., & Tanaka, J. W. (2010). Controlling low-level image properties: The SHINE toolbox. *Behavior Research Methods*, 42(3), 671-684.](https://doi.org/10.3758/BRM.42.3.671)
+
 ### Main Objectives
 - **Compatibility**: Maintain compatibility with the original MATLAB implementation
 - **Performance**: Optimize performance for large datasets
@@ -77,7 +79,7 @@ ans = [3, 4, -3, -4]
 array([2., 4., -2., -4.])
 ```
 - Rounds **to nearest even** (round-half-to-even, "Bankers' Rounding")
-- **IEEE 754-2019 Standard** compliant (recommended default)
+- **IEEE 754-2019 Standard** compliant (recommended default for binary formats)
 - **Statistically unbiased** for large datasets
 - **Reduces cumulative rounding errors** in iterative computations
 
@@ -100,10 +102,9 @@ While SHINIER provides MATLAB-compatible rounding for **legacy compatibility**, 
 4. **Numerical Stability**: Better performance in floating-point arithmetic
 
 **References:**
-- **IEEE 754-2019**: "IEEE Standard for Floating-Point Arithmetic"
-- **Goldberg, D. (1991)**: "What Every Computer Scientist Should Know About Floating-Point Arithmetic"
-- **Kahan, W. (1996)**: "IEEE Standard 754 for Binary Floating-Point Arithmetic"
-- **Higham, N.J. (2002)**: "Accuracy and Stability of Numerical Algorithms"
+- [**IEEE 754-2019**](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8766229&tag=1): "IEEE Standard for Floating-Point Arithmetic"
+- [**Goldberg, D. (1991)**](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html): "What Every Computer Scientist Should Know About Floating-Point Arithmetic"
+- [**Kahan, W. (1996)**](https://people.eecs.berkeley.edu/~wkahan/ieee754status/IEEE754.PDF): "IEEE Standard 754 for Binary Floating-Point Arithmetic"
 
 **Recommendation**: Use `legacy_mode=False` (default) for scientifically robust results, `legacy_mode=True` only for MATLAB compatibility validation.
 
@@ -210,6 +211,9 @@ Different luma coefficients are optimized for different **display technologies**
 
 **SHINIER Advantage**: Provides **multiple standards** allowing users to choose the most appropriate for their display technology and research context. 
 
+**WARNING AND REMINDER**: Ajusting for the luminance transfer functions implemented in image-capturing devices 
+and the precise calibration of display monitors are essential for accurate visual stimulus presentation.
+
 ---
 
 ## ⚙️ Detailed Processing Modes
@@ -234,11 +238,11 @@ mode = 1  # lum_match only
 mode = 2  # hist_match only
 ```
 **Available Algorithms:**
-- **Exact specification** (`hist_specification=0`): Coltuc, Bolon & Chassery (2006) algorithm
+- **Exact specification** (`hist_specification=0`): [Coltuc, Bolon & Chassery (2006)]((https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf)) algorithm
 - **Specification with noise** (`hist_specification=1`): Legacy version with noise addition
 
 **SSIM Optimization:**
-- `hist_optim=1`: SSIM-based optimization (Avanaki, 2009)
+- `hist_optim=1`: SSIM-based optimization ([Avanaki, 2009](https://link.springer.com/article/10.1007/s10043-009-0119-z)))
 - `hist_iterations`: Number of iterations (default: 10)
 - `step_size`: Step size (default: 34)
 
@@ -407,7 +411,7 @@ def sf_plot(sf_profile, figsize=(8, 6)):
 ## 🧮 Implemented Algorithms
 
 ### 1. Exact Histogram Specification
-**Reference:** Coltuc, D., Bolon, P., & Chassery, J. M. (2006). Exact histogram specification.
+**Reference:** [Coltuc, D., Bolon, P., & Chassery, J. M. (2006). Exact histogram specification. *IEEE Transactions on Image Processing*, 15(5), 1143-1152.](https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf)
 
 **Algorithm:**
 1. Calculate cumulative distribution function (CDF) of source image
@@ -416,7 +420,7 @@ def sf_plot(sf_profile, figsize=(8, 6)):
 4. Apply mapping pixel by pixel
 
 ### 2. SSIM Optimization for Histogram
-**Reference:** Avanaki, A. N. (2009). Exact histogram specification for digital images using a variational approach.
+**Reference:** [Avanaki, A. N. (2009). Exact histogram specification for digital images using a variational approach. *Journal of Visual Communication and Image Representation*, 20(7), 505-515.](https://link.springer.com/article/10.1007/s10043-009-0119-z)
 
 **Algorithm:**
 1. Initial calculation of target histogram
@@ -432,7 +436,7 @@ def sf_plot(sf_profile, figsize=(8, 6)):
 3. Distribute error to neighboring pixels with different weights.
 
 ### 4. Noisy Bit Dithering
-**Reference:** Allard, R., & Faubert, J. (2008). The noisy-bit method for digital halftoning.
+**Reference:** [Allard, R., & Faubert, J. (2008). The noisy-bit method for digital halftoning. *Journal of the Optical Society of America A*, 25(8), 1980-1989.](https://link.springer.com/article/10.3758/BRM.40.3.735)
 
 **Algorithm:**
 1. Add controlled noise to each pixel
@@ -563,13 +567,10 @@ def hist_match(self):
 
 ---
 
-## 📚 Advanced Usage Examples
+## 📚 Usage Examples
 
 - See `Example_usage.ipynb` in the documemntation folder for:
-  - Batch processing with masks
-  - Custom histogram matching
-  - Legacy mode (MATLAB compatibility)
-  - Processing with a custom target spectrum
+  - Coding usage
   - Interactive CLI usage
 
 Examples in this README have been intentionally minimized; please open the notebook for complete, executable code.
@@ -607,49 +608,24 @@ options = Options(
 )
 ```
 
-### Performance Optimization
-
-**1. Image Format Choice**
+**4. Composite modes (5-8) not achieving perfect matching for both histogram and Fourier simultaneously**
 ```python
-# PNG: Lossless compression, good for masks
-# TIFF: Professional format, metadata support
-# JPEG: Lossy compression, avoid for processing
+# Solution: Increase iterations for composite modes
+options = Options(
+    mode=8,  # Spectrum + Histogram
+    iterations=5,  # Increase from default 2 for better dual matching
+)
 ```
 
-**2. Image Size**
-```python
-# For very large images, consider:
-# - conserve_memory=True mode
-# - Block processing
-# - Preliminary resolution reduction
-```
+**Scientific Rationale:**
+Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum matching followed by histogram matching). The original [SHINE article](documentation/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf) explains that **multiple iterations** are necessary because:
 
-**3. Number of Iterations**
-```python
-# Mode 8 (recommended): 5 iterations usually sufficient (see SHINE article)
-# Mode with SSIM optimization: 5-10 iterations
-# More iterations = better quality but longer computation time
-```
+1. **Sequential Processing**: Each iteration applies both transformations in sequence
+2. **Convergence**: Early iterations may not achieve perfect matching for both properties simultaneously
+3. **Iterative Refinement**: Subsequent iterations refine the results to better satisfy both histogram and Fourier constraints
 
----
-
-## 📖 References
-
-### Main Publications
-1. **Willenbockel, V., Sadr, J., Fiset, D., Horne, G. O., Gosselin, F., & Tanaka, J. W.** (2010). Controlling low-level image properties: The SHINE toolbox. *Behavior Research Methods*, 42(3), 671-684.
-
-2. **Coltuc, D., Bolon, P., & Chassery, J. M.** (2006). Exact histogram specification. *IEEE Transactions on Image Processing*, 15(5), 1143-1152.
-
-3. **Avanaki, A. N.** (2009). Exact histogram specification for digital images using a variational approach. *Journal of Visual Communication and Image Representation*, 20(7), 505-515.
-
-4. **Floyd, R. W., & Steinberg, L.** (1976). An adaptive algorithm for spatial grey scale. *Proceedings of the Society of Information Display*, 17, 75-77.
-
-5. **Allard, R., & Faubert, J.** (2008). The noisy-bit method for digital halftoning. *Journal of the Optical Society of America A*, 25(8), 1980-1989.
-
-### ITU-R Standards
-- **Rec.ITU-R BT.601-7**: Luma coefficients for SD monitors
-- **Rec.ITU-R BT.709**: Luma coefficients for HD monitors
-- **Rec.ITU-R BT.2020**: Luma coefficients for UHD monitors
+**Recommendations:**
+- **Number of iterations**: 5 iterations usually sufficient for dual matching. The quality gets better with more iterations but it will take a longer computation time
 
 ---
 
