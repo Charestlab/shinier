@@ -42,10 +42,10 @@ class Options:
         as_gray (Optional[int]): Images are converted into grayscale then uint8. Default is no conversion (default = 0).
             0 = No conversion applied
             1 = An equal weighted sum of red, green and blue pixels is applied.
-            2 = (legacy mode) Rec.ITU-R 601 is used (see Matlab). Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′
-            3 = Rec.ITU-R 709 is used. Y′ = 0.2126 R′ + 0.7152 G′ + 0.0722 B′
-            4 = Rec.ITU-R 2020 is used. Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′
-
+            2 = (legacy mode) Rec.ITU-R 601 is used (see Matlab). Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′ (Standard-Definition monitors)
+            3 = Rec.ITU-R 709 is used. Y′ = 0.2126 R′ + 0.7152 G′ + 0.0722 B′ (High-Definition monitors)
+            4 = Rec.ITU-R 2020 is used. Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′ (Ultra-High-Definition monitors)
+            
         dithering (Literal): Default = 1, dithering before final conversion to uint8
             0 = no dithering
             1 = noisy bit dithering (Allard R. & Faubert J. (2008))
@@ -71,7 +71,7 @@ class Options:
             0 = no SSIM optimization
             1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 35), see below)
 
-        iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
+        hist_iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
         step_size (int): Step size for SSIM optimization in hist_optim. Default is 35. (Avanaki (2009) uses 67)
 
         target_hist (Optional[np.ndarray]): Target histogram counts (int) or weights (float) to use for histogram or fourier matching. Should be a

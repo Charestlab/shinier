@@ -380,7 +380,6 @@ def load_images_from_folder(folder_path: str) -> List[np.ndarray]:
     return arrays
 
 # Example usage:
-images_list = load_images_from_folder("/Users/mathiassalvas/projects/shinier-toolbox/testing_INPUT")
 
 #SHINIER_CLI(images = images_list)
 SHINIER_CLI()
