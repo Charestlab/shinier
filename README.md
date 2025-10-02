@@ -198,15 +198,15 @@ def rgb2gray(image, recommendation='rec709'):
 
 Different luma coefficients are optimized for different **display technologies** and **viewing conditions**:
 
+- **Rec.ITU-R BT.601**: **Legacy compatibility** for SD displays
 - **Rec.ITU-R BT.709**: **Recommended default** for modern displays (HD, 4K)
 - **Rec.ITU-R BT.2020**: **Future-proof** for UHD/HDR displays
-- **Rec.ITU-R BT.601**: **Legacy compatibility** for SD displays
 
 **References:**
-- **Poynton, Charles (1997)**: "Frequently Asked Questions about Color"
-- **ITU-R BT.601-7 (2011)**: "Studio encoding parameters of digital television for standard 4:3 and wide-screen 16:9 aspect ratios"
-- **ITU-R BT.709-6 (2015)**: "Parameter values for the HDTV standards for production and international programme exchange"
-- **ITU-R BT.2020-2 (2015)**: "Parameter values for ultra-high definition television systems"
+- [**Poynton, Charles (1997)**](https://poynton.ca/PDFs/ColorFAQ.pdf): "Frequently Asked Questions about Color"
+- [**ITU-R BT.601-7 (2011)**](https://www.itu.int/dms_pubrec/itu-r/rec/bt/R-REC-BT.601-7-201103-I!!PDF-E.pdf): "Studio encoding parameters of digital television for standard 4:3 and wide-screen 16:9 aspect ratios"
+- [**ITU-R BT.709-6 (2015)**](https://www.itu.int/dms_pubrec/itu-r/rec/bt/r-rec-bt.709-6-201506-i!!pdf-e.pdf): "Parameter values for the HDTV standards for production and international programme exchange"
+- [**ITU-R BT.2020-2 (2015)**](https://www.itu.int/dms_pubrec/itu-r/rec/bt/r-rec-bt.2020-2-201510-i!!pdf-e.pdf): "Parameter values for ultra-high definition television systems"
 
 **SHINIER Advantage**: Provides **multiple standards** allowing users to choose the most appropriate for their display technology and research context. 
 
