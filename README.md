@@ -609,7 +609,7 @@ options = Options(
 )
 ```
 **Recommendations:**
-- **The SHINIER, the better. Legacy doesn't mean it's ideal**
+- **The SHINIER, the better. Legacy doesn't mean it's ideal.**
 
 **4. Composite modes (5-8) not achieving perfect matching for both histogram and Fourier simultaneously**
 ```python
@@ -632,24 +632,7 @@ Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum m
 
 ---
 
-## 🤝 Contribution and Development
-
-### Code Structure
-- **Documentation**: Google-style docstrings
-- **Tests**: Unit tests with reference images
-- **Validation**: Systematic comparison with MATLAB
-- **Performance**: Continuous profiling and optimization
-
-### Future Improvements
-- [ ] 16-bit image support
-- [ ] GPU processing with CuPy
-- [ ] Graphical interface
-- [ ] RAW format support
-- [ ] Advanced dithering algorithms
-
----
-
 <p align="center">
-  <strong>Developed with ❤️ for the vision research community</strong><br>
+  <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
   <em>Version 0.1.0 - Complete technical documentation</em>
 </p>
