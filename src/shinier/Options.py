@@ -62,7 +62,7 @@ class Options:
             while integrating new optimizations. (conserve_memory = False, as_gray = 2, dithering = 0, hist_specification = 1,
             safe_lum_match = False)
         
-        iterations (int): Default = 1, number of iteration for composites mode. For these modes, histogram specification and Fourier 
+        iterations (int): Default = 2, number of iteration for composites mode. For these modes, histogram specification and Fourier 
             amplitude specification affect each other. Multiple iterations will allows a high degree a joint matching.
             !! The method was develop so that it recalculates the respective target at each iteration (i.e., no target hist/spectrum).
 

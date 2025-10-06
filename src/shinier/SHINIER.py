@@ -246,7 +246,7 @@ def SHINIER_CLI(images = None, masks = None) -> Options:
         "Histogram + Spectrum",
         "SF + Histogram",
         "Spectrum + Histogram",
-        "Noisy bit-dithering"
+        "Only dithering"
     ], default = 8)
     kwargs["mode"] = mode
     
@@ -261,35 +261,41 @@ def SHINIER_CLI(images = None, masks = None) -> Options:
     if legacy:
         kwargs["legacy_mode"] = True
 
-    # --------- Global Preferences (custom profile only) ---------
+    # --------- GLOBAL Preferences (custom profile only) ---------
     if prof == 3:
         as_gray = prompt_choice("\nLoad as grayscale?",
-                                ["No conversion applied",
+                                 ["No conversion applied",
                                  "Equal weighted grayscaling",
-                                 "Perceptual weighted grayscaling"],
-                                 default = 0)
-        print("as gray", as_gray, "minus 1", as_gray - 1)
-        
-        if as_gray is not None: 
+                                 "Rec. 601 (legacy)",
+                                 "Rec. 709 (HD monitors)",
+                                 "Rec. 2020 (UHD monitors)"],
+
+                                default = 1)
+        if as_gray is not None:
             kwargs["as_gray"] = as_gray - 1 # prompt_choice is 1-based
 
         conserve = prompt_yes_no("\nConserve memory (temp dir, 1 image in RAM)?", default = True)
         if conserve is not None: 
             kwargs["conserve_memory"] = conserve
-        
-        dith = prompt_choice("\nApply dithering before final uint8 cast?",
-                             ["No dithering",
-                              "Noisy-bit dithering",
-                              "Floyd-Steinberg dithering"], default = 2) if mode != 9 else 2
-        if dith is not None: 
-            kwargs["dithering"] = dith - 1 # prompt_choice is 1-based
+
+        if mode != 9:
+            dith = prompt_choice("\nApply dithering before final uint8 cast?",
+                                    ["No dithering", # 1
+                                    "Noisy-bit dithering", # 2
+                                    "Floyd-Steinberg dithering"], default = 2) # 3
+        else:
+            dith = prompt_choice("\nWhich dithering is going to be applied?",
+                                    ["Noisy-bit dithering",       # 1 (2 for kwargs)
+                                    "Floyd-Steinberg dithering"], # 2 (3 for kwargs)
+                                    default = 1) 
+        kwargs["dithering"] = dith - 1 if mode != 9 else dith # prompt_choice is 1-based, mode 9 values already aligned.
 
         now = datetime.now()
         seed = prompt_int("Random seed", default = int(now.timestamp()))
         if seed is not None: 
             kwargs["seed"] = seed
 
-    # --------- Mode-specific Options (custom profile only) ---------
+    # --------- MODE-SPECIFIC Options (custom profile only) ---------
     if prof == 3:
         # Luminance (mode 1)
         if mode == 1:
@@ -313,10 +319,10 @@ def SHINIER_CLI(images = None, masks = None) -> Options:
 
             if ho == 2:
                 iters = prompt_int("\nSSIM iterations", 1, 1_000_000)
-                if iters is not None: 
-                    kwargs["iterations"] = iters
+                if iters is not None:
+                    kwargs["hist_iterations"] = iters
                 step = prompt_int("\nSSIM step size", 1, 1_000_000)
-                if step is not None: 
+                if step is not None:
                     kwargs["step_size"] = step
 
             use_specific_hist = prompt_yes_no("\nUse a specific target histogram? (otherwise average will be used)", default = False)
@@ -337,6 +343,12 @@ def SHINIER_CLI(images = None, masks = None) -> Options:
                 ts = load_array_maybe(tsp)
                 if ts is not None:
                     kwargs["target_spectrum"] = ts
+        
+        # Composite modes (hist+sf/spec or sf/hist/spec+hist): ask for global iterations
+        if mode in (5,6,7,8):
+            comp_iter = prompt_int("\nComposite iterations (hist/spec coupling)", 1, 1_000_000, default = 2)
+            if comp_iter is not None:
+                kwargs["iterations"] = comp_iter
         
         kwargs["rescaling"] = 0 if mode in [1,2] else 1
    

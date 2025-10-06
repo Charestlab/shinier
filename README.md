@@ -472,42 +472,6 @@ class ImageListIO:
             self._load_all_images(input_data)
 ```
 
-### NumPy Optimizations
-
-**Optimized FFT:**
-```python
-# Use np.fft.rfft2 for real images (faster)
-if image.dtype in [np.float32, np.float64]:
-    fft_result = np.fft.rfft2(image)
-else:
-    fft_result = np.fft.fft2(image)
-```
-
-**Vectorized Operations:**
-```python
-# Exact histogram specification using pixel ordering
-def exact_histogram(image, target_hist, binary_mask=None, n_bins=None):
-    """
-    Implements exact histogram specification using pixel ordering algorithm
-    Reference: Coltuc, Bolon & Chassery (2006)
-    """
-    # Get pixel order values for ranking
-    im_sort, OA = pixel_order(image)
-    
-    # For each channel, assign pixels based on sorted order
-    for channel in range(n_channels):
-        foreground_indices = binary_mask[:, :, channel]
-        pix_ord = im_sort[:, :, channel][foreground_indices]
-        sorted_indices = np.argsort(pix_ord)
-        
-        # Create intensity values based on target histogram
-        Hraw = np.repeat(np.arange(L), new_target_hist)
-        Hraw_sorted[sorted_indices] = Hraw
-        
-        # Assign back to output image
-        im_out[:, :, channel][foreground_indices] = Hraw_sorted
-```
-
 ---
 
 ## 🧪 Testing and Validation
@@ -527,50 +491,13 @@ def exact_histogram(image, target_hist, binary_mask=None, n_bins=None):
 
 ### MATLAB Validation
 
-**Comparison Metrics:**
-
-These metrics are used to validate the quality of histogram matching by comparing the **target histogram** with the **obtained histogram** from the processed image:
-
-- **RMSE**: Root Mean Square Error between target and obtained histogram counts
-- **SSIM**: Structural Similarity Index between original and processed images  
-- **Correlation**: Pearson correlation coefficient between target and obtained histogram distributions
-
-**How they work in SHINIER:**
-
-```python
-def hist_match(self):
-    """Histogram matching with validation metrics"""
-    # After histogram specification
-    final_hist = imhist(image=new_image, mask=self.bool_masks[idx], n_bins=n_bins, normalized=True)
-    
-    # Compare target vs obtained histogram
-    corr = np.corrcoef(final_hist.flatten(), target_hist.flatten())
-    rmse = compute_rmse(final_hist.flatten(), target_hist.flatten())
-    
-    # Compare original vs processed image structure
-    sens, ssim = ssim_sens(image/n_bins, Y/n_bins, n_bins=2)
-    
-    # Validation: ideal values are correlation=1, RMSE=0
-    self._validate(
-        observed=[corr[0, 1], rmse], 
-        expected=[1, 0], 
-        measures_str=[
-            'correlation (target vs obtained histogram count)', 
-            'RMS error (target vs obtained histogram count)'
-        ]
-    )
-```
-
-**Metric Interpretations:**
-- **Correlation ≈ 1.0**: Perfect histogram match (target and obtained histograms are identical)
-- **RMSE ≈ 0**: No error between target and obtained histogram counts
-- **SSIM ≈ 1.0**: Perfect structural similarity (preserves image structure while matching histogram)
+**TODO**
 
 ---
 
 ## 📚 Usage Examples
 
-- See `Example_usage.ipynb` in the documemntation folder for:
+- [See](documentation/Example_usage.ipynb) `Example_usage.ipynb` [in the documentation folder for](documentation/Example_usage.ipynb):
   - Coding usage
   - Interactive CLI usage
 
@@ -628,7 +555,7 @@ Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum m
 3. **Iterative Refinement**: After several iterations (typically 5), the process reaches a stable equilibrium where further refinement yields negligible improvement.
 
 **Recommendations:**
-- **Target histogram and spectrum**: Avoid providing explicit target histograms or spectra. As explained in the [SHINE article]((documentation/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf)), the algorithm is designed to automatically compute the mean histogram and spectrum across all input images at each iteration, ensuring that the matching process remains adaptive and consistent.
+- **Target histogram and spectrum**: Avoid providing explicit target histograms or spectra. As explained in the [SHINE article](documentation/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), the algorithm is designed to automatically compute the mean histogram and spectrum across all input images at each iteration, ensuring that the matching process remains adaptive and consistent.
 
 ---
 
