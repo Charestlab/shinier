@@ -11,17 +11,16 @@
 3. [MATLAB vs Python Differences](#matlab-vs-python-differences)
 4. [Detailed Processing Modes](#detailed-processing-modes)
 5. [Main Classes](#main-classes)
-6. [Utility Functions](#utility-functions)
+6. [Visualization Functions](#visualization-functions)
 7. [Implemented Algorithms](#implemented-algorithms)
 8. [Memory Management and Performance](#memory-management-and-performance)
 9. [Testing and Validation](#testing-and-validation)
-10. [Advanced Usage Examples](#advanced-usage-examples)
 
 ---
 
 ## 🎯 Overview
 
-**SHINIER** is a modern Python implementation of the **SHINE** (Spectrum, Histogram, and Intensity Normalization and Equalization) toolbox, originally developed in MATLAB by [Willenbockel et al. (2010)](https://doi.org/10.3758/BRM.42.3.671).
+**SHINIER** is a modern Python implementation of the **SHINE** (Spectrum, Histogram, and Intensity Normalization and Equalization) toolbox, originally developed in MATLAB by [Willenbockel et al. (2010)](https://doi.org/10.3758/BRM.42.3.671). This new version implemented new options (e.g., color management, dithering and [Coltuc, Bolon & Chassery (2006)](https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf) exact histogram specification algorithm) and refined the previous ones.
 
 **Reference** : [Willenbockel, V., Sadr, J., Fiset, D., Horne, G. O., Gosselin, F., & Tanaka, J. W. (2010). Controlling low-level image properties: The SHINE toolbox. *Behavior Research Methods*, 42(3), 671-684.](https://doi.org/10.3758/BRM.42.3.671)
 
@@ -212,7 +211,7 @@ Different luma coefficients are optimized for different **display technologies**
 **SHINIER Advantage**: Provides **multiple standards** allowing users to choose the most appropriate for their display technology and research context. 
 
 **WARNING AND REMINDER**: Ajusting for the luminance transfer functions implemented in image-capturing devices 
-and the precise calibration of display monitors are essential for accurate visual stimulus presentation.
+and the precise calibration of display monitors are essential for accurate visual stimuli presentation.
 
 ---
 
@@ -326,15 +325,18 @@ class Options:
         whole_image: Literal[1, 2, 3] = 1,
         background: Union[int, float] = 300,
         
-        # Processing mode
+        # General options
         mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8,
         as_gray: Literal[0, 1, 2, 3, 4] = 0,
         dithering: Literal[0, 1, 2] = 1,
-        
-        # Memory management
         conserve_memory: bool = True,
-        seed: Optional[int] = None,
+        seed: Optional[int] = None, 
         legacy_mode: bool = False,
+
+        iterations: int = 2,
+
+        # Processing mode
+        mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8,
         
         # Luminance matching
         safe_lum_match: bool = False,
@@ -349,8 +351,7 @@ class Options:
         
         # Fourier matching
         rescaling: Optional[Literal[0, 1, 2, 3]] = 2,
-        target_spectrum: Optional[np.ndarray] = None,
-        iterations: int = 2
+        target_spectrum: Optional[np.ndarray] = None
     ):
 ```
 
@@ -607,6 +608,8 @@ options = Options(
     mode=8
 )
 ```
+**Recommendations:**
+- **The SHINIER, the better. Legacy doesn't mean it's ideal**
 
 **4. Composite modes (5-8) not achieving perfect matching for both histogram and Fourier simultaneously**
 ```python
@@ -618,14 +621,14 @@ options = Options(
 ```
 
 **Scientific Rationale:**
-Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum matching followed by histogram matching). The original [SHINE article](documentation/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf) explains that **multiple iterations** are necessary because:
+Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum matching followed by histogram matching). Because each transformation modifies the image in ways that can partially undo the effects of the other, a **single pass rarely yields convergence**. As detailed in the original [SHINE documentation](documentation/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), **iterative application** of both steps allows the algorithm to progressively minimize residual discrepancies between the desired luminance distribution and spectral amplitude structure.
 
-1. **Sequential Processing**: Each iteration applies both transformations in sequence
-2. **Convergence**: Early iterations may not achieve perfect matching for both properties simultaneously
-3. **Iterative Refinement**: Subsequent iterations refine the results to better satisfy both histogram and Fourier constraints
+1. **Sequential Processing**: Each cycle compensates for the distortions introduced by the preceding transformation (e.g., histogram adjustment altering spectral power).
+2. **Convergence**: Repeated alternation drives both properties toward their joint target values.
+3. **Iterative Refinement**: After several iterations (typically 5), the process reaches a stable equilibrium where further refinement yields negligible improvement.
 
 **Recommendations:**
-- **Number of iterations**: 5 iterations usually sufficient for dual matching. The quality gets better with more iterations but it will take a longer computation time
+- **Target histogram and spectrum**: Avoid providing explicit target histograms or spectra. As explained in the [SHINE article]((documentation/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf)), the algorithm is designed to automatically compute the mean histogram and spectrum across all input images at each iteration, ensuring that the matching process remains adaptive and consistent.
 
 ---
 
