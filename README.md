@@ -11,17 +11,18 @@
 3. [MATLAB vs Python Differences](#matlab-vs-python-differences)
 4. [Detailed Processing Modes](#detailed-processing-modes)
 5. [Main Classes](#main-classes)
-6. [Utility Functions](#utility-functions)
+6. [Visualization Functions](#visualization-functions)
 7. [Implemented Algorithms](#implemented-algorithms)
 8. [Memory Management and Performance](#memory-management-and-performance)
 9. [Testing and Validation](#testing-and-validation)
-10. [Advanced Usage Examples](#advanced-usage-examples)
 
 ---
 
 ## 🎯 Overview
 
-**SHINIER** is a modern Python implementation of the **SHINE** (Spectrum, Histogram, and Intensity Normalization and Equalization) toolbox, originally developed in MATLAB by [Willenbockel et al. (2010)](https://doi.org/10.3758/BRM.42.3.671).
+**SHINIER** is a modern Python implementation of the **SHINE** (Spectrum, Histogram, and Intensity Normalization and Equalization) toolbox, originally developed in MATLAB by [Willenbockel et al. (2010)](https://doi.org/10.3758/BRM.42.3.671). This new version implemented new options (e.g., color management, dithering and [Coltuc, Bolon & Chassery (2006)](https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf) exact histogram specification algorithm) and refined the previous ones.
+
+**Reference** : [Willenbockel, V., Sadr, J., Fiset, D., Horne, G. O., Gosselin, F., & Tanaka, J. W. (2010). Controlling low-level image properties: The SHINE toolbox. *Behavior Research Methods*, 42(3), 671-684.](https://doi.org/10.3758/BRM.42.3.671)
 
 ### Main Objectives
 - **Compatibility**: Maintain compatibility with the original MATLAB implementation
@@ -77,7 +78,7 @@ ans = [3, 4, -3, -4]
 array([2., 4., -2., -4.])
 ```
 - Rounds **to nearest even** (round-half-to-even, "Bankers' Rounding")
-- **IEEE 754-2019 Standard** compliant (recommended default)
+- **IEEE 754-2019 Standard** compliant (recommended default for binary formats)
 - **Statistically unbiased** for large datasets
 - **Reduces cumulative rounding errors** in iterative computations
 
@@ -100,10 +101,9 @@ While SHINIER provides MATLAB-compatible rounding for **legacy compatibility**, 
 4. **Numerical Stability**: Better performance in floating-point arithmetic
 
 **References:**
-- **IEEE 754-2019**: "IEEE Standard for Floating-Point Arithmetic"
-- **Goldberg, D. (1991)**: "What Every Computer Scientist Should Know About Floating-Point Arithmetic"
-- **Kahan, W. (1996)**: "IEEE Standard 754 for Binary Floating-Point Arithmetic"
-- **Higham, N.J. (2002)**: "Accuracy and Stability of Numerical Algorithms"
+- [**IEEE 754-2019**](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8766229&tag=1): "IEEE Standard for Floating-Point Arithmetic"
+- [**Goldberg, D. (1991)**](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html): "What Every Computer Scientist Should Know About Floating-Point Arithmetic"
+- [**Kahan, W. (1996)**](https://people.eecs.berkeley.edu/~wkahan/ieee754status/IEEE754.PDF): "IEEE Standard 754 for Binary Floating-Point Arithmetic"
 
 **Recommendation**: Use `legacy_mode=False` (default) for scientifically robust results, `legacy_mode=True` only for MATLAB compatibility validation.
 
@@ -198,17 +198,20 @@ def rgb2gray(image, recommendation='rec709'):
 
 Different luma coefficients are optimized for different **display technologies** and **viewing conditions**:
 
+- **Rec.ITU-R BT.601**: **Legacy compatibility** for SD displays
 - **Rec.ITU-R BT.709**: **Recommended default** for modern displays (HD, 4K)
 - **Rec.ITU-R BT.2020**: **Future-proof** for UHD/HDR displays
-- **Rec.ITU-R BT.601**: **Legacy compatibility** for SD displays
 
 **References:**
-- **Poynton, Charles (1997)**: "Frequently Asked Questions about Color"
-- **ITU-R BT.601-7 (2011)**: "Studio encoding parameters of digital television for standard 4:3 and wide-screen 16:9 aspect ratios"
-- **ITU-R BT.709-6 (2015)**: "Parameter values for the HDTV standards for production and international programme exchange"
-- **ITU-R BT.2020-2 (2015)**: "Parameter values for ultra-high definition television systems"
+- [**Poynton, Charles (1997)**](https://poynton.ca/PDFs/ColorFAQ.pdf): "Frequently Asked Questions about Color"
+- [**ITU-R BT.601-7 (2011)**](https://www.itu.int/dms_pubrec/itu-r/rec/bt/R-REC-BT.601-7-201103-I!!PDF-E.pdf): "Studio encoding parameters of digital television for standard 4:3 and wide-screen 16:9 aspect ratios"
+- [**ITU-R BT.709-6 (2015)**](https://www.itu.int/dms_pubrec/itu-r/rec/bt/r-rec-bt.709-6-201506-i!!pdf-e.pdf): "Parameter values for the HDTV standards for production and international programme exchange"
+- [**ITU-R BT.2020-2 (2015)**](https://www.itu.int/dms_pubrec/itu-r/rec/bt/r-rec-bt.2020-2-201510-i!!pdf-e.pdf): "Parameter values for ultra-high definition television systems"
 
 **SHINIER Advantage**: Provides **multiple standards** allowing users to choose the most appropriate for their display technology and research context. 
+
+**WARNING AND REMINDER**: Ajusting for the luminance transfer functions implemented in image-capturing devices 
+and the precise calibration of display monitors are essential for accurate visual stimuli presentation.
 
 ---
 
@@ -234,11 +237,11 @@ mode = 1  # lum_match only
 mode = 2  # hist_match only
 ```
 **Available Algorithms:**
-- **Exact specification** (`hist_specification=0`): Coltuc, Bolon & Chassery (2006) algorithm
+- **Exact specification** (`hist_specification=0`): [Coltuc, Bolon & Chassery (2006)]((https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf)) algorithm
 - **Specification with noise** (`hist_specification=1`): Legacy version with noise addition
 
 **SSIM Optimization:**
-- `hist_optim=1`: SSIM-based optimization (Avanaki, 2009)
+- `hist_optim=1`: SSIM-based optimization ([Avanaki, 2009](https://link.springer.com/article/10.1007/s10043-009-0119-z)))
 - `hist_iterations`: Number of iterations (default: 10)
 - `step_size`: Step size (default: 34)
 
@@ -322,15 +325,18 @@ class Options:
         whole_image: Literal[1, 2, 3] = 1,
         background: Union[int, float] = 300,
         
-        # Processing mode
+        # General options
         mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8,
         as_gray: Literal[0, 1, 2, 3, 4] = 0,
         dithering: Literal[0, 1, 2] = 1,
-        
-        # Memory management
         conserve_memory: bool = True,
-        seed: Optional[int] = None,
+        seed: Optional[int] = None, 
         legacy_mode: bool = False,
+
+        iterations: int = 2,
+
+        # Processing mode
+        mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8,
         
         # Luminance matching
         safe_lum_match: bool = False,
@@ -345,8 +351,7 @@ class Options:
         
         # Fourier matching
         rescaling: Optional[Literal[0, 1, 2, 3]] = 2,
-        target_spectrum: Optional[np.ndarray] = None,
-        iterations: int = 2
+        target_spectrum: Optional[np.ndarray] = None
     ):
 ```
 
@@ -407,7 +412,7 @@ def sf_plot(sf_profile, figsize=(8, 6)):
 ## 🧮 Implemented Algorithms
 
 ### 1. Exact Histogram Specification
-**Reference:** Coltuc, D., Bolon, P., & Chassery, J. M. (2006). Exact histogram specification.
+**Reference:** [Coltuc, D., Bolon, P., & Chassery, J. M. (2006). Exact histogram specification. *IEEE Transactions on Image Processing*, 15(5), 1143-1152.](https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf)
 
 **Algorithm:**
 1. Calculate cumulative distribution function (CDF) of source image
@@ -416,7 +421,7 @@ def sf_plot(sf_profile, figsize=(8, 6)):
 4. Apply mapping pixel by pixel
 
 ### 2. SSIM Optimization for Histogram
-**Reference:** Avanaki, A. N. (2009). Exact histogram specification for digital images using a variational approach.
+**Reference:** [Avanaki, A. N. (2009). Exact histogram specification for digital images using a variational approach. *Journal of Visual Communication and Image Representation*, 20(7), 505-515.](https://link.springer.com/article/10.1007/s10043-009-0119-z)
 
 **Algorithm:**
 1. Initial calculation of target histogram
@@ -432,7 +437,7 @@ def sf_plot(sf_profile, figsize=(8, 6)):
 3. Distribute error to neighboring pixels with different weights.
 
 ### 4. Noisy Bit Dithering
-**Reference:** Allard, R., & Faubert, J. (2008). The noisy-bit method for digital halftoning.
+**Reference:** [Allard, R., & Faubert, J. (2008). The noisy-bit method for digital halftoning. *Journal of the Optical Society of America A*, 25(8), 1980-1989.](https://link.springer.com/article/10.3758/BRM.40.3.735)
 
 **Algorithm:**
 1. Add controlled noise to each pixel
@@ -467,42 +472,6 @@ class ImageListIO:
             self._load_all_images(input_data)
 ```
 
-### NumPy Optimizations
-
-**Optimized FFT:**
-```python
-# Use np.fft.rfft2 for real images (faster)
-if image.dtype in [np.float32, np.float64]:
-    fft_result = np.fft.rfft2(image)
-else:
-    fft_result = np.fft.fft2(image)
-```
-
-**Vectorized Operations:**
-```python
-# Exact histogram specification using pixel ordering
-def exact_histogram(image, target_hist, binary_mask=None, n_bins=None):
-    """
-    Implements exact histogram specification using pixel ordering algorithm
-    Reference: Coltuc, Bolon & Chassery (2006)
-    """
-    # Get pixel order values for ranking
-    im_sort, OA = pixel_order(image)
-    
-    # For each channel, assign pixels based on sorted order
-    for channel in range(n_channels):
-        foreground_indices = binary_mask[:, :, channel]
-        pix_ord = im_sort[:, :, channel][foreground_indices]
-        sorted_indices = np.argsort(pix_ord)
-        
-        # Create intensity values based on target histogram
-        Hraw = np.repeat(np.arange(L), new_target_hist)
-        Hraw_sorted[sorted_indices] = Hraw
-        
-        # Assign back to output image
-        im_out[:, :, channel][foreground_indices] = Hraw_sorted
-```
-
 ---
 
 ## 🧪 Testing and Validation
@@ -522,54 +491,14 @@ def exact_histogram(image, target_hist, binary_mask=None, n_bins=None):
 
 ### MATLAB Validation
 
-**Comparison Metrics:**
-
-These metrics are used to validate the quality of histogram matching by comparing the **target histogram** with the **obtained histogram** from the processed image:
-
-- **RMSE**: Root Mean Square Error between target and obtained histogram counts
-- **SSIM**: Structural Similarity Index between original and processed images  
-- **Correlation**: Pearson correlation coefficient between target and obtained histogram distributions
-
-**How they work in SHINIER:**
-
-```python
-def hist_match(self):
-    """Histogram matching with validation metrics"""
-    # After histogram specification
-    final_hist = imhist(image=new_image, mask=self.bool_masks[idx], n_bins=n_bins, normalized=True)
-    
-    # Compare target vs obtained histogram
-    corr = np.corrcoef(final_hist.flatten(), target_hist.flatten())
-    rmse = compute_rmse(final_hist.flatten(), target_hist.flatten())
-    
-    # Compare original vs processed image structure
-    sens, ssim = ssim_sens(image/n_bins, Y/n_bins, n_bins=2)
-    
-    # Validation: ideal values are correlation=1, RMSE=0
-    self._validate(
-        observed=[corr[0, 1], rmse], 
-        expected=[1, 0], 
-        measures_str=[
-            'correlation (target vs obtained histogram count)', 
-            'RMS error (target vs obtained histogram count)'
-        ]
-    )
-```
-
-**Metric Interpretations:**
-- **Correlation ≈ 1.0**: Perfect histogram match (target and obtained histograms are identical)
-- **RMSE ≈ 0**: No error between target and obtained histogram counts
-- **SSIM ≈ 1.0**: Perfect structural similarity (preserves image structure while matching histogram)
+**TODO**
 
 ---
 
-## 📚 Advanced Usage Examples
+## 📚 Usage Examples
 
-- See `Example_usage.ipynb` in the documemntation folder for:
-  - Batch processing with masks
-  - Custom histogram matching
-  - Legacy mode (MATLAB compatibility)
-  - Processing with a custom target spectrum
+- [See](documentation/Example_usage.ipynb) `Example_usage.ipynb` [in the documentation folder for](documentation/Example_usage.ipynb):
+  - Coding usage
   - Interactive CLI usage
 
 Examples in this README have been intentionally minimized; please open the notebook for complete, executable code.
@@ -606,71 +535,31 @@ options = Options(
     mode=8
 )
 ```
+**Recommendations:**
+- **The SHINIER, the better. Legacy doesn't mean it's ideal.**
 
-### Performance Optimization
-
-**1. Image Format Choice**
+**4. Composite modes (5-8) not achieving perfect matching for both histogram and Fourier simultaneously**
 ```python
-# PNG: Lossless compression, good for masks
-# TIFF: Professional format, metadata support
-# JPEG: Lossy compression, avoid for processing
+# Solution: Increase iterations for composite modes
+options = Options(
+    mode=8,  # Spectrum + Histogram
+    iterations=5,  # Increase from default 2 for better dual matching
+)
 ```
 
-**2. Image Size**
-```python
-# For very large images, consider:
-# - conserve_memory=True mode
-# - Block processing
-# - Preliminary resolution reduction
-```
+**Scientific Rationale:**
+Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum matching followed by histogram matching). Because each transformation modifies the image in ways that can partially undo the effects of the other, a **single pass rarely yields convergence**. As detailed in the original [SHINE documentation](documentation/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), **iterative application** of both steps allows the algorithm to progressively minimize residual discrepancies between the desired luminance distribution and spectral amplitude structure.
 
-**3. Number of Iterations**
-```python
-# Mode 8 (recommended): 5 iterations usually sufficient (see SHINE article)
-# Mode with SSIM optimization: 5-10 iterations
-# More iterations = better quality but longer computation time
-```
+1. **Sequential Processing**: Each cycle compensates for the distortions introduced by the preceding transformation (e.g., histogram adjustment altering spectral power).
+2. **Convergence**: Repeated alternation drives both properties toward their joint target values.
+3. **Iterative Refinement**: After several iterations (typically 5), the process reaches a stable equilibrium where further refinement yields negligible improvement.
 
----
-
-## 📖 References
-
-### Main Publications
-1. **Willenbockel, V., Sadr, J., Fiset, D., Horne, G. O., Gosselin, F., & Tanaka, J. W.** (2010). Controlling low-level image properties: The SHINE toolbox. *Behavior Research Methods*, 42(3), 671-684.
-
-2. **Coltuc, D., Bolon, P., & Chassery, J. M.** (2006). Exact histogram specification. *IEEE Transactions on Image Processing*, 15(5), 1143-1152.
-
-3. **Avanaki, A. N.** (2009). Exact histogram specification for digital images using a variational approach. *Journal of Visual Communication and Image Representation*, 20(7), 505-515.
-
-4. **Floyd, R. W., & Steinberg, L.** (1976). An adaptive algorithm for spatial grey scale. *Proceedings of the Society of Information Display*, 17, 75-77.
-
-5. **Allard, R., & Faubert, J.** (2008). The noisy-bit method for digital halftoning. *Journal of the Optical Society of America A*, 25(8), 1980-1989.
-
-### ITU-R Standards
-- **Rec.ITU-R BT.601-7**: Luma coefficients for SD monitors
-- **Rec.ITU-R BT.709**: Luma coefficients for HD monitors
-- **Rec.ITU-R BT.2020**: Luma coefficients for UHD monitors
-
----
-
-## 🤝 Contribution and Development
-
-### Code Structure
-- **Documentation**: Google-style docstrings
-- **Tests**: Unit tests with reference images
-- **Validation**: Systematic comparison with MATLAB
-- **Performance**: Continuous profiling and optimization
-
-### Future Improvements
-- [ ] 16-bit image support
-- [ ] GPU processing with CuPy
-- [ ] Graphical interface
-- [ ] RAW format support
-- [ ] Advanced dithering algorithms
+**Recommendations:**
+- **Target histogram and spectrum**: Avoid providing explicit target histograms or spectra. As explained in the [SHINE article](documentation/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), the algorithm is designed to automatically compute the mean histogram and spectrum across all input images at each iteration, ensuring that the matching process remains adaptive and consistent.
 
 ---
 
 <p align="center">
-  <strong>Developed with ❤️ for the vision research community</strong><br>
+  <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
   <em>Version 0.1.0 - Complete technical documentation</em>
 </p>

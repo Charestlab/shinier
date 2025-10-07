@@ -55,12 +55,16 @@ class Options:
             and keeps only one image in memory at a time. If True and input_data is a list of NumPy arrays,
             images are first saved as .npy in a temporary directory, and they are loaded in memory one at a time upon request.
 
-        seed (Optional[Int]): Optional seed to initialize the PRNG.
+        seed (Optional[Int]): Optional seed to initialize the PRNG. Random is used for noisy bit dithering and for exact histogram
+            specification with noise.
 
         legacy_mode (bool): If True, ensures compatibility with older versions and workflows, preserving previous functionalities
-                            while integrating new optimizations. (conserve_memory = False, as_gray = 2, dithering = 0,
-                            hist_specification = 1, safe_lum_match = False)
-
+            while integrating new optimizations. (conserve_memory = False, as_gray = 2, dithering = 0, hist_specification = 1,
+            safe_lum_match = False)
+        
+        iterations (int): Default = 2, number of iteration for composites mode. For these modes, histogram specification and Fourier 
+            amplitude specification affect each other. Multiple iterations will allows a high degree a joint matching.
+            !! The method was develop so that it recalculates the respective target at each iteration (i.e., no target hist/spectrum).
 
     --------------------------------------------------HISTOGRAM matching--------------------------------------------------------
         hist_specification (Literal): Default = 0
