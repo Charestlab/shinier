@@ -1342,6 +1342,108 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> tupl
     return np.stack(all_sens, axis=-1).squeeze(), np.stack(all_mssim)
 
 
+def hist_match_validation(images: ImageListType) -> Tuple[np.ndarray, np.ndarray]:
+
+    def normalize_hist(a_hist):
+        a_hist = np.float64(a_hist)
+        return a_hist / (a_hist.sum(axis=0, keepdims=True) + 1e-12)
+
+    initial_hist = []
+    target_hist = np.zeros((images.drange[-1]+1, images[0].ndim))
+    for idx, image in enumerate(images):
+        initial_hist.append(imhist(image))
+        target_hist += initial_hist[-1]
+        initial_hist[-1] = normalize_hist(initial_hist[-1])
+    target_hist /= len(images)
+    target_hist = normalize_hist(target_hist)
+
+    # Compute metric
+    N = len(initial_hist)
+    corr, rms = np.zeros((N,)), np.zeros((N,))
+    for idx, a_hist in enumerate(initial_hist):
+        corr[idx] = np.corrcoef(a_hist.ravel(), target_hist.ravel())[0, 1]
+        rms[idx] = compute_rmse(a_hist.ravel(), target_hist.ravel())
+    return corr, rms
+
+
+def sf_match_validation(images: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Mean magnitude per radius bin (annular average)."""
+
+    def rot_avg(arr2d: np.ndarray, radius: np.ndarray, ann_counts: np.ndarray) -> np.ndarray:
+        """Mean magnitude per radius bin (annular average)."""
+        sums = np.bincount(radius, weights=arr2d.ravel())
+        return sums / ann_counts
+
+    x_size, y_size = images[0].shape[:2]
+    n_channels = 3
+
+    # Compute spectra and mean spectrum
+    magnitudes, phases = get_images_spectra(images=images)
+    target_spectrum = np.zeros(images[0].shape)
+    for idx, mag in enumerate(magnitudes):
+        target_spectrum += mag
+    target_spectrum /= len(magnitudes)
+    target_spectrum = im3D(target_spectrum)
+
+    #  Returns the frequencies of the image, bins range from -0.5f to 0.5f (0.5f is the Nyquist frequency) 1/y_size is the distance between each pixel in the image
+    f_cols = np.fft.fftshift(np.fft.fftfreq(y_size, d=1 / y_size))  # like f1 in MATLAB
+    f_rows = np.fft.fftshift(np.fft.fftfreq(x_size, d=1 / x_size))  # like f2 in MATLAB
+    XX, YY = np.meshgrid(f_cols, f_rows)
+    nyquistLimit = np.floor(max(x_size, y_size) / 2)
+    r, theta = cart2pol(XX, YY)
+
+    # Map of the bins of the frequencies
+    r = np.round(r, decimals=0)
+
+    # Need to be a 1D array of integers for the bincount function
+    r_int = r.astype(np.int32)
+    r1 = r_int.ravel()
+
+    # Precompute counts per radius (for true rotational *averages*, not sums)
+    ann_counts = np.bincount(r1)
+    ann_counts[ann_counts == 0] = 1  # protect against divide-by-zero
+    target_rot_avg = []
+    initial_rot_avg = []
+    for idx, image in enumerate(images):
+        magnitude = im3D(magnitudes[idx])
+        phase = im3D(phases[idx])
+        tra = []
+        ira = []
+        for channel in range(n_channels):
+            fft_image = magnitude[:, :, channel]
+
+            # Rotational averages (target vs source) as MEANS over annuli
+            tra.append(rot_avg(target_spectrum[:, :, channel], radius=r1, ann_counts=ann_counts))
+            ira.append(rot_avg(fft_image, radius=r1, ann_counts=ann_counts))
+        target_rot_avg.append(np.stack(tra))
+        initial_rot_avg.append(np.stack(ira))
+
+    # Compute metrics
+    N = len(initial_rot_avg)
+    corr, rms = np.zeros((N,)), np.zeros((N,))
+    for idx, ira in enumerate(initial_rot_avg):
+        corr[idx] = np.corrcoef(ira.ravel(), target_rot_avg[idx].ravel())[0, 1]
+        rms[idx] = compute_rmse(ira.ravel(), target_rot_avg[idx].ravel())
+    return corr, rms
+
+
+def spec_match_validation(images: ImageListType) -> Tuple[np.ndarray, np.ndarray]:
+    magnitudes, phases = get_images_spectra(images=images)
+
+    target_spectrum = np.zeros(images[0].shape)
+    for idx, mag in enumerate(magnitudes):
+        target_spectrum += mag
+    target_spectrum /= len(magnitudes)
+
+    # Compute metric
+    N = len(magnitudes)
+    corr, rms = np.zeros((N,)), np.zeros((N,))
+    for idx, a_mag in enumerate(magnitudes):
+        corr[idx] = np.corrcoef(a_mag.ravel(), target_spectrum.ravel())[0, 1]
+        rms[idx] = compute_rmse(a_mag.ravel(), target_spectrum.ravel())
+    return corr, rms
+
+
 def compute_rmse(image1: np.ndarray, image2: np.ndarray) -> float:
     """ Compute the root-mean-square error between two images. """
     return np.sqrt(np.mean((image1 - image2) ** 2))
@@ -1365,11 +1467,9 @@ def get_images_spectra(images: ImageListType, magnitudes: Optional[ImageListType
     n_channels = 3 if images.n_dims == 3 else 1
     phases = [None] * n_images if phases is None else phases
     magnitudes = [None] * n_images if magnitudes is None else magnitudes
-
-    if images.drange == (0, 255):
-        raise ValueError(f'images should be in the [0, 1] range.')
-
     for idx, image in enumerate(images):
+        if images.drange == (0, 255):
+            image = np.float64(image)/255
         magnitudes[idx], phases[idx] = image_spectrum(image, rescale=rescale)
     return magnitudes, phases
 

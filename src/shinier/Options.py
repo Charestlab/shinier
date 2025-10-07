@@ -45,7 +45,7 @@ class Options:
             2 = (legacy mode) Rec.ITU-R 601 is used (see Matlab). Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′ (Standard-Definition monitors)
             3 = Rec.ITU-R 709 is used. Y′ = 0.2126 R′ + 0.7152 G′ + 0.0722 B′ (High-Definition monitors)
             4 = Rec.ITU-R 2020 is used. Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′ (Ultra-High-Definition monitors)
-            
+
         dithering (Literal): Default = 1, dithering before final conversion to uint8
             0 = no dithering
             1 = noisy bit dithering (Allard R. & Faubert J. (2008))
@@ -76,7 +76,7 @@ class Options:
 
         target_hist (Optional[np.ndarray]): Target histogram counts (int) or weights (float) to use for histogram or fourier matching. Should be a
             numpy array of shape (256,) or (65536,) for 8-bit or 16-bit images, or as required by the processing function.
-            Default is None.
+            Default is None. Only for mode 2.
             E.g.,
                 from shinier.utils import imhist
                 target_hist = imhist(im)
@@ -89,6 +89,7 @@ class Options:
         target_lum (Optional[Iterable[Union[int, float]]]): Default = (0, 0)
             Pair (mean, std) of target luminance for luminance matching. The mean must be in [0, 255], and the standard deviation must be ≥ 0.
             The mean must be in [0, 255], and the standard deviation must be ≥ 0.
+            Only for mode 1.
 
     --------------------------------------------------FOURIER matching--------------------------------------------------------
         rescaling (Literal): Default = 2. Post-processing applied after sf_match or spec_match only.
@@ -100,6 +101,7 @@ class Options:
         target_spectrum: Optional[np.ndarray[float]]: Target magnitude spectrum.
             Same size as the images of float values. If None, the target magnitude
             spectrum is the average spectrum of all the input images.
+            Only for mode 3 and 4.
             E.g.,
                 from shinier.utils import cart2pol
                 fftim = np.fft.fftshift(np.fft.fft2(im))
@@ -131,7 +133,7 @@ class Options:
 
             hist_specification: Literal[0, 1] = 0,
             hist_optim: Literal[0, 1] = 0,
-            hist_iterations: int = 10,
+            hist_iterations: int = 5,
             step_size: int = 34,
             target_hist: Optional[np.ndarray] = None,
 
@@ -219,7 +221,7 @@ class Options:
             raise TypeError("legacy_mode must be a boolean value.")
         if not isinstance(self.safe_lum_match, bool):
             raise TypeError("safe_lum_match must be a boolean value.")
-        if not (isinstance(self.target_lum, Iterable) and all([isinstance(item, (float, int)) for item in self.target_lum]) and len(self.target_lum) ==2):
+        if not (isinstance(self.target_lum, Iterable) and all([isinstance(item, (float, int)) for item in self.target_lum]) and len(self.target_lum) == 2):
             raise ValueError("target_lum should be an iterable of two numbers")
         if not (self.target_lum[0] >= 0 and self.target_lum[0] <= 255):
             raise ValueError(f"Mean luminance is {self.target_lum[0]} but should be between 0 and 255")
@@ -240,17 +242,17 @@ class Options:
             if not isinstance(self.target_hist, np.ndarray):
                 raise TypeError("target_hist must be a numpy.ndarray.")
             if self.as_gray:
-                if self.target_hist.ndim != 1:
+                if self.target_hist.squeeze().ndim != 1:
                     raise ValueError("For grayscale images (as_gray is 1, 2, 3, 4), target_hist must be 1D (shape (256,) or (65536,)).")
-                if self.target_hist.shape[0] not in [256, 65536]:
+                if np.prod(self.target_hist.shape) not in [256, 65536]:
                     raise ValueError("target_hist must have 256 or 65536 values (for 8 or 16 bits).")
             else:
                 if self.target_hist.ndim != 2:
                     raise ValueError("For color images (as_gray = 0), target_hist must be 2D (shape (256, 3) or (65536, 3)).")
                 if self.target_hist.shape[0] not in [256, 65536] or self.target_hist.shape[1] != 3:
                     raise ValueError("target_hist must have shape (256, 3) or (65536, 3) for RGB images.")
-            if not np.issubdtype(self.target_hist.dtype, np.integer):
-                raise TypeError("target_hist must contain integer values (pixel counts per bin).")
+            # if not np.issubdtype(self.target_hist.dtype, np.integer):
+            #     raise TypeError("target_hist must contain integer values (pixel counts per bin).")
 
         if self.rescaling != 0 and self.mode in [1, 2]:  # TODO: Shouldn't we prevent rescaling anytime lum and hist match are applied?
             raise ValueError("Should not apply rescaling after luminance or histogram matching.")
@@ -259,7 +261,7 @@ class Options:
         if self.target_spectrum is not None :
             if not isinstance(self.target_spectrum, np.ndarray):
                 raise TypeError('The target spectrum must be a numpy array of np.float64.')
-            if np.issubdtype(self.target_spectrum.dtype, np.floating):
+            if not np.issubdtype(self.target_spectrum.dtype, np.floating):
                 raise TypeError('The target spectrum must be a numpy array of np.float64.')
         if self.mode == 9 and self.dithering == 0:
             raise ValueError("The dithering option cannot be 0 for mode 9. Should be either 1 or 2.")

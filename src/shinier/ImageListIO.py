@@ -251,7 +251,7 @@ class ImageListIO:
 
     def _cleanup_temp_dir(self) -> None:
         """Idempotent explicit cleanup."""
-        if self._temp_dir is None:
+        if getattr(self, '_temp_dir', None) is None:
             return
         try:
             if self._temp_dir.exists():

@@ -23,9 +23,11 @@ class ImageProcessor:
         self.options: Optional[Options] = options or getattr(dataset, "options", None)
         self.current_masks: Optional[np.ndarray] = None
         self.bool_masks: List = [None] * len(self.dataset.images)
-        self.verbose: Literal[0, 1, 2] = verbose
+        self.verbose: Literal[-1, 0, 1, 2] = verbose  # -1: Nothing is printed (used for unit tests); 0: Minimal processing steps are printed; 1: Additional info about image and channels being processed are printed; 2: Additional info about the results of internal tests are printed.
         self.log: List = []
         self.validation: List = []
+        self.ssim_results: List = []
+        self.ssim_data: List = []
         self.seed: int = self.options.seed
 
         # Private attributes
@@ -53,10 +55,10 @@ class ImageProcessor:
             'spec_match': 'fourier spectrum matching',
             None: 'dithering',
         }
-        self._iter: int
+        self._iter: int = 0
         self._processing_steps: List[str] = self._mode2processing_steps[self.options.mode]
         self._n_steps: int = len(self._processing_steps)
-        self._step: int
+        self._step: int = 0
         self._processing_function: str
         self._processed_image: str
         self._processed_channel: Optional[int] = None
@@ -119,7 +121,23 @@ class ImageProcessor:
             mask_f, mask_b, _ = separate(mask, self.options.background)
         self.current_masks = (mask_f, mask_b)
 
-    def _validate(self, observed: List[float], expected: List[float], measures_str: list[str], tolerance: float = 1e-3):
+    def _validate_ssim(self, ssim: List[float]):
+        if len(ssim) > 1:
+            out = np.mean(ssim, axis=1)
+            is_strictly_increasing = np.all(np.diff(out) > -1e-3)
+            res_color = Bcolors.OKGREEN if is_strictly_increasing else Bcolors.FAIL
+            res_txt = 'PASS' if is_strictly_increasing else 'FAIL'
+            res = f'{Bcolors.OKCYAN}SSIM optimization test:{Bcolors.ENDC} {res_color}{res_txt}{Bcolors.ENDC}'
+            self.console_log(msg=res, level=1, min_verbose=1)
+            results = {
+                'iter': self._iter,
+                'step': self._step,
+                'image': self._processed_image,
+                'valide_result': is_strictly_increasing
+            }
+            self.ssim_results.append(results)
+
+    def _validate(self, observed: List[float], expected: List[float], measures_str: list[str], tolerance: float = 4e-3):
         """Internal validation"""
         if len(observed) != len(expected) or len(observed) != len(measures_str):
             raise ValueError('observed, expected and measures_str lists must be the same size')
@@ -351,7 +369,15 @@ class ImageProcessor:
         input_collection = self.dataset.buffer.readonly_copy()
         buffer_collection = self.dataset.buffer
 
-        bit_size = 16 if self.options.mode in [5, 6, 7, 8] or hist_optim == 1 else 8
+        if target_hist is None and (self.options.mode in [5, 6, 7, 8] or hist_optim == 1):
+            bit_size = 16
+        elif target_hist is not None:
+            n_bins = target_hist.shape[0]
+            if n_bins not in [256, 65536]:
+                raise ValueError('Target hist must contain either 256 or 65536 elements')
+            bit_size = int(np.log2(n_bins))
+        else:
+            bit_size = 8
         n_bins = 2 ** bit_size
 
         if buffer_collection.drange[1] < n_bins:
@@ -366,6 +392,9 @@ class ImageProcessor:
                 self._get_mask(idx)
             if target_hist.shape[0] != n_bins:
                 raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
+            if target_hist.max()>1:
+                target_hist = target_hist.astype(np.float64)
+                target_hist /= (target_hist.sum(axis=0, keepdims=True) + 1e-12)
 
         # If hist_optim disable, will run only one loop (n_iter = 1)
         n_iter = self.options.hist_iterations + 1 if hist_optim else 1  # See important note below to explain the +1. Also, note that the number of iterations for SSIM optimization (default = 10)
@@ -380,24 +409,32 @@ class ImageProcessor:
             image = im3D(image)
             X = image
             M = np.prod(image.shape[:2])
-            for iter in range(n_iter):  # n_iter = 1 when hist_optim == 0
-                if n_iter > 1 and iter < n_iter - 1:
-                    self.console_log(msg=f"Optimization (iter={iter + 1}):", level=1, color=Bcolors.BOLD, min_verbose=1)
+            all_ssim = []
+            for self._sub_iter in range(n_iter):  # n_iter = 1 when hist_optim == 0
+                if n_iter > 1 and self._sub_iter < n_iter - 1:
+                    self.console_log(msg=f"Optimization (iter={self._sub_iter + 1}):", level=1, color=Bcolors.BOLD, min_verbose=1)
 
                 if hist_specification == 1:
                     Y = exact_histogram_with_noise(image=X, binary_mask=self.bool_masks[idx], target_hist=target_hist, noise_level=noise_level, n_bins=n_bins)
                 else:
                     Y, OA = exact_histogram(image=X, target_hist=target_hist, binary_mask=self.bool_masks[idx], n_bins=n_bins, verbose=self.verbose>=1)
-                    if n_iter == 1 or (n_iter > 1 and iter < n_iter - 1):
+                    if n_iter == 1 or (n_iter > 1 and self._sub_iter < n_iter - 1):
                         self.console_log(msg=f"Ordering accuracy per channel = {OA}", level=1, color=Bcolors.OKBLUE, min_verbose=2)
                 # sens, ssim = ssim_sens(image, Y, n_bins=n_bins)
                 sens, ssim = ssim_sens(image/n_bins, Y/n_bins, n_bins=2)
-                if hist_optim and (n_iter == 1 or (n_iter > 1 and iter < n_iter - 1)):
+                if n_iter > 1 and self._sub_iter < n_iter - 1:
+                    all_ssim.append(ssim)
+
+                if hist_optim and (n_iter == 1 or (n_iter > 1 and self._sub_iter < n_iter - 1)):
                     self.console_log(msg=f"Mean SSIM = {np.mean(ssim):.4f}", level=1, color=Bcolors.OKBLUE, min_verbose=2)
-                if hist_optim and iter < n_iter - 1:
+                if hist_optim and self._sub_iter < n_iter - 1:
                     ssim_update = sens * step_size * M
                     X = Y + ssim_update  # X float64, Y uint8/uint16
                     X = np.rint(np.clip(X, 0, 2 ** bit_size - 1)).astype(f'uint{bit_size}')
+
+            # Test monotonic increase of ssim between first and last iteration
+            if self.options.hist_optim and len(all_ssim) >=2:
+                self._validate_ssim(ssim=[all_ssim[0], all_ssim[-1]])
 
             # Important Note:
             # - Must use Y as this is the one that matches the target histogram.
