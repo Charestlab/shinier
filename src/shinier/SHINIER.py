@@ -250,12 +250,7 @@ def SHINIER_CLI(images = None, masks = None) -> Options:
     ], default = 8)
     kwargs["mode"] = mode
     
-    # --------- Global Preferences (default profile only) ---------
-    # Default
-    if prof == 1 :
-        print(mode)
-        kwargs["rescaling"] = 0 if mode in [1,2] else 1
-    
+    # --------- Global Preferences (default profile only) ---------    
     # Legacy
     legacy = (prof == 2)
     if legacy:
@@ -349,13 +344,10 @@ def SHINIER_CLI(images = None, masks = None) -> Options:
             comp_iter = prompt_int("\nComposite iterations (hist/spec coupling)", 1, 1_000_000, default = 2)
             if comp_iter is not None:
                 kwargs["iterations"] = comp_iter
-        
-        kwargs["rescaling"] = 0 if mode in [1,2] else 1
-   
+           
     # Build Options object
     try:
         opts = Options(**kwargs)
-        print("options", opts)
     except Exception as e:
         print(f"\n Invalid configuration: {e}\n", file=sys.stderr)
         raise
@@ -373,7 +365,8 @@ def SHINIER_CLI(images = None, masks = None) -> Options:
 
     # Preview
     print("=== Options ===")
-    print(opts)
+    for key, value in kwargs.items():
+        print(f"  {key:<15}: {value}")
 
 def load_images_from_folder(folder_path: str) -> List[np.ndarray]:
     """Load all images from a folder as numpy arrays."""
