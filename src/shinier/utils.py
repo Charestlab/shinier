@@ -12,11 +12,23 @@ from PIL import Image
 from itertools import chain
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+import re
 
 # Local package imports
 
 # Type definition
 ImageListType = Union[str, Path, List[Union[str, Path]], List[np.ndarray]]
+RGB2GRAY_WEIGHTS = {
+    'equal': [1 / 3, 1 / 3, 1 / 3],
+    '709': [0.2125, 0.7154, 0.0721],
+    '601': [0.299, 0.587, 0.114],
+    '2020': [0.2627, 0.6780, 0.0593],
+}
+for k, v in RGB2GRAY_WEIGHTS.items():
+    RGB2GRAY_WEIGHTS[k] /= np.sum(v)
+int2key_mapping = dict(zip(range(len(RGB2GRAY_WEIGHTS)), RGB2GRAY_WEIGHTS.keys()))
+RGB2GRAY_WEIGHTS['int2key'] = int2key_mapping
+RGB2GRAY_WEIGHTS['key2int'] = dict(zip(RGB2GRAY_WEIGHTS['int2key'].values(), RGB2GRAY_WEIGHTS['int2key'].keys()))
 
 
 class Bcolors:
@@ -139,8 +151,7 @@ class MatlabOperators:
     def rgb2gray(image):
         """Replicates MATLAB's rgb2gray function (ITU-R rec601)."""
         if image.ndim == 3:
-            weights = [0.298936021293775, 0.587043074451121, 0.114020904255103]
-            return np.dot(image.astype(np.float64), weights)
+            return np.dot(image.astype(np.float64), RGB2GRAY_WEIGHTS['601'])
         else:
             return image
 
@@ -614,8 +625,8 @@ def exact_histogram_with_noise(image: np.ndarray, target_hist: np.ndarray, binar
             raise ValueError(f"Target histogram for channel {c} sums to zero.")
 
         # Values used for ranking (float); add small jitter to break ties
-        x = im[..., c].ravel()[idx].astype(np.float32)
-        x = x + np.random.uniform(-noise_level, noise_level, size=x.shape).astype(np.float32)
+        x = im[..., c].ravel()[idx].astype(np.float64)
+        x = x + np.random.uniform(-noise_level, noise_level, size=x.shape).astype(np.float64)
 
         order = np.argsort(x, kind="mergesort")  # stable rank order
 
@@ -1066,7 +1077,7 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: Union[str] 
 
     Parameters
     ----------
-    img : np.ndarray
+    image (np.ndarray or Image.Image):
         RGB image array with last dimension = 3. Assumed to be gamma-encoded R′G′B′ (i.e., *not* linear light), which
         matches typical sRGB/Rec.709-style images loaded from files.
     conversion_type : {"equal", "rec601", "rec709", "rec2020"}, default "rec709"
@@ -1087,22 +1098,21 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: Union[str] 
       matrices for Y′CbCr / Y′CbcCrc. For physically linear luminance, you would need
       to first linearize R′G′B′ using the appropriate transfer function,
       mix with linear-light coefficients, then re-encode if desired.
+
+    Args:
+        image:
     """
     if isinstance(image, Image.Image):
         image = np.array(image)
     elif not isinstance(image, np.ndarray):
         raise ValueError(f"Invalid image type {type(image)}. Supported values are Image.Image and np.ndarray")
 
+    ct = re.findall(r'\d+', conversion_type)
+    if np.any([c not in conversion_type for c in ['709', '601', '2020', 'equal']]) or len(ct) == 0:
+        raise ValueError('Conversion type must be either 709, 601, 2020, equal')
+
     if image.ndim > 2:
-        if '709' in conversion_type:
-            weights = [0.2125, 0.7154, 0.0721]
-        elif '601' in conversion_type:
-            weights = [0.298936021293775, 0.587043074451121, 0.114020904255103]
-        elif '2020' in conversion_type:
-            weights = [0.2627, 0.6780, 0.0593]
-        else:
-            weights = [1/3, 1/3, 1/3]
-        return np.dot(image[..., :3].astype(np.float32), weights)
+        return np.dot(image[..., :3].astype(np.float64), RGB2GRAY_WEIGHTS[ct[0]])
     elif image.ndim == 2:
         return image
     else:
@@ -1545,7 +1555,7 @@ def rescale_images(images: ImageListType, rescaling_option: Literal[0, 1, 2, 3] 
     return images
 
 
-def uint8_plus(image: np.ndarray, verbose: bool = True) -> np.ndarray:
+def uint8_plus(image: np.ndarray, verbose: bool = False) -> np.ndarray:
     """
     Apply clipping, banker's rounding and uint8 transformations.
 

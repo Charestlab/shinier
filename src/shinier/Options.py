@@ -61,8 +61,8 @@ class Options:
         legacy_mode (bool): If True, ensures compatibility with older versions and workflows, preserving previous functionalities
             while integrating new optimizations. (conserve_memory = False, as_gray = 2, dithering = 0, hist_specification = 1,
             safe_lum_match = False)
-        
-        iterations (int): Default = 2, number of iteration for composites mode. For these modes, histogram specification and Fourier 
+
+        iterations (int): Default = 2, number of iteration for composites mode. For these modes, histogram specification and Fourier
             amplitude specification affect each other. Multiple iterations will allows a high degree a joint matching.
             !! The method was develop so that it recalculates the respective target at each iteration (i.e., no target hist/spectrum).
 
@@ -76,6 +76,7 @@ class Options:
             1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 35), see below)
 
         hist_iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
+
         step_size (int): Step size for SSIM optimization in hist_optim. Default is 35. (Avanaki (2009) uses 67)
 
         target_hist (Optional[np.ndarray]): Target histogram counts (int) or weights (float) to use for histogram or fourier matching. Should be a
@@ -94,6 +95,12 @@ class Options:
             Pair (mean, std) of target luminance for luminance matching. The mean must be in [0, 255], and the standard deviation must be ≥ 0.
             The mean must be in [0, 255], and the standard deviation must be ≥ 0.
             Only for mode 1.
+
+        rgb_weights (Optional[int]): RGB values are converted to luminance using a weighted sum for lum_match computation (default = 3).
+            1 = An equal weighted sum of red, green and blue pixels is applied.
+            2 = (legacy mode) Rec.ITU-R 601 is used (see Matlab). Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′ (Standard-Definition monitors)
+            3 = (default) Rec.ITU-R 709 is used. Y′ = 0.2126 R′ + 0.7152 G′ + 0.0722 B′ (High-Definition monitors)
+            4 = Rec.ITU-R 2020 is used. Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′ (Ultra-High-Definition monitors)
 
     --------------------------------------------------FOURIER matching--------------------------------------------------------
         rescaling (Literal): Default = 2. Post-processing applied after sf_match or spec_match only.
@@ -134,6 +141,7 @@ class Options:
 
             safe_lum_match: bool = False,
             target_lum: Optional[Iterable[Union[int, float]]] = (0, 0),
+            rgb_weights: Literal[1, 2, 3, 4] = 3,
 
             hist_specification: Literal[0, 1] = 0,
             hist_optim: Literal[0, 1] = 0,
@@ -165,6 +173,7 @@ class Options:
 
         self.safe_lum_match = safe_lum_match
         self.target_lum = target_lum
+        self.rgb_weights = rgb_weights
 
         self.hist_specification = hist_specification
         self.hist_optim = hist_optim
@@ -201,7 +210,7 @@ class Options:
                 raise ValueError(f"{self.masks_folder} folder does not exists")
         if self.images_format not in ['png', 'tif', 'tiff', 'jpg', 'jpeg']:
             raise ValueError("images format must be either 'png', 'tif', 'tiff', 'jpg' or 'jpeg'")
-        if self.masks_format not in ['png', 'tif', 'tiff', 'jpg', 'jpeg'] and self.whole_image == 3 :
+        if self.masks_format not in ['png', 'tif', 'tiff', 'jpg', 'jpeg'] and self.whole_image == 3:
             raise ValueError("masks format muse be either 'png', 'tif', 'tiff', 'jpg' or 'jpeg' if whole_image == 3")
         if self.whole_image not in [1, 2, 3]:
             raise ValueError("whole_image must be 1, 2 or 3. See Options")
@@ -257,6 +266,8 @@ class Options:
                     raise ValueError("target_hist must have shape (256, 3) or (65536, 3) for RGB images.")
             # if not np.issubdtype(self.target_hist.dtype, np.integer):
             #     raise TypeError("target_hist must contain integer values (pixel counts per bin).")
+        if self.rgb_weights not in [1, 2, 3, 4]:
+            raise TypeError("rgb_weights must be an int equal to 1, 2, 3 or 4.")
 
         if self.rescaling != 0 and self.mode in [1, 2]:  # TODO: Shouldn't we prevent rescaling anytime lum and hist match are applied?
             raise ValueError("Should not apply rescaling after luminance or histogram matching.")

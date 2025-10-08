@@ -1,5 +1,5 @@
 """
-Python package for the SHINE TOOLBOX
+Python package for shinier
 
 See accompanying paper: XXX
 See original paper: Willenbockel V, Sadr J, Fiset D, Horne GO, Gosselin F, Tanaka JW. Controlling low-level image properties: the SHINE toolbox. Behav Res Methods. 2010 Aug;42(3):671-84. doi: 10.3758/BRM.42.3.671. PMID: 20805589.

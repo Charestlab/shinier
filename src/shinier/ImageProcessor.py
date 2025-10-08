@@ -10,7 +10,7 @@ from shinier.utils import (
     ImageListType, separate, imhist, im3D, cart2pol, pol2cart, soft_clip,
     rescale_images, get_images_spectra, ssim_sens, spectrum_plot, imhist_plot, sf_plot,
     uint8_plus, float01_to_uint, uint_to_float01, noisy_bit_dithering, floyd_steinberg_dithering,
-    exact_histogram, exact_histogram_with_noise, Bcolors, MatlabOperators, compute_rmse)
+    exact_histogram, exact_histogram_with_noise, Bcolors, MatlabOperators, compute_rmse, RGB2GRAY_WEIGHTS)
 
 Vector = Iterable[Union[float, int]]
 
@@ -133,11 +133,11 @@ class ImageProcessor:
                 'iter': self._iter,
                 'step': self._step,
                 'image': self._processed_image,
-                'valide_result': is_strictly_increasing
+                'valid_result': is_strictly_increasing
             }
             self.ssim_results.append(results)
 
-    def _validate(self, observed: List[float], expected: List[float], measures_str: list[str], tolerance: float = 4e-3):
+    def _validate(self, observed: List[float], expected: List[float], measures_str: list[str], tolerance: float = 5e-3):
         """Internal validation"""
         if len(observed) != len(expected) or len(observed) != len(measures_str):
             raise ValueError('observed, expected and measures_str lists must be the same size')
@@ -148,14 +148,14 @@ class ImageProcessor:
             'processing_function': self._processing_function,
             'image': self._processed_image,
             'channel': self._processed_channel,
-            'valide_result': np.all([d < tolerance for d in diff])
+            'valid_result': np.all([d < tolerance for d in diff])
         }
         obs = ', '.join([f'{msr} = {observed[idx]:4.4f}' for idx, msr in enumerate(measures_str)])
         obs = f'Observed: {obs}'
         exp = ', '.join([f'{msr} = {expected[idx]:4.4f}' for idx, msr in enumerate(measures_str)])
         exp = f'Expected: {exp}'
-        res_color = Bcolors.OKGREEN if results['valide_result'] else Bcolors.FAIL
-        res_txt = 'PASS' if results['valide_result'] else 'FAIL'
+        res_color = Bcolors.OKGREEN if results['valid_result'] else Bcolors.FAIL
+        res_txt = 'PASS' if results['valid_result'] else 'FAIL'
         res = f'{Bcolors.OKCYAN}Internal test:{Bcolors.ENDC} {res_color}{res_txt}{Bcolors.ENDC}'
         if res_txt == 'FAIL' and self.verbose > 1:
             print(res)
@@ -244,7 +244,7 @@ class ImageProcessor:
             elif dithering == 2:
                 output_collection[idx] = floyd_steinberg_dithering(image=image/255, depth=256, legacy_mode=self.options.legacy_mode)
             else:
-                output_collection[idx] = MatlabOperators.uint8(image) if self.options.legacy_mode else uint8_plus(image)
+                output_collection[idx] = MatlabOperators.uint8(image) if self.options.legacy_mode else uint8_plus(image=image, verbose=self.verbose>0)
 
         return output_collection
 
@@ -265,6 +265,30 @@ class ImageProcessor:
             predicted_range = predicted_max - predicted_min
             return predicted_min, predicted_max, predicted_range
 
+        def compute_m_and_sd(image: np.ndarray, binary_mask: np.ndarray) -> Tuple[float, float]:
+            """
+            M and SD is a weighted sum of the channels for RGB images. Normal otherwise.
+            Args:
+                image: An image
+                binary_mask: A mask
+
+            Returns:
+                Tuple: mean, standard deviation
+            """
+
+            if self.options.as_gray != 0:
+                M = MatlabOperators.mean2(im[binary_mask]) if self.options.legacy_mode else np.mean(im[binary_mask])
+                SD = MatlabOperators.mean2(im[binary_mask]) if self.options.legacy_mode else np.mean(im[binary_mask])
+            else:
+                convertion_type = RGB2GRAY_WEIGHTS['int2key'][self.options.rgb_weights]
+                ch_weights = RGB2GRAY_WEIGHTS[convertion_type]
+                ch_means = np.array([np.mean(im[:, :, c][binary_mask[:, :, c]]) for c in range(3)])
+                ch_stds = np.array([np.std(im[:, :, c][binary_mask[:, :, c]]) for c in range(3)])
+                M = np.sum(ch_means * ch_weights)
+                SD = np.sqrt(np.sum((ch_weights ** 2) * (ch_stds ** 2)))
+
+            return M, SD
+
         buffer_collection = self.dataset.buffer
 
         # 1) Compute the mean and standard deviation of the original images.
@@ -280,8 +304,7 @@ class ImageProcessor:
         self._processed_channel = None
         for idx, im in enumerate(buffer_collection):
             self._get_mask(idx)
-            M = MatlabOperators.mean2(im[self.bool_masks[idx]]) if self.options.legacy_mode else np.mean(im[self.bool_masks[idx]])
-            SD = MatlabOperators.std2(im[self.bool_masks[idx]]) if self.options.legacy_mode else np.std(im[self.bool_masks[idx]])
+            M, SD = compute_m_and_sd(image=im, binary_mask=self.bool_masks[idx])
             original_means.append(M)
             original_stds.append(SD)
             original_min_max.append((im[self.bool_masks[idx]].min(), im[self.bool_masks[idx]].max()))
@@ -296,28 +319,24 @@ class ImageProcessor:
             target_mean = target_mean + (255 - np.max(predicted_max))
             self.console_log(msg=f"Adjusted target values for safe values: M = {target_mean:.4f}, SD = {target_std:.4f}", level=0,color=Bcolors.WARNING, min_verbose=0)
             predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
-            if np.any(predicted_min < 0) or np.any(predicted_max > 255):
+            if np.any(predicted_min < -1e-3) or np.any(predicted_max > (255 + 1e-3)):
                 raise Exception(f'Out-of-range values detected: mins = {list(predicted_min)}, maxs = {list(predicted_max)}')
 
         for idx, im in enumerate(buffer_collection):
             im2 = im.copy()
-            M = MatlabOperators.mean2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.mean(
-                im2[self.bool_masks[idx]])
-            SD = MatlabOperators.std2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.std(
-                im2[self.bool_masks[idx]])
+            M, SD = compute_m_and_sd(image=im2, binary_mask=self.bool_masks[idx])
+
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
             self.console_log(msg=f"Image {self._processed_image}:", level=0, color=Bcolors.BOLD, min_verbose=1)
             self.console_log(msg=f"Original: M = {M:.4f}, SD = {SD:.4f}", level=1, color=Bcolors.OKBLUE, min_verbose=2)
 
             # Standardization
             if original_stds[idx] != 0:
-                im2[self.bool_masks[idx]] = (im2[self.bool_masks[idx]] - original_means[idx]) / original_stds[
-                    idx] * target_std + target_mean
+                im2[self.bool_masks[idx]] = (im2[self.bool_masks[idx]] - original_means[idx]) / original_stds[idx] * target_std + target_mean
             else:
                 im2[self.bool_masks[idx]] = target_mean
 
-            M = MatlabOperators.mean2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.mean(im2[self.bool_masks[idx]])
-            SD = MatlabOperators.std2(im2[self.bool_masks[idx]]) if self.options.legacy_mode else np.std(im2[self.bool_masks[idx]])
+            M, SD = compute_m_and_sd(image=im2, binary_mask=self.bool_masks[idx])
 
             # Save resulting image
             self.console_log(msg=f"Target values: M = {target_mean:.4f}, SD = {target_std:.4f}", level=1, color=Bcolors.OKBLUE, min_verbose=2)

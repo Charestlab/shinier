@@ -4,7 +4,7 @@ import numpy as np
 from typing import Any, Optional, Tuple, Union, NewType, List, Iterator, Callable, Literal
 from PIL import Image
 import atexit, shutil, tempfile, weakref, os, time, sys
-from shinier.utils import rgb2gray, uint8_plus
+from shinier.utils import rgb2gray, uint8_plus, RGB2GRAY_WEIGHTS
 import copy
 
 # Type definition
@@ -280,10 +280,9 @@ class ImageListIO:
         return image
 
     def _to_gray(self, image: np.ndarray):
-        gray_map = {1: 'equal', 2: 'rec601', 3: 'rec709', 4: 'rec2020'}
         if image.ndim == 3:
             if self.as_gray > 0:
-                image = rgb2gray(image, conversion_type=gray_map[self.as_gray])
+                image = rgb2gray(image, conversion_type=RGB2GRAY_WEIGHTS['int2key'][self.as_gray])
                 image = uint8_plus(image)
         return image
 
