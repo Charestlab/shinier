@@ -1106,9 +1106,8 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: Union[str] 
         image = np.array(image)
     elif not isinstance(image, np.ndarray):
         raise ValueError(f"Invalid image type {type(image)}. Supported values are Image.Image and np.ndarray")
-
-    ct = re.findall(r'\d+', conversion_type)
-    if np.any([c not in conversion_type for c in ['709', '601', '2020', 'equal']]) or len(ct) == 0:
+    ct = ['equal'] if conversion_type.lower() == 'equal' else re.findall(r'\d+', conversion_type)
+    if np.sum([c not in conversion_type for c in ['709', '601', '2020', 'equal']])==1 or len(ct) == 0:
         raise ValueError('Conversion type must be either 709, 601, 2020, equal')
 
     if image.ndim > 2:
