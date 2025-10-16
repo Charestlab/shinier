@@ -1,16 +1,29 @@
-# PYCHARM
-.idea
+# -------------------------------
+# PYCHARM & BUILD ARTIFACTS
+# -------------------------------
+.idea/
+build/
+dist/
 __pycache__/
 *.pyc
-.pytest_cache
+.pytest_cache/
 .DS_Store
+*.egg-info/
+*.egg
+*.so
+*.pyd
+*.dll
+.pytest_tmp/
 
-# IGNORE ALL IMAGES, BUT ALLOW CERTAIN FILES
+# -------------------------------
+# PACKAGE DATA
+# -------------------------------
 
-# Ignore content of OUTPUT entirely
+# Ignore everything inside OUTPUT, but keep the folder itself
 OUTPUT/*
+!OUTPUT/.gitkeep
 
-# Ignore everything in INPUT and MASK, but allow specific files
+# Ignore everything inside INPUT and MASK, but allow specific test files
 INPUT/*
 MASK/*
 
@@ -18,19 +31,12 @@ MASK/*
 !INPUT/
 !MASK/
 
-# Re-allow specific test images
-!INPUT/test_face1.png
-!INPUT/test_face2.png
-!INPUT/test_face3.png
-!INPUT/test_face4.png
-!INPUT/test_face5.png
-!INPUT/test_scene1.png
-!INPUT/test_scene2.png
-!INPUT/test_scene3.png
-!INPUT/test_scene4.png
-!INPUT/test_scene5.png
-
+# Re-allow specific test assets
+!INPUT/test_face*.png
+!INPUT/test_scene*.png
 !MASK/mask.png
 
-# OTHERS
+# -------------------------------
+# TESTS
+# -------------------------------
 tests/*
