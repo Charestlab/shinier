@@ -39,4 +39,8 @@ MASK/*
 # -------------------------------
 # TESTS
 # -------------------------------
-tests/*
+tests/IMAGES/tmp/*
+!tests/IMAGES/SAMPLE_64X64/test_face*.png
+!tests/IMAGES/SAMPLE_64X64/test_scene*.png
+!tests/IMAGES/SAMPLE_512X512/test_face*.png
+!tests/IMAGES/SAMPLE_512X512/test_scene*.png
