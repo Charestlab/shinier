@@ -1,4 +1,5 @@
 # Global imports
+from shinier.utils import console_log, Bcolors
 from typing import Union, Optional, Iterable, List, Literal
 from pathlib import Path
 import numpy as np
@@ -67,9 +68,11 @@ class Options:
             !! The method was develop so that it recalculates the respective target at each iteration (i.e., no target hist/spectrum).
 
     --------------------------------------------------HISTOGRAM matching--------------------------------------------------------
-        hist_specification (Literal): Default = 0
-            0 = Exact specification without noise (see Coltuc, Bolon & Chassery, 2006)
+        hist_specification (Literal): Default = 4
             1 = Exact specification with noise (legacy code)
+            2 = Coltuc Bolon & Chassery (2006) tie-breaking strategy with moving-average filters.
+            3 = Coltuc's tie-breaking strategy with gaussian filters.
+            4 = Coltuc's tie-breaking strategy with gaussian filters, then noise if isoluminant pixels persist.
 
         hist_optim (Literal): Default = 0
             0 = no SSIM optimization
@@ -77,11 +80,12 @@ class Options:
 
         hist_iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
 
-        step_size (int): Step size for SSIM optimization in hist_optim. Default is 35. (Avanaki (2009) uses 67)
+        step_size (int): Step size for SSIM optimization in hist_optim. Default is 35. This initial measure is adjusted during the optimization process
+            using Avanaki's 2010 theoretical bounds.
 
-        target_hist (Optional[np.ndarray]): Target histogram counts (int) or weights (float) to use for histogram or fourier matching. Should be a
-            numpy array of shape (256,) or (65536,) for 8-bit or 16-bit images, or as required by the processing function.
-            Default is None. Only for mode 2.
+        target_hist (Optional[np.ndarray, Literal['equal']]): Target histogram counts (int) or weights (float) to use for histogram or fourier matching. Should be a
+            numpy array of shape (256,) for 8-bit images, or a string 'equal' for histogram equalization.
+            Default is None.
             E.g.,
                 from shinier.utils import imhist
                 target_hist = imhist(im)
@@ -119,6 +123,14 @@ class Options:
                 rho, theta = cart2pol(np.real(fftim), np.imag(fftim))
                 target_spectrum = rho
 
+    --------------------------------------------------EXTRA--------------------------------------------------------
+        verbose (Literal[-1, 0, 1, 2]): Default = 0.
+            -1: Nothing is printed (used for unit tests);
+            0: Minimal processing steps are printed;
+            1: Additional info about image and channels being processed are printed;
+            2: Additional info about the results of internal tests are printed.
+
+
     """
     def __init__(
             self,
@@ -143,16 +155,17 @@ class Options:
             target_lum: Optional[Iterable[Union[int, float]]] = (0, 0),
             rgb_weights: Literal[1, 2, 3, 4] = 3,
 
-            hist_specification: Literal[0, 1] = 0,
+            hist_specification: Literal[1, 2, 3, 4] = 4,
             hist_optim: Literal[0, 1] = 0,
-            hist_iterations: int = 5,
+            hist_iterations: int = 10,
             step_size: int = 34,
-            target_hist: Optional[np.ndarray] = None,
+            target_hist: Optional[Union[np.ndarray, Literal['equal']]] = None,
 
             rescaling: Optional[Literal[0, 1, 2, 3]] = 2,
             target_spectrum: Optional[np.ndarray] = None,
-            iterations: int = 2
+            iterations: int = 2,
 
+            verbose: Literal[-1, 0, 1, 2] = 0  # -1: Nothing is printed (used for unit tests); 0: Minimal processing steps are printed; 1: Additional info about image and channels being processed are printed; 2: Additional info about the results of internal tests are printed.
     ):
         self.images_format = images_format
         self.input_folder = Path(input_folder).resolve()
@@ -168,7 +181,7 @@ class Options:
         self.as_gray = 2 if self.legacy_mode else as_gray
         self.dithering = dithering
 
-        self.conserve_memory = conserve_memory if mode in [5,6,7,8] else False
+        self.conserve_memory = conserve_memory if mode in [5, 6, 7, 8] else False
         self.seed = seed
 
         self.safe_lum_match = safe_lum_match
@@ -184,6 +197,9 @@ class Options:
         self.rescaling = 0 if self.mode in [1, 2] else rescaling if rescaling is not None else 2
         self.target_spectrum = target_spectrum
         self.iterations = iterations if mode in [5,6,7,8] else 1
+
+        self.verbose = verbose
+
 
         # Override validation and
         if not self.legacy_mode:
@@ -211,7 +227,7 @@ class Options:
         if self.images_format not in ['png', 'tif', 'tiff', 'jpg', 'jpeg']:
             raise ValueError("images format must be either 'png', 'tif', 'tiff', 'jpg' or 'jpeg'")
         if self.masks_format not in ['png', 'tif', 'tiff', 'jpg', 'jpeg'] and self.whole_image == 3:
-            raise ValueError("masks format muse be either 'png', 'tif', 'tiff', 'jpg' or 'jpeg' if whole_image == 3")
+            raise ValueError("masks format must be either 'png', 'tif', 'tiff', 'jpg' or 'jpeg' if whole_image == 3")
         if self.whole_image not in [1, 2, 3]:
             raise ValueError("whole_image must be 1, 2 or 3. See Options")
         if self.background not in range(0,256) and self.background != 300:
@@ -236,13 +252,13 @@ class Options:
             raise TypeError("safe_lum_match must be a boolean value.")
         if not (isinstance(self.target_lum, Iterable) and all([isinstance(item, (float, int)) for item in self.target_lum]) and len(self.target_lum) == 2):
             raise ValueError("target_lum should be an iterable of two numbers")
-        if not (self.target_lum[0] >= 0 and self.target_lum[0] <= 255):
+        if not (0 <= self.target_lum[0] <= 255):
             raise ValueError(f"Mean luminance is {self.target_lum[0]} but should be between 0 and 255")
         if self.target_lum[1] < 0:
             raise ValueError(f"Standard deviation is {self.target_lum[1]} but should be greater than or equal to 0")
 
-        if self.hist_specification not in [0, 1]:
-            raise ValueError("hist_specification must be 0 or 1. See Options")
+        if self.hist_specification not in [1, 2, 3, 4]:
+            raise ValueError("hist_specification must be 1, 2, 3 or 4. See Options")
         if self.hist_optim not in [0, 1]:
             raise ValueError("Optim must be 0 or 1. See Options")
         if self.hist_iterations < 1:
@@ -252,18 +268,20 @@ class Options:
         if self.step_size < 1:
             raise ValueError("Step size must be at least 1. See Options")
         if self.target_hist is not None:
-            if not isinstance(self.target_hist, np.ndarray):
-                raise TypeError("target_hist must be a numpy.ndarray.")
-            if self.as_gray:
-                if self.target_hist.squeeze().ndim != 1:
-                    raise ValueError("For grayscale images (as_gray is 1, 2, 3, 4), target_hist must be 1D (shape (256,) or (65536,)).")
-                if np.prod(self.target_hist.shape) not in [256, 65536]:
-                    raise ValueError("target_hist must have 256 or 65536 values (for 8 or 16 bits).")
-            else:
-                if self.target_hist.ndim != 2:
-                    raise ValueError("For color images (as_gray = 0), target_hist must be 2D (shape (256, 3) or (65536, 3)).")
-                if self.target_hist.shape[0] not in [256, 65536] or self.target_hist.shape[1] != 3:
-                    raise ValueError("target_hist must have shape (256, 3) or (65536, 3) for RGB images.")
+            if (not isinstance(self.target_hist, (np.ndarray, str))) or (isinstance(self.target_hist, str) and self.target_hist != 'equal'):
+                raise TypeError("target_hist must be either a numpy.ndarray or a string = 'equal' for histogram equalization.")
+            if isinstance(self.target_hist, np.ndarray):
+                if self.as_gray:
+                    if self.target_hist.squeeze().ndim != 1:
+                        raise ValueError("For grayscale images (as_gray is 1, 2, 3, 4), target_hist must be 1D (shape (256,)).")
+                    if np.prod(self.target_hist.shape) not in [256]:
+                        raise ValueError("target_hist must have 256 for 8 bits images.")
+                else:
+                    if self.target_hist.ndim != 2:
+                        raise ValueError("For color images (as_gray = 0), target_hist must be 2D (shape (256, 3)).")
+                    if self.target_hist.shape[0] not in [256] or self.target_hist.shape[1] != 3:
+                        raise ValueError("target_hist must have shape (256, 3) for RGB images.")
+
             # if not np.issubdtype(self.target_hist.dtype, np.integer):
             #     raise TypeError("target_hist must contain integer values (pixel counts per bin).")
         if self.rgb_weights not in [1, 2, 3, 4]:
@@ -280,3 +298,24 @@ class Options:
                 raise TypeError('The target spectrum must be a numpy array of np.float64.')
         if self.mode == 9 and self.dithering == 0:
             raise ValueError("The dithering option cannot be 0 for mode 9. Should be either 1 or 2.")
+
+        if self.verbose not in [-1, 0, 1, 2]:
+            raise ValueError('Verbose should be -1, 0, 1 or 2. See docstrings for definition.')
+
+    def _assumptions_warning(self):
+        msg = None
+        if self.as_gray > 0:
+            if self.mode in [1]:
+                msg = '[warning to user] Luminance matching assumes that the input images are linearly related to luminance, which is not the case for most sRGB images.'
+            if self.mode in [2, 5, 6, 7, 8]:
+                msg = "[warning to user] `hist_match` operates directly on intensity values and does not assume linear luminance scaling."
+        else:
+            if self.mode in [2, 5, 6, 7, 8]:
+                msg = '\n'.join([
+                    "[warning to user] By default, `hist_match` is applied independently to each color channel.",
+                    'This may produce inaccurate color relationships or out-of-gamut results.',
+                    "If joint color consistency is required, consider using histogram matching of joint RGB distributions",
+                    "or other color-aware distribution matching methods."])
+        if msg is not None:
+            console_log(msg=msg, indent_level=0, color=Bcolors.WARNING, verbose=self.verbose >= 1)
+

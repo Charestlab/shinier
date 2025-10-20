@@ -139,6 +139,7 @@ class ImageListIO:
         self.src_paths: List[Optional[Path]] = []  # immutable provenance
         self.store_paths: List[Path] = []
         self.reference_size: Optional[Tuple[int, int]] = None
+        self.n_channels: Optional[int] = None
         self.n_dims: Optional[int] = None
         self.n_images: int = 0
         self._temp_dir: Optional[Path] = None
@@ -269,6 +270,7 @@ class ImageListIO:
         if self.reference_size is None:
             self.reference_size = image_size
             self.n_dims = image.ndim
+            self.n_channels = image.shape[2] if self.n_dims == 3 else 1
         elif self.reference_size != image_size:
             raise ValueError(f"Image size {image_size} does not match reference size {self.reference_size}.")
         if self.dtype is None:
@@ -401,6 +403,9 @@ class ImageListIO:
 
     def _save_image(self, idx: int, image: np.ndarray, save_dir: Optional[Path] = None) -> None:
         """ Save an image to the temporary directory. """
+        if getattr(self, "_read_only", False):
+            raise RuntimeError("This ImageListIO fork is read-only; cannot modify items.")
+
         if save_dir is None and self.conserve_memory:
             self._ensure_temp_dir()
             save_dir = self._temp_dir
@@ -460,5 +465,5 @@ class ImageListIO:
         self._cleanup_temp_dir()
 
     def __del__(self) -> None:
-        """ Clean up temporary directory upon object destruction. """
+        """ Clean up the temporary directory upon object destruction. """
         self._cleanup_temp_dir()

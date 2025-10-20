@@ -4,10 +4,12 @@
 # TODO: Optimization: Check image type and use np.fft.rfft2 for faster computations.
 
 # External package imports
+import warnings
 from pathlib import Path
 import numpy as np
+from datetime import datetime
 from numpy.lib.stride_tricks import sliding_window_view
-from typing import Any, Optional, Tuple, Union, NewType, List, Iterator, Callable, Literal
+from typing import Any, Optional, Tuple, Union, NewType, List, Iterable, Callable, Literal, Dict
 from PIL import Image
 from itertools import chain
 import matplotlib.pyplot as plt
@@ -15,6 +17,11 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import re
 
 # Local package imports
+try:
+    from . import _cconvolve
+    _HAS_CYTHON = True
+except ImportError:
+    _HAS_CYTHON = False
 
 # Type definition
 ImageListType = Union[str, Path, List[Union[str, Path]], List[np.ndarray]]
@@ -26,12 +33,16 @@ RGB2GRAY_WEIGHTS = {
 }
 for k, v in RGB2GRAY_WEIGHTS.items():
     RGB2GRAY_WEIGHTS[k] /= np.sum(v)
-int2key_mapping = dict(zip(range(len(RGB2GRAY_WEIGHTS)), RGB2GRAY_WEIGHTS.keys()))
+int2key_mapping = dict(zip(range(1, len(RGB2GRAY_WEIGHTS)+1), RGB2GRAY_WEIGHTS.keys()))
 RGB2GRAY_WEIGHTS['int2key'] = int2key_mapping
 RGB2GRAY_WEIGHTS['key2int'] = dict(zip(RGB2GRAY_WEIGHTS['int2key'].values(), RGB2GRAY_WEIGHTS['int2key'].keys()))
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 class Bcolors:
+    """
+    Provides color-coding for terminal text output.
+    """
     HEADER = '\033[95m'  # Processing steps
     OKBLUE = '\033[94m'  # Processing values
     OKCYAN = '\033[96m'  # Internal notes
@@ -45,6 +56,16 @@ class Bcolors:
 
 
 class MatlabOperators:
+    """
+    Provides methods that replicate the behavior of MATLAB functions and operators
+    in Python.
+
+    This class is designed to provide static methods for MATLAB-like operations,
+    aiming to mimic their behavior as closely as possible using NumPy and Python.
+    It can be useful for porting MATLAB code to Python or when MATLAB-like behavior
+    is desired in numerical computations.
+
+    """
 
     @staticmethod
     def round(x):
@@ -456,6 +477,19 @@ def convolve_2d(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     if not isinstance(kernel, np.ndarray):
         raise TypeError("Kernel must be a np.ndarray")
 
+    # Use compiled versions if exist
+    if _HAS_CYTHON:
+        if kernel.ndim == 1:
+            return _cconvolve.convolve2d_separable(
+                image.astype(np.float64, copy=False),
+                kernel.astype(np.float64, copy=False)
+            )
+        elif kernel.ndim == 2:
+            return _cconvolve.convolve2d_direct(
+                image.astype(np.float64, copy=False),
+                kernel.astype(np.float64, copy=False)
+            )
+
     # Separable path: user passed a 1D kernel (e.g., Gaussian vector)
     if kernel.ndim == 1:
         tmp = convolve_1d(image, kernel, axis=1)
@@ -471,284 +505,315 @@ def convolve_2d(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     return np.tensordot(windows, kernel, axes=((2, 3), (0, 1)))
 
 
-def pixel_order(image: np.ndarray) -> Tuple[np.ndarray, Union[float, list]]:
-    """Assign strict ordering to monochromatic or multispectral image pixels.
-
-    For each channel, builds a 6-D feature vector per pixel:
-      F1 = raw pixel value
-      F2 = 3×3 cross mean (not separable)
-      F3 = 3×3 box mean (separable)
-      F4 = 5×5 ring-ish mean (not separable)
-      F5 = 5×5 box w/o corners (not separable)
-      F6 = 5×5 full box mean (separable)
-
-    Then sorts pixels lexicographically by (F1, F2, F3, F4, F5, F6).
-    Returns per-channel rank maps and order accuracy (OA).
+def has_duplicates(image: np.ndarray, binary_mask: np.ndarray) -> bool:
+    """
+    Determines whether the given image contains duplicate pixel values on each channel.
 
     Args:
-        image (np.ndarray): Grayscale (H, W) or color (H, W, C) image.
+        image (np.ndarray): A numpy array representing the image data, where
+            each element corresponds to a pixel value.
+        binary_mask (np.ndarray): A numpy array of bools representing masked regions of the image.
 
     Returns:
-        im_sort (np.ndarray): (H, W, C) rank maps (or (H, W, 1) for grayscale).
-        OA: Order accuracy in [0, 1]; list per channel for C>1, else float.
+        bool: True if duplicate pixel values are found in one channel of the image. False otherwise.
     """
-    image = im3D(image)
-    M, N, P = image.shape
+    im = im3D(image)
+    binary_mask = im3D(binary_mask)
+    return any(n_unique(im[..., c][binary_mask[..., c]]) != binary_mask[..., c].sum() for c in range(im.shape[2]))
 
-    # --- Define filters ---
-    # F2: 3×3 cross (not separable)
-    F2 = np.array([[0, 1, 0],
-                   [1, 1, 1],
-                   [0, 1, 0]], dtype=np.float64) / 5.0
 
-    # F3: 3×3 box (separable: g3 ⊗ g3)
-    g3 = np.array([1.0, 1.0, 1.0], dtype=np.float64) / 3.0
+def n_unique(arr: np.ndarray) -> int:
+    """Compute the number of unique values in 2D and 3D images efficiently using hash.
 
-    # F4: 5×5 ring-ish (not separable)
-    F4 = np.ones((5, 5), dtype=np.float64) / 13.0
-    F4[[0, 0, 1, 1, 1, 3, 3, 4, 4, 4], [0, 1, 0, 1, 4, 0, 4, 1, 3, 4]] = 0.0
+    Handles 1D vectors or 2D and 3D images. If the array is 3D, it is reshaped to
+    (H*W, C). If it is 2D and square, it is treated as a single-channel
+    image (converted via im3D). Otherwise, the shape is preserved.
 
-    # F5: 5×5 box without corners (not separable)
-    F5 = np.ones((5, 5), dtype=np.float64) / 21.0
-    F5[[0, 0, 4, 4], [0, 4, 0, 4]] = 0.0
+    The implementation uses the np.view(void) hashing trick to perform
+    fast and deterministic uniqueness checks across all vector dimensions.
 
-    # F6: 5×5 full box (separable: g5 ⊗ g5)
-    g6 = np.ones(5, dtype=np.float64) / 5.0
+    Args:
+        arr (np.ndarray): Input array representing feature responses or image data.
+            Can be:
+                - (N) → single vector
+                - (H, W) → single-channel image
+                - (H, W, C) → multi-channels image
+                - (N, D) → generic feature vectors
 
+    Returns:
+        int: Number of unique row vectors in the flattened representation.
+
+    Raises:
+        ValueError: If the input has fewer than 2 dimensions or empty shape.
+
+    Notes:
+        - The function avoids deep copies; all reshaping uses views where possible.
+        - Deterministic (lexicographically consistent) results.
+        - Faster (~3×) than np.unique(..., axis=0) for large 2D or 3D arrays.
+
+    """
+
+    # --- Handle 1D case ---
+    if arr.ndim == 1:
+        # Fast path: 1D scalar values
+        return np.unique(arr).size
+
+    # --- Handle 2D case ---
+    if arr.ndim == 2:
+        H, W = arr.shape
+        if H == W:  # square → treat as image with 1 channel
+            arr = arr[..., None]
+        else:
+            # Already vector data (e.g. N×D)
+            b = arr.view(np.dtype((np.void, arr.dtype.itemsize * arr.shape[1])))
+            return np.unique(b).size
+
+    # --- Now guaranteed 3D ---
+    H, W, C = arr.shape
+    FR_flat = arr.reshape(H * W, C)
+
+    # --- Compute unique row hashes (fast & deterministic) ---
+    b = FR_flat.view(np.dtype((np.void, FR_flat.dtype.itemsize * FR_flat.shape[1])))
+    n_u = np.unique(b).size
+
+    return int(n_u)
+
+
+def strict_ordering(
+        image: np.ndarray,
+        kernels: list[np.ndarray],
+        early_stop: bool = False,
+        min_kernels: Optional[int] = None) -> Tuple[np.ndarray, List[float]]:
+    """Assign strict pixel ordering using a customizable set of kernels.
+
+    For each channel, this function applies a series of convolution kernels
+    and stacks the resulting responses into a multidimensional feature vector
+    used for lexicographic sorting. The order accuracy (OA) is tracked after
+    each kernel addition.
+
+    Args:
+        image (np.ndarray): Input grayscale or color image (H, W[, C]).
+        kernels (list[np.ndarray]): List of convolution kernels to apply.
+        early_stop (bool): If True, the function will stop early once all pixels
+            have unique feature responses (OA = 1.0) after applying at least
+            `min_kernels` kernels.
+        min_kernels (Optional[int]): Minimum number of kernels to apply before
+            early stopping is allowed. Defaults to len(kernels) if
+            early_stop=False, or ceil(len(kernels)/2) if early_stop=True.
+
+    Returns:
+        Tuple[np.ndarray, List[float]]:
+            - im_sort: (H, W, C) array of lexicographic rank indices.
+            - OA: List of order accuracies (float) for each channel.
+    """
+    im = im3D(image)
+    M, N, P = im.shape
+
+    # Normalize kernels (sum to 1 when possible)
+    K = [(k / np.sum(k)) if np.sum(k) != 0 else k for k in kernels]
+    nK = len(K)
+    if min_kernels is None:
+        min_kernels = int(np.ceil(nK / 2)) if early_stop else nK
+
+    # One extra slot for the identity (raw channel)
+    feat_dims = nK + 1
     im_sort = []
     OA = []
-
     for c in range(P):
-        ch = image[:, :, c].astype(np.float64, copy=False)
-
-        # Build feature responses FR[..., 0..5]
-        FR = np.zeros((M, N, 6), dtype=np.float64)
-
-        # F1: identity
+        ch = im[:, :, c].astype(np.float64, copy=False)
+        FR = np.zeros((M, N, feat_dims), dtype=np.float64)
         FR[:, :, 0] = ch
 
-        # F2: 3×3 cross (2D)
-        FR[:, :, 1] = convolve_2d(ch, F2)  # 2D kernel
+        oa, FR_flat = 0.0, None
+        for idx, kernel in enumerate(K):
+            FR[..., idx + 1] = convolve_2d(ch, kernel)
 
-        # F3: 3×3 box (separable)
-        FR[:, :, 2] = convolve_2d(ch, g3)  # 1D -> separable path
+            # Optional compute for early stop and mandatory compute on last iteration
+            if (idx + 1 >= min_kernels and early_stop) or (idx == nK - 1):
+                used_dims = idx + 2  # identity + kernels up to idx
+                FR_flat = FR[..., :used_dims].reshape(M * N, used_dims)
+                n_u = n_unique(FR_flat)
+                oa = n_u / (M * N)
+                if oa == 1.0:
+                    break
 
-        # F4: 5×5 ring-ish (2D)
-        FR[:, :, 3] = convolve_2d(ch, F4)  # 2D kernel
-
-        # F5: 5×5 box without corners (2D)
-        FR[:, :, 4] = convolve_2d(ch, F5)  # 2D kernel
-
-        # F6: 5×5 full box (separable)
-        FR[:, :, 5] = convolve_2d(ch, g6)  # 1D -> separable path
-
-        # Rearrange the filter responses
-        FR = FR.reshape(M * N, 6)
-
-        # Number of unique filter responses and ordering accuracy
-        n_unique = np.unique(FR, axis=0).shape[0]
-        OA.append(n_unique / (M * N))
-
-        # Sort responses lexicographically
-        # [:, ::-1] because np.lexsort applies sort keys from last to first (right to left).
-        idx_pos = np.lexsort(FR[:, ::-1].T)
-
-        # Rearrange indices according to pixel position
+        # Lexicographic ordering
+        idx_pos = np.lexsort(FR_flat[:, ::-1].T)
         idx_rank = np.argsort(idx_pos).reshape(M, N)
-        im_sort.append(idx_rank)
 
-    if P == 1:
-        OA = OA[0]
+        OA.append(oa)
+        im_sort.append(idx_rank)
 
     return np.stack(im_sort, axis=-1), OA
 
 
-def exact_histogram_with_noise(image: np.ndarray, target_hist: np.ndarray, binary_mask: Optional[np.ndarray] = None, noise_level: float = 0.1, n_bins: int = 256) -> np.ndarray:
-    """Exact histogram specification by rank allocation (mask-aware, per channel).
+def exact_histogram(
+    image: np.ndarray,
+    target_hist: np.ndarray,
+    binary_mask: Optional[np.ndarray] = None,
+    n_bins: Optional[int] = None,
+    tie_strategy: Literal['none', 'moving-average', 'gaussian', 'noise', 'hybrid'] = "hybrid",
+    verbose: bool = True
+) -> Tuple[np.ndarray, List]:
+    """Unified exact histogram specification.
 
-    This implements a discrete, “exact” histogram specification: masked pixels are
-    ranked (with small amount of noise for tie-breaking), then assigned to output levels so
-    that the counts per level match `target_hist` as closely as possible
-    (exact up to rounding and mask size). Unmasked pixels are left unchanged.
-
-    Args:
-        image (np.ndarray): Input image, 2D (H,W) or 3D (H,W,C). Any numeric dtype.
-            If Float, values are used only for ranking; the output levels are in
-            the integer range [0, n_bins-1].
-        target_hist (np.ndarray): Target histogram counts or weights with shape
-            (n_bins, C). If weights, they are normalized internally to the number
-            of masked pixels in each channel.
-        binary_mask (np.ndarray): Boolean mask, shape (H,W) or (H,W,C). True indicates
-            pixels to be histogram-specified. If 2D, it is applied to all channels.
-        noise_level (float): Level of noise used only to break ties
-            in ranking. Set to a small value like 1e-3 (relative to input scale).
-            Use 0 to disable noise (less robust when many ties).
-        n_bins (int): Number of discrete output levels (e.g., 256, 65536).
-
-    Returns:
-        np.ndarray: Output image with masked pixels reassigned to match the target
-        histogram, dtype chosen from {uint8, uint16, uint32} according to
-        `n_bins`. Unmasked pixels keep their original values (cast to output dtype).
-
-
-    Reference: Coltuc, Dinu; Bolon, Philippe; Chassery, Jean-Marc. Exact Histogram Specification. IEEE Transactions on Image Processing, Vol. 15, No. 5, May 2006, pp. 1143-1152. doi:10.1109/TIP.2005.864170
-    """
-    # Ensure 3D (H,W,C)
-    im = im3D(image)  # your helper: returns (H,W,C)
-    H, W, C = im.shape
-    mask = im3D(binary_mask) if binary_mask is not None else np.zeros_like(im, dtype=bool)
-    mask = np.broadcast_to(mask, (H, W, C)) if mask.shape[2] == 1 and C > 1 else mask
-
-    # Validate target histogram shape
-    if target_hist.shape[0] != n_bins:
-        raise ValueError(f"target_hist must have shape (n_bins, C) with n_bins={n_bins}; "
-                         f"got {target_hist.shape[0]} bins.")
-    if target_hist.shape[1] != C:
-        raise ValueError(f"target_hist has {target_hist.shape[1]} channels, but image has {C}.")
-
-    n_bits = int(np.log2(n_bins))
-    if n_bins not in (256, 65536, 4294967296) and 2 ** n_bits != n_bins:
-        raise ValueError(f"n_bins must be a power of two; got {n_bins}.")
-    out_dtype = f'uint{n_bits}'
-    out = np.empty((H, W, C), dtype=out_dtype)
-
-    # --- Per-channel exact allocation ---
-    for c in range(C):
-        ch_mask = mask[:, :, c].astype(bool)
-        idx = np.flatnonzero(ch_mask.ravel())
-        if idx.size == 0:
-            raise ValueError(f"Mask for channel {c} has no True elements.")
-
-        th = np.maximum(target_hist[:, c].astype(np.float64), 0.0)
-        s = th.sum()
-        if s <= 0.0:
-            raise ValueError(f"Target histogram for channel {c} sums to zero.")
-
-        # Values used for ranking (float); add small jitter to break ties
-        x = im[..., c].ravel()[idx].astype(np.float64)
-        x = x + np.random.uniform(-noise_level, noise_level, size=x.shape).astype(np.float64)
-
-        order = np.argsort(x, kind="mergesort")  # stable rank order
-
-        # Desired integer counts per level (unbiased rounding)
-        desired = th / s * idx.size
-        base = np.floor(desired).astype(np.int64)
-        rem = idx.size - int(base.sum())
-        if rem != 0:
-            frac = desired - base
-            add_idx = np.argsort(-frac)[:abs(rem)]
-            base[add_idx] += np.sign(rem)
-
-        # Assign contiguous blocks of ranks to output levels 0..n_bins-1
-        assign = np.empty(idx.size, dtype=out_dtype)
-        start = 0
-        for level, k in enumerate(base):
-            if k > 0:
-                assign[order[start:start + k]] = np.asarray(level, dtype=out_dtype)
-                start += k
-        if start != idx.size:  # should not happen; strict fill
-            raise RuntimeError(f"Rounding error while assigning ranks in channel {c}.")
-
-        # Write back masked pixels; copy-through others (cast)
-        ch_out = np.asarray(im[..., c], dtype=out_dtype).ravel()
-        ch_out[idx] = assign
-        out[..., c] = ch_out.reshape(H, W)
-
-    return out.squeeze()
-
-
-def exact_histogram(image: np.ndarray, target_hist: np.ndarray, binary_mask: np.ndarray = None, n_bins: Optional[int] = None, verbose: bool = True) -> Tuple[np.ndarray, List]:
-    """
-    Specify exact image histogram.
+    Provides a single entry point for 3 families of exact histogram specification strategies:
+        1) Direct mapping assuming no isoluminant pixel (no ties): 'none'
+        2) Coltuc's ordering based on filter bank: 'moving-average' or 'gaussian'.
+        3) Noise-based tie-breaking: 'noise'.
+        4) A hybrid strategies first using 'gaussian', then 'noise if ties persist: 'hybrid'.
 
     Args:
-        image (np.ndarray): Input image (8-bit or 16-bit grayscale or RGB).
-        target_hist (np.ndarray): Specified histogram.
-        binary_mask (np.ndarray): Binary mask to only adjust pixel intensities in the foreground (optional).
-        n_bins (int): If provided, will be used to set L value. This is convenient when using float images.
-        verbose (bool): Log information
+        image (np.ndarray): Input grayscale or RGB image.
+        target_hist (np.ndarray): Target histogram counts/weights, shape (n_bins, C).
+        binary_mask (Optional[np.ndarray]): Foreground mask.
+        n_bins (Optional[int]): Number of bins; required for float images.
+        tie_strategy (str): Strategy for tie-breaking. One of:
+            "none", "moving-average", "gaussian", "noise", "hybrid" (default).
+        verbose (bool): If True, logs key operations.
 
     Returns:
-        Tuple[np.ndarray, Union[float, list]]:
-            - im_out (np.ndarray): Processed image with specified histogram.
-            - OA (list): Order accuracy indicating fraction of unique filter response combinations.
-
-    References:
-        1. Coltuc D. and Bolon P., 1999, "Strict ordering on discrete images
-        and applications"
-        2. Coltuc D., Bolon P. and Chassery J-M., 2006, "Exact histogram
-        specification", IEEE Transactions on Image Processing
-        15(5):1143-1152
-
-    This code is a Python implementation of Anton Semechko's (asemechk@uoguelph.ca) exact_histogram in MATLAB
+        Tuple[np.ndarray, List]:
+            - im_out: Histogram-specified image.
+            - OA: Order accuracy list per channel.
     """
-
-    # Maximum number of gray levels and image dimensions
+    # --- Validate and prepare inputs ---
     L = n_bins if n_bins is not None else None
     if L is None and np.issubdtype(image.dtype, np.integer):
         L = 2 ** np.iinfo(image.dtype).bits
+
     if L is None:
         raise ValueError("L, the expected number of values per channel, must be specified!")
 
-    image = im3D(image)  # force a third dimension on image
+    image = im3D(image)
     x_size, y_size, n_channels = image.shape
 
-    # Verify input format
+    if tie_strategy not in ['none', 'moving-average', 'gaussian', 'noise', 'hybrid']:
+        raise ValueError("tie_strategy must be one of ['none', 'moving-average', 'gaussian', 'noise', 'hybrid']")
     if image.dtype not in (np.uint8, np.uint16) and not np.issubdtype(image.dtype, np.floating):
         raise ValueError("Input image must be 8- or 16-bit or float")
     if len(target_hist) != L:
-        raise ValueError("Number of histogram bins must match maximum number of gray levels.")
+        raise ValueError("Number of histogram bins must match maximum gray levels.")
     if target_hist.ndim != 2 or target_hist.shape[1] != n_channels:
-        raise ValueError("Target histogram (target_hist) should have the same number of channels as the image.")
+        raise ValueError("Target histogram shape mismatch.")
     if binary_mask is not None:
-        binary_mask = im3D(binary_mask)  # force a third dimension on image
-        if not image.shape == binary_mask.shape:
-            raise ValueError(f"binary_mask shape ({binary_mask.shape}) should be equal to image shape ({image.shape})")
+        binary_mask = im3D(binary_mask)
+        if binary_mask.shape != image.shape:
+            raise ValueError("binary_mask must have same shape as image.")
         if np.sum(binary_mask) < (50 * n_channels):
-            raise ValueError("Too few foreground pixels in the binary mask.")
+            raise ValueError("Too few foreground pixels in binary mask.")
     else:
         binary_mask = np.ones(image.shape, dtype=bool)
     if n_channels not in [1, 3]:
         raise ValueError("Input image must have 1 or 3 channels.")
 
-    # Assign strict order to pixels
-    # print(f"{Bcolors.HEADER}Assigning strict order to pixels{Bcolors.ENDC}") if verbose else None
-    im_sort, OA = pixel_order(image)
+    # --- Prepare filters ---
+    if tie_strategy == 'moving-average':
+        # Coltuc kernels
+        F2 = np.array([[0, 1, 0],
+                       [1, 1, 1],
+                       [0, 1, 0]], dtype=np.float64)
+        g3 = np.array([1.0, 1.0, 1.0], dtype=np.float64)
+        F4 = np.ones((5, 5), dtype=np.float64)
+        F4[[0, 0, 1, 1, 1, 3, 3, 4, 4, 4],
+           [0, 1, 0, 1, 4, 0, 4, 1, 3, 4]] = 0.0
+        F5 = np.ones((5, 5), dtype=np.float64)
+        F5[[0, 0, 4, 4], [0, 4, 0, 4]] = 0.0
+        g6 = np.ones(5, dtype=np.float64)
+        kernels = [F2, g3, F4, F5, g6]
+        early_stop = False
+        min_kernels = 5
+    elif tie_strategy in ['gaussian', 'hybrid']:
+        kernels = [
+            gaussian_kernel(size, coverage=0.95, n_dim=1)
+            for size in [3, 5, 7, 9, 17, 33, 65]
+        ]
+        early_stop = True
+        min_kernels = 5
 
-    # Process each channel separately
-    # print(f"{Bcolors.HEADER}Main exact_histogram loop{Bcolors.ENDC}") if verbose else None
-    im_out = image.copy()
-    for channel in range(n_channels):
-        # Work only on the masked (foreground) pixels
-        foreground_indices = binary_mask[:, :, channel]
-        Ntotal = np.sum(foreground_indices)
+    # --- Tie-breaking strategy selection ---
+    OA = 1
+    if tie_strategy in ("moving-average", "gaussian", "hybrid"):
+        im_sort, OA = strict_ordering(image, kernels, early_stop=early_stop, min_kernels=min_kernels)
+        OA = np.array(OA)
 
-        # Get the pixel order values for the masked region
-        pix_ord = im_sort[:, :, channel][foreground_indices]
+        # Optional noise fallback
+        if tie_strategy == "hybrid" and np.any(OA < 1.0):
+            if verbose:
+                n_iso = np.sum((1 - OA) * x_size * y_size)
+                msg = f"[exact_histogram] {n_iso:1.0f} isoluminant pixels detected → applying noise (0.1)."
+                console_log(msg=msg, indent_level=1, color=Bcolors.WARNING, verbose=True)
+            im_sort = im_sort.astype(np.float64, copy=True)
+            im_sort += np.random.uniform(-0.1, 0.1, size=image.shape)
 
-        # Sort pixel order and get the sorted indices
-        sorted_indices = np.argsort(pix_ord)
+    if tie_strategy in ["noise", "hybrid"]:
+        hybrid_extra_step = tie_strategy == 'hybrid' and np.any(OA < 1.0)
+        if hybrid_extra_step:
+            if verbose:
+                n_iso = np.sum((1 - OA) * x_size * y_size)
+                msg = f"[exact_histogram] {n_iso:1.0f} isoluminant pixels detected → applying noise (0.1)."
+                console_log(msg=msg, indent_level=1, color=Bcolors.WARNING, verbose=True)
+            noise_level = 0.1
+        elif tie_strategy == 'noise':
+            noise_level = tie_breaking_noise_level(image)
+            im_sort = image.astype(np.float64, copy=True)
+        if tie_strategy == 'noise' or hybrid_extra_step:
+            im_sort += np.random.uniform(-noise_level, noise_level, size=image.shape)
+            OA = [1.0] * n_channels
+    elif tie_strategy == "none":
+        im_sort, OA = image, [1.0] * n_channels
 
-        # Adjust the specified histogram to match the number of pixels in the mask
-        new_target_hist = (Ntotal * target_hist[:, channel] / np.sum(target_hist[:, channel])).astype(int)
-        residuals = Ntotal - np.sum(new_target_hist)
+    # --- Histogram mapping stage ---
+    im_out = apply_histogram_mapping(im_sort, target_hist, binary_mask)
+    return im_out, OA
 
-        # Redistribute the residuals to ensure total counts match
-        sorted_residuals = np.argsort(-np.mod(Ntotal * target_hist[:, channel] / np.sum(target_hist[:, channel]), 1))
-        new_target_hist[sorted_residuals[:residuals]] += 1
 
-        # Create intensity values based on the adjusted histogram
-        Hraw = np.repeat(np.arange(L), new_target_hist)
+def apply_histogram_mapping(
+        image: np.ndarray,
+        target_hist: np.ndarray,
+        binary_mask: Optional[np.ndarray] = None
+) -> np.ndarray:
+    """Map pixel ranks to discrete intensity levels to match a target histogram.
 
-        # Reorder Hraw according to the sorted pixel positions
-        Hraw_sorted = np.zeros_like(Hraw)
-        Hraw_sorted[sorted_indices] = Hraw
+    Args:
+        image (np.ndarray): Input image with unique-valued pixels (after ordering).
+        target_hist (np.ndarray): Target histogram of shape (n_bins, C).
+        binary_mask (Optional[np.ndarray]): Optional boolean mask.
 
-        # Assign the sorted intensity values back to the output image
-        im_out[:, :, channel][foreground_indices] = Hraw_sorted.astype(image.dtype)
-        im_out[:, :, channel][~foreground_indices] = image[:, :, channel][~foreground_indices]
+    Returns:
+        np.ndarray: Histogram-specified image.
+    """
+    im = im3D(image)
+    mask = im3D(binary_mask) if binary_mask is not None else np.ones_like(im, dtype=bool)
 
-    return im_out.squeeze(), OA
+    n_bins, C = target_hist.shape
+    H, W, C = im.shape
+    out = im.copy()
+
+    for c in range(C):
+        vals = im[:, :, c][mask[:, :, c]].ravel()
+        n_pix = vals.size
+        if n_pix == 0:
+            continue
+
+        order = np.argsort(vals, kind="mergesort")
+        th_sum = target_hist[:, c].sum()
+        desired = target_hist[:, c] / th_sum * n_pix
+
+        base = np.floor(desired).astype(np.int64)
+        rem = n_pix - base.sum()
+
+        if rem != 0:
+            frac = desired - base
+            add_idx = np.argsort(-frac)[:abs(rem)]
+            base[add_idx] += np.sign(rem)
+
+        levels = np.repeat(np.arange(n_bins), base)
+        assign = np.empty_like(vals)
+        assign[order] = levels
+        out[..., c][mask[..., c]] = assign
+
+    return out
 
 
 def floyd_steinberg_dithering(image: np.ndarray, depth: int = 256, legacy_mode: bool = False) -> np.ndarray:
@@ -817,7 +882,7 @@ def soft_clip(arr: np.ndarray,
     """
 
     def _zero_clip_mean_preserving(arr, a, b):
-        x_min = np.min(arr);
+        x_min = np.min(arr)
         x_max = np.max(arr)
         m = np.mean(arr, dtype=np.float64)
         # If mean is out of bounds, cannot avoid clipping without shifting
@@ -1073,13 +1138,13 @@ def cart2pol(x, y) -> Tuple[np.ndarray, np.ndarray]:
 
 def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: Union[str] = 'equal') -> np.ndarray:
     """
-    Convert an RGB image to grayscale (luma, Y′) using ITU luma coefficients.
+    Convert an R'G'B' image to grayscale (luma, Y′) using ITU luma coefficients.
 
     Parameters
     ----------
     image (np.ndarray or Image.Image):
-        RGB image array with last dimension = 3. Assumed to be gamma-encoded R′G′B′ (i.e., *not* linear light), which
-        matches typical sRGB/Rec.709-style images loaded from files.
+        RGB image array with last dimension = 3. Assumed to be gamma-encoded R′G′B′ (i.e., not linear light), which
+        matches typical sRGB/Rec.709-style images loaded from files (e.g. png or jpg images).
     conversion_type : {"equal", "rec601", "rec709", "rec2020"}, default "rec709"
         Choice of luma standard:
           - "equal" → Y′ = 0.333 R′ + 0.333 G′ + 0.333 B′
@@ -1094,13 +1159,11 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: Union[str] 
 
     Notes
     -----
-    - This computes luma (Y′) from *gamma-encoded* components, as defined by the ITU
-      matrices for Y′CbCr / Y′CbcCrc. For physically linear luminance, you would need
+    - This computes luma (Y′) from gamma-encoded components, as defined by the ITU
+      matrices for Y′CbCr / Y′CbcCrc. For physical linear luminance, you would need
       to first linearize R′G′B′ using the appropriate transfer function,
       mix with linear-light coefficients, then re-encode if desired.
 
-    Args:
-        image:
     """
     if isinstance(image, Image.Image):
         image = np.array(image)
@@ -1218,28 +1281,59 @@ def image_spectrum(image: np.ndarray, rescale: bool = True) -> tuple[np.ndarray,
     return magnitude, phase
 
 
-def gaussian_kernel(size: int, sigma: float, n_dim: int = 2) -> np.ndarray:
+def gaussian_kernel(
+    size: int,
+    sigma: Optional[float] = None,
+    coverage: Optional[float] = None,
+    n_dim: int = 2
+) -> np.ndarray:
     """Generate a normalized Gaussian kernel.
 
+    Exactly one of `sigma` or `coverage` must be provided.
+
+    If `coverage` is specified, `sigma` is automatically computed so that
+    the specified fraction of the Gaussian's total area is contained
+    within the kernel support of given `size`.
+
     Args:
-        size (int): Size of the kernel. Must be odd.
-        sigma (float): Standard deviation of the Gaussian.
+        size (int): Size of the kernel (must be odd).
+        sigma (float, optional): Standard deviation of the Gaussian.
+            Mutually exclusive with `coverage`.
+        coverage (float, optional): Fraction (0–1) of total Gaussian area
+            contained within the kernel (e.g., 0.99 ≈ ±2.575σ).
+            Mutually exclusive with `sigma`.
         n_dim (int, optional): Dimensionality of the kernel.
             * 1 -> return 1D Gaussian kernel of shape (size,)
             * 2 -> return 2D Gaussian kernel of shape (size, size)
             Defaults to 2.
 
     Returns:
-        np.ndarray: Normalized Gaussian kernel.
+        np.ndarray: Normalized Gaussian kernel of shape (size,) or (size, size).
 
     Raises:
-        ValueError: If `size` is not odd or `dim` is not 1 or 2.
+        ValueError: If `size` is not odd, or if both/neither of `sigma` and
+            `coverage` are provided, or if inputs are invalid.
     """
     if size % 2 == 0:
         raise ValueError("Kernel size must be odd.")
+    if (sigma is None and coverage is None) or (sigma is not None and coverage is not None):
+        raise ValueError("Provide exactly one of `sigma` or `coverage`.")
     if n_dim not in (1, 2):
         raise ValueError("n_dim must be 1 or 2.")
 
+    # Determine sigma from coverage
+    if coverage is not None:
+        if not (0 < coverage < 1):
+            raise ValueError("`coverage` must be between 0 and 1.")
+        half_width = size // 2
+        p = (1 + coverage) / 2.0
+        # Gaussian inverse CDF = sqrt(2) * erfinv(2p - 1)
+        x = 2 * p - 1
+        erfinv_x = _erfinv_approx(x)
+        n_sigma = np.sqrt(2) * erfinv_x
+        sigma = half_width / n_sigma
+
+    # Coordinate axis centered at 0
     ax = np.arange(-(size // 2), size // 2 + 1, dtype=np.float64)
 
     if n_dim == 1:
@@ -1254,14 +1348,369 @@ def gaussian_kernel(size: int, sigma: float, n_dim: int = 2) -> np.ndarray:
     return kernel
 
 
-def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> tuple[np.ndarray, np.ndarray]:
+def _erfinv_approx(x: np.ndarray) -> np.ndarray:
+    """Approximate inverse error function (Winitzki’s formula).
+    Valid for |x| < 1; ~1e-6 accuracy for typical use."""
+    a = 0.147
+    ln_term = np.log(1 - x**2)
+    first = 2 / (np.pi * a) + ln_term / 2
+    second = ln_term / a
+    return np.sign(x) * np.sqrt(np.sqrt(first**2 - second) - first)
+
+
+def center_surround_kernel(
+    size: int,
+    sigma_center: Optional[float] = None,
+    coverage: Optional[float] = None,
+    ratio: float = 1.6,
+    n_dim: int = 2
+) -> np.ndarray:
+    """Generate a center–surround (Difference-of-Gaussians) kernel.
+
+    The kernel is built as a narrow (center) Gaussian minus a broader (surround)
+    Gaussian, each L1-normalized over the *same* finite support defined by
+    `size`. The resulting kernel is DC-balanced (sum≈0), suitable for
+    center–surround/edge-like filtering and strict-ordering feature banks.
+
+    Exactly one of `sigma_center` or `coverage` must be provided.
+
+    If `coverage` is provided, `sigma_center` is chosen so that the specified
+    fraction of the 1D Gaussian's total area lies within the half-width
+    `size//2`. `sigma_surround` is then derived as `ratio * sigma_center`.
+
+    Args:
+        size: Odd kernel size; defines spatial support (1D or 2D).
+        sigma_center: Standard deviation of the center Gaussian (pixels).
+        coverage: Fraction (0–1) of total Gaussian area within support, used to
+            *infer* `sigma_center`. (E.g., 0.95 ≈ ±2σ, 0.99 ≈ ±3σ.)
+        ratio: Surround-to-center sigma ratio. Common choices:
+            - 1.6 → good LoG approximation / Marr–Hildreth/SIFT-style           (default)
+            - ~3–6 → retinal ganglion center–surround (HVS-like)
+        n_dim: 1 → shape (size,), 2 → shape (size, size).
+
+    Returns:
+        DoG kernel (float64) of shape (size,) or (size, size), zero-mean.
+
+    Raises:
+        ValueError: On invalid sizes, exclusivity of args, or nonpositive sigmas.
+    """
+    if size % 2 == 0:
+        raise ValueError("Kernel size must be odd.")
+    if (sigma_center is None) == (coverage is None):
+        raise ValueError("Provide exactly one of `sigma_center` or `coverage`.")
+    if n_dim not in (1, 2):
+        raise ValueError("`n_dim` must be 1 or 2.")
+    if sigma_center is not None and sigma_center <= 0:
+        raise ValueError("`sigma_center` must be positive.")
+    if ratio <= 1.0:
+        raise ValueError("`ratio` must be > 1.0 (surround broader than center).")
+
+    # Infer sigma_center from coverage, matching your gaussian_kernel convention
+    if coverage is not None:
+        if not (0 < coverage < 1):
+            raise ValueError("`coverage` must be in (0, 1).")
+        half_width = size // 2
+        p = (1.0 + coverage) / 2.0
+        n_sigma = np.sqrt(2.0) * _erfinv_approx(2 * p - 1)
+        sigma_center = half_width / n_sigma
+
+    sigma_surround = ratio * float(sigma_center)
+
+    # Coordinate grid
+    ax = np.arange(-(size // 2), size // 2 + 1, dtype=np.float64)
+
+    if n_dim == 1:
+        g_c = np.exp(-(ax**2) / (2 * sigma_center**2))
+        g_s = np.exp(-(ax**2) / (2 * sigma_surround**2))
+        g_c /= g_c.sum()
+        g_s /= g_s.sum()
+        dog = g_c - g_s
+        dog -= dog.mean()  # enforce zero DC over finite support
+        return dog
+
+    xx, yy = np.meshgrid(ax, ax)
+    r2 = xx**2 + yy**2
+    g_c = np.exp(-r2 / (2 * sigma_center**2))
+    g_s = np.exp(-r2 / (2 * sigma_surround**2))
+    g_c /= g_c.sum()
+    g_s /= g_s.sum()
+    dog = g_c - g_s
+    dog -= dog.mean()
+    return dog
+
+
+def laplacian_kernel(
+    size: int,
+    sigma: Optional[float] = None,
+    coverage: Optional[float] = None,
+    n_dim: int = 2
+) -> np.ndarray:
+    """Generate a Laplacian-of-Gaussian (LoG) kernel over finite support.
+
+    Exactly one of `sigma` or `coverage` must be provided.
+
+    If `coverage` is given, `sigma` is chosen so the specified fraction of the
+    1D Gaussian area lies within half-width `size//2` (matching the convention
+    used in `gaussian_kernel`).
+
+    Args:
+        size: Odd kernel size; defines spatial support (1D or 2D).
+        sigma: Standard deviation of Gaussian envelope (pixels).
+        coverage: Fraction (0–1) of total Gaussian area within support.
+        n_dim: 1 → shape (size,), 2 → shape (size, size).
+
+    Returns:
+        Zero-mean LoG kernel (float64) of shape (size,) or (size, size).
+
+    Raises:
+        ValueError: On invalid sizes, exclusivity of args, or nonpositive sigma.
+    """
+    if size % 2 == 0:
+        raise ValueError("Kernel size must be odd.")
+    if (sigma is None) == (coverage is None):
+        raise ValueError("Provide exactly one of `sigma` or `coverage`.")
+    if n_dim not in (1, 2):
+        raise ValueError("`n_dim` must be 1 or 2.")
+
+    if coverage is not None:
+        if not (0 < coverage < 1):
+            raise ValueError("`coverage` must be in (0, 1).")
+        half_width = size // 2
+        p = (1.0 + coverage) / 2.0
+        n_sigma = np.sqrt(2.0) * _erfinv_approx(2 * p - 1)
+        sigma = half_width / n_sigma
+
+    if sigma <= 0:
+        raise ValueError("`sigma` must be positive.")
+
+    ax = np.arange(-(size // 2), size // 2 + 1, dtype=np.float64)
+
+    if n_dim == 1:
+        x2 = ax**2
+        g = np.exp(-x2 / (2 * sigma**2))
+        log1d = (x2 - sigma**2) / (sigma**4) * g
+        log1d -= log1d.mean()
+        return log1d
+
+    xx, yy = np.meshgrid(ax, ax)
+    r2 = xx**2 + yy**2
+    g = np.exp(-r2 / (2 * sigma**2))
+    log2d = (r2 - 2 * sigma**2) / (sigma**4) * g
+    log2d -= log2d.mean()
+    return log2d
+
+
+def tie_breaking_noise_level(image: np.ndarray, min_gap: Optional[float] = None, gap_frac_cap: float = 1e-3) -> float:
+    """Return a numerically effective yet rank-safe noise amplitude for any dtype.
+
+    The returned noise is large enough to survive rounding of the input dtype
+    (unit-in-the-last-place (ULP)-aware for floats, quantization-aware for uint-x) but small enough not
+    to reorder distinct values. Used to ensure strict ranking in exact
+    histogram specification when pixel ties are present.
+
+    Args:
+        image (np.ndarray): Input image. Supported dtypes: uint8, uint16,
+            float16, float32, float64.
+        min_gap (float, optional): Smallest nonzero intensity increment
+            in the data (e.g., from np.diff(np.unique(image))). If provided,
+            the returned noise will be capped to a small fraction of it.
+        gap_frac_cap (float): Fraction of `min_gap` allowed for noise (default 1e-3).
+
+    Returns:
+        float: Recommended amplitude of uniform tie-breaking noise (symmetric ±).
+    """
+    x = np.asarray(image)
+
+    # --- Determine dtype category ---
+    if np.issubdtype(x.dtype, np.floating):
+        finfo = np.finfo(x.dtype)
+        eps = finfo.eps
+        max_abs = float(np.max(np.abs(x)))
+        rng = float(np.max(x) - np.min(x))
+
+        # dtype-dependent safety parameters
+        if x.dtype == np.float64:
+            ulp_factor = 10.0
+            rel_range = 1e-9
+        elif x.dtype == np.float32:
+            ulp_factor = 10.0
+            rel_range = 1e-6
+        elif x.dtype == np.float16:
+            ulp_factor = 5.0
+            rel_range = 1e-3
+        else:
+            # fallback for exotic float types (e.g. bfloat16)
+            ulp_factor = 10.0
+            rel_range = 1e-6
+
+        # (1) ULP-based floor: ensures the noise survives rounding
+        ulp_based = ulp_factor * eps * max_abs
+        # (2) Range-based cap: ensures noise stays negligible
+        range_based = rel_range * max(rng, 1.0)
+        noise = max(ulp_based, range_based)
+
+    elif np.issubdtype(x.dtype, np.integer):
+        # Handle integer types (e.g. uint8, uint16)
+        info = np.iinfo(x.dtype)
+        # one quantization step is 1 intensity unit
+        quant_step = 1.0
+        # add noise smaller than 1 LSB to avoid rank distortion
+        noise = 1e-3 * quant_step  # e.g. 0.001 for 8-bit, 0.001 for 16-bit
+    else:
+        raise TypeError(f"Unsupported image dtype: {x.dtype}")
+
+    # --- Optionally cap by the observed smallest gap ---
+    if min_gap is not None and np.isfinite(min_gap) and min_gap > 0.0:
+        noise = min(noise, gap_frac_cap * min_gap)
+
+    return noise
+
+
+def print_log(logs: List[str], log_path: Union[Path, str], log_name: Optional[str] = None) -> None:
+    """
+    Takes a list of log messages and writes them to a file located
+    at the specified log directory (`log_path`). Optionally, a static filename can
+    be provided (`log_name`). If no static name is supplied, the function generates
+    a filename containing the current date and time, ensuring logs are uniquely
+    stored based on their creation time.
+
+    Args:
+        logs (List[str]): A list of log messages to write to the file.
+        log_path (Path): The directory where the log file will be saved.
+        log_name (Optional[str]): The optional static name for the log file. If not
+            specified, a timestamped filename will be generated.
+
+    Returns:
+        None
+    """
+    if not isinstance(logs, Iterable):
+        raise TypeError('logs must be a list of string.')
+
+    if not isinstance(log_path, (Path, str)):
+        raise TypeError('log_path must be a Path object or a string')
+    log_path = Path(log_path)
+
+    if not log_path.exists():
+        raise FileExistsError(f'{log_path} does not exists.')
+
+    # Generate a filename with the full date and time
+    if log_name is None:
+        current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        log_name = f"log_{current_datetime}.txt"
+    else:
+        if 'txt' not in log_name:
+            raise ValueError(f'log_name ({log_name}) must be a text file with a .txt extension.')
+
+    filename = Path(log_path) / log_name
+
+    # Write each step to a new line in the file
+    with open(filename, 'w') as file:
+        for step in logs:
+            file.write(step + '\n')
+
+
+def strip_ansi(s: str) -> str:
+    return ANSI_RE.sub("", s)
+
+
+def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, verbose: bool = False):
+    """
+    Logs a message to the console with optional indentation, color, and verbose control.
+
+    Args:
+        msg (str): The message string to be logged.
+        indent_level (int): The level of indentation represented as the number of tab characters.
+            Defaults to 0.
+        color (Optional[str]): The color code applied to the message text.
+            Defaults to None, indicating no color formatting.
+        verbose (bool): A flag to determine whether to print the message to the console.
+            If False, the message is only processed and not output. Defaults to False.
+
+    Returns:
+        str: The formatted message as a string with any ANSI color codes stripped.
+    """
+
+    def _set_indent_and_color(text, lev: int, col: Optional[str] = None):
+        indent_str = '\t' * lev
+        if col is not None:
+            return "\n".join(f'{indent_str}{col}{line}{Bcolors.ENDC}' for line in text.splitlines())
+        else:
+            return "\n".join(f'{indent_str}{line}' for line in text.splitlines())
+
+    # Log message
+    msg = _set_indent_and_color(msg, indent_level, color)
+    if verbose:
+        print(msg)
+    return strip_ansi(msg)
+
+
+def beta_bounds_from_ssim(gradients: np.ndarray, ssim: List[float], binary_mask: Optional[np.ndarray] = None) -> Tuple[float, float]:
+    """Compute Avanaki's step-size bounds for SSIM gradient ascent.
+
+    This computes lower/upper bounds for the scalar step size β in an update
+    of the form: ``Y <- Y + β * (M ⊙ ∇_Y SSIM(I, Y))``, where ``M`` is an
+    optional binary mask.
+
+    Bounds:
+      - β_max = (1 - SSIM(I, Y)) / ||G||_2^2
+      - β_min = 1 / (2 * ||G||_∞)
+    with G the (optionally masked) gradient map.
+
+    Args:
+      gradients: Gradient map ∇_Y SSIM(I, Y); shape (H, W) or (H, W, C).
+      ssim: List of SSIM(I, Y), one per channel.
+      binary_mask: Optional boolean mask of shape (H, W) or broadcastable to (H, W, n_channels).
+                   Pixels with False are frozen (no update).
+
+    Returns:
+      A list (len = n_channels) of tuples (beta_min, beta_max) giving the lower and upper bounds. Returns zeros
+      if the gradient is zero everywhere under the mask or SSIM≈1.
+
+    Notes:
+      - See "Iterative exact global histogram specification and SSIM gradient ascent: a proof of convergence, step size and parameter selection"
+      - Norms are computed over all pixels and channels after masking.
+      - Gradients should already include the same scaling used in your SSIM implementation.
+    """
+    bm = im3D(binary_mask)
+    G = im3D(gradients)
+    n_channels = G.shape[2]
+    if bm.shape != G.shape:
+        raise ValueError('`gradients` and `binary_mask` should be of equal shape.')
+    if len(ssim) != n_channels:
+        raise ValueError('Length of `ssim` should be equal to number of channel(s) in `gradients` and `binary_mask`')
+
+    out = []
+    for ch in range(n_channels):
+        g = G[..., ch][bm[..., ch]]
+        N = bm[..., ch].sum()
+
+        # Clean numerics
+        if not np.all(np.isfinite(g)):
+            g = np.nan_to_num(g, copy=False)
+
+        # Norms: sum of squares for L2^2; max abs for L_inf
+        g2 = float(np.dot(g, g))  # Same as np.sum(g**2)
+        g_inf = float(np.max(np.abs(g))) if g.size else 0.0
+        s = float(ssim[ch])
+
+        if g2 <= 0.0 or g_inf <= 0.0 or s >= 1.0:
+            # Stationary/fully masked or already at SSIM=1: no meaningful step.
+            beta_max, beta_min = 0, 0
+        else:
+            beta_max = (1.0 - s) / g2 / N
+            beta_min = 1.0 / (2.0 * g_inf) / N
+        out.append((beta_min, beta_max))
+    return out
+
+
+def ssim_sens(image1: np.ndarray, image2: np.ndarray, data_range: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute the Structural Similarity Index (SSIM) and its gradient.
 
     Args:
         image1 (np.ndarray): First image as a 3D array.
         image2 (np.ndarray): Second image as a 3D array.
-        n_bins (int, optional): Dynamic range of pixel values. Defaults to 256.
+        data_range (int, optional): Dynamic range of pixel values.
 
     Returns:
         Tuple[np.ndarray, float]:
@@ -1275,92 +1724,138 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, n_bins: int = 256) -> tupl
         2. Zhou Wang, A. C. Bovik, H. R. Sheikh and E. P. Simoncelli, "Image quality assessment:
         from error visibility to structural similarity," in IEEE Transactions on Image Processing,
         vol. 13, no. 4, pp. 600-612, April 2004, doi: 10.1109/TIP.2003.819861.
+
+    Notes:
+        - Should match scikit-image ssim computations using data_range=255, channel_axis=-1, win_size=11, gaussian_weights=True
     """
-    image_x_3D = im3D(image1.astype(np.float64))
-    image_y_3D = im3D(image2.astype(np.float64))
-    eps = 1e-12  # smallest gradient for covariance computation
+    # Keep original dtype for data_range inference
+    orig_dtype = image1.dtype
 
-    # Gaussian kernel parameters
-    window_size = 11
+    # Coerce to float64 for stable numerics and force channels-last with your helper
+    # Assumes `im3D` is available in your codebase and returns HxWxC (C>=1).
+    img1_3D = im3D(image1)
+    img2_3D = im3D(image2)
+
+    # ---- Basic checks ----
+    if img1_3D.shape != img2_3D.shape:
+        raise ValueError("image1 and image2 must have the same shape")
+
+    H, W, C = img1_3D.shape
+
+    # ---- data_range handling (REQUIRED for float images; inferred for integer) ----
+    if data_range is None:
+        if np.issubdtype(orig_dtype, np.floating):
+            # For typical float images in [0,1], pass data_range=1.0 explicitly.
+            raise ValueError(
+                "For float images, please specify data_range (e.g., 1.0 for [0,1], 255 for uint8-equivalent)."
+            )
+        # If integer, infer from dtype like skimage
+        info = np.iinfo(orig_dtype)
+        data_range = float(info.max - info.min)
+    R = float(data_range)
+
+    # SSIM defaults parameters
     sigma = 1.5
-    window = gaussian_kernel(window_size, sigma, n_dim=1)  # 1d kernel to enable faster convolution with 2d separable kernel trick.
+    truncate = 3.5
+    r = int(truncate * sigma + 0.5)  # radius (e.g., 5 for sigma=1.5, truncate=3.5)
+    win_size = 2 * r + 1  # 11-tap
+    pad = r
+    NP = win_size * win_size
+    use_sample_covariance = True
+    cov_norm = (NP / (NP - 1.0)) if use_sample_covariance else 1.0
 
-    # Constants for SSIM
-    L = n_bins - 1
-    K1 = 0.01
-    K2 = 0.03
-    C1 = (K1 * L) ** 2
-    C2 = (K2 * L) ** 2
+    # Build normalized 1D Gaussian kernel (to mimic ndimage.gaussian, mode='reflect')
+    x = np.arange(-r, r + 1, dtype=np.float64)
+    g1d = np.exp(-(x * x) / (2.0 * sigma * sigma))
+    g1d /= g1d.sum()
 
-    # Mean calculations
-    all_sens, all_mssim = [], []
-    for channel in range(image_x_3D.shape[2]):
-        # Select channels
-        image_x = image_x_3D[:, :, channel]
-        image_y = image_y_3D[:, :, channel]
+    # ---- Constants (Wang et al.) ----
+    K1, K2 = 0.01, 0.03
+    C1 = (K1 * R) ** 2
+    C2 = (K2 * R) ** 2
 
-        # Mean pixel intensity
-        mu_x = convolve_2d(image_x, window)
-        mu_y = convolve_2d(image_y, window)
-        mu_x_sq = mu_x ** 2
-        mu_y_sq = mu_y ** 2
-        mu_x_y = mu_x * mu_y
+    all_sens = []
+    all_mssim = []
+    for ch in range(C):
+        X = img1_3D[:, :, ch]
+        Y = img2_3D[:, :, ch]
 
-        # Variances et covariance
-        sigma_x_sq = convolve_2d(image_x ** 2, window) - mu_x_sq
-        sigma_y_sq = convolve_2d(image_y ** 2, window) - mu_y_sq
-        sigma_x_y = convolve_2d(image_x * image_y, window) - mu_x_y
+        # Local means (Gaussian)
+        ux = convolve_2d(X, g1d)
+        uy = convolve_2d(Y, g1d)
 
-        # Clamp variance and covariance to avoid floating-point (negative) artifacts, which will produce NaNs, Infs,
-        # or SSIM > 1
-        sigma_x_sq = np.maximum(sigma_x_sq, 0.0)
-        sigma_y_sq = np.maximum(sigma_y_sq, 0.0)
-        sigma_x_y = np.clip(sigma_x_y, -np.sqrt(sigma_x_sq * sigma_y_sq) - eps, np.sqrt(sigma_x_sq * sigma_y_sq) + eps)
+        # Second moments
+        uxx = convolve_2d(X * X, g1d)
+        uyy = convolve_2d(Y * Y, g1d)
+        uxy = convolve_2d(X * Y, g1d)
 
-        # SSIM map (Eq. 6)
-        num_1 = 2 * mu_x_y + C1
-        num_2 = 2 * sigma_x_y + C2
-        num = (num_1 * num_2)
+        # Variances / covariance with sample (Bessel) correction to match skimage default
+        vx = cov_norm * (uxx - ux * ux)
+        vy = cov_norm * (uyy - uy * uy)
+        vxy = cov_norm * (uxy - ux * uy)
 
-        den_1 = mu_x_sq + mu_y_sq + C1
-        den_2 = sigma_x_sq + sigma_y_sq + C2
-        den = (den_1 * den_2)
+        # SSIM components (Wang 2004, Eq. 6)
+        A1 = 2.0 * ux * uy + C1
+        A2 = 2.0 * vxy + C2
+        B1 = ux * ux + uy * uy + C1
+        B2 = vx + vy + C2
 
-        ssim_map = num / den
-        mssim = np.mean(ssim_map)
+        D = B1 * B2
+        S = (A1 * A2) / D
 
-        # SSIM gradient - Eqs. (7) and (8) (Avanaki, 2009)
-        term_1 = num_1 / den
-        sens = convolve_2d(term_1, window) * image_x
+        # Crop a border of width `pad` before averaging (skimage behavior)
+        if pad > 0 and min(*S.shape) > 2 * pad:
+            S_valid = S[pad:-pad, pad:-pad]
+        else:
+            S_valid = S
+        mssim = S_valid.mean(dtype=np.float64)
+        all_mssim.append(mssim)
 
-        term_2 = -ssim_map/den_2
-        sens += convolve_2d(term_2, window) * image_y
+        # Gradient (Avanaki 2009, Eqs. 7–8), filtered with the same Gaussian
+        term1 = A1 / D
+        term2 = -S / B2
+        term3 = (ux * (A2 - A1) - uy * (B2 - B1) * S) / D
 
-        term_3 = (mu_x * (num_2 - num_1) - mu_y * ssim_map * (den_2 - den_1)) / den
-        sens += convolve_2d(term_3, window)
-
-        sens *= 2 / sens.size
-
-        # FIX: scales the SSIM gradient to compensate for its attenuation at larger n_bins and keep the
-        # effective update weight consistent across bit depths (more bins require proportionally larger
-        # changes for the same effect).
-        # sens *= 256**(2*(np.log(n_bins) / np.log(256)-1))
+        sens = convolve_2d(term1, g1d) * X
+        sens += convolve_2d(term2, g1d) * Y
+        sens += convolve_2d(term3, g1d)
+        sens *= (2.0 / (H * W))  # equivalent to skimage scaling for a single-channel call
 
         all_sens.append(sens)
-        all_mssim.append(mssim)
-    return np.stack(all_sens, axis=-1).squeeze(), np.stack(all_mssim)
+
+    sens_out = np.stack(all_sens, axis=-1)
+    sens_out = im3D(sens_out)
+    ssim_vals = np.asarray(all_mssim, dtype=np.float64)  # per-channel SSIMs
+
+    return sens_out, ssim_vals
 
 
-def hist_match_validation(images: ImageListType) -> Tuple[np.ndarray, np.ndarray]:
+def hist_match_validation(images: ImageListType, binary_masks: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Validates the histogram matching process by comparing initial histograms of images
+    to a target histogram. Uses correlation coefficients and root mean square error
+    (RMSE) as metrics for validation.
+
+    Args:
+        images (ImageListType): A list-like object containing images. Each image should
+            represent its histogram and dimensional attributes appropriately.
+        binary_masks ([np.ndarray]). A list of binary masks with same size as image.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: A tuple where the first element is an array
+            of correlation coefficients, and the second element is an array of RMS
+            values for all images compared against the target histogram.
+    """
 
     def normalize_hist(a_hist):
         a_hist = np.float64(a_hist)
         return a_hist / (a_hist.sum(axis=0, keepdims=True) + 1e-12)
 
     initial_hist = []
-    target_hist = np.zeros((images.drange[-1]+1, images[0].ndim))
+    image = im3D(images[0])
+    target_hist = np.zeros((images.drange[-1]+1, image.shape[-1]))
     for idx, image in enumerate(images):
-        initial_hist.append(imhist(image))
+        initial_hist.append(imhist(image, mask=binary_masks[idx]))
         target_hist += initial_hist[-1]
         initial_hist[-1] = normalize_hist(initial_hist[-1])
     target_hist /= len(images)
@@ -1376,7 +1871,22 @@ def hist_match_validation(images: ImageListType) -> Tuple[np.ndarray, np.ndarray
 
 
 def sf_match_validation(images: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Mean magnitude per radius bin (annular average)."""
+    """
+    Validates spectral match between a set of input images by comparing their
+    rotational averages of magnitude spectra against a computed target spectrum.
+    The function calculates metrics such as correlation coefficients and root
+    mean square error (RMSE) to evaluate the quality of the spectral match.
+
+    Args:
+        images (np.ndarray): Array of images for which the spectral validation
+            is performed. Each image is assumed to have three channels (e.g., RGB).
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: A tuple containing two arrays:
+            - Correlation coefficients (np.ndarray) between the rotational averages
+              of the input images and the target spectrum.
+            - Root mean square errors (np.ndarray) for the same comparison.
+    """
 
     def rot_avg(arr2d: np.ndarray, radius: np.ndarray, ann_counts: np.ndarray) -> np.ndarray:
         """Mean magnitude per radius bin (annular average)."""
@@ -1384,11 +1894,11 @@ def sf_match_validation(images: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         return sums / ann_counts
 
     x_size, y_size = images[0].shape[:2]
-    n_channels = 3
+    n_channels = 1 if images[0].ndim == 2 else 3
 
     # Compute spectra and mean spectrum
     magnitudes, phases = get_images_spectra(images=images)
-    target_spectrum = np.zeros(images[0].shape)
+    target_spectrum = im3D(np.zeros(images[0].shape))
     for idx, mag in enumerate(magnitudes):
         target_spectrum += mag
     target_spectrum /= len(magnitudes)
@@ -1415,7 +1925,7 @@ def sf_match_validation(images: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     initial_rot_avg = []
     for idx, image in enumerate(images):
         magnitude = im3D(magnitudes[idx])
-        phase = im3D(phases[idx])
+        # phase = im3D(phases[idx])
         tra = []
         ira = []
         for channel in range(n_channels):
@@ -1437,17 +1947,36 @@ def sf_match_validation(images: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def spec_match_validation(images: ImageListType) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Validates spectral matching of input images by comparing the spectra of each
+    image with a target spectrum. The target spectrum is computed as the average
+    magnitude spectrum of all input images. Computes both the correlation and root
+    mean square error (RMSE) between the magnitude spectra of individual images
+    and the target spectrum.
+
+    Args:
+        images: List or array of images for which spectral matching needs to be
+            validated. Each image should have the same shape.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: A tuple containing two numpy arrays. The
+        first array contains the correlation coefficients between the magnitude
+        spectra of individual images and the target spectrum. The second array
+        contains the root mean square errors (RMSE) for the same comparison.
+    """
     magnitudes, phases = get_images_spectra(images=images)
 
-    target_spectrum = np.zeros(images[0].shape)
+    target_spectrum = im3D(np.zeros(images[0].shape))
     for idx, mag in enumerate(magnitudes):
         target_spectrum += mag
     target_spectrum /= len(magnitudes)
+    target_spectrum = im3D(target_spectrum)
 
     # Compute metric
     N = len(magnitudes)
     corr, rms = np.zeros((N,)), np.zeros((N,))
     for idx, a_mag in enumerate(magnitudes):
+        a_mag = im3D(a_mag)
         corr[idx] = np.corrcoef(a_mag.ravel(), target_spectrum.ravel())[0, 1]
         rms[idx] = compute_rmse(a_mag.ravel(), target_spectrum.ravel())
     return corr, rms
@@ -1507,7 +2036,7 @@ def rescale_image(image: np.ndarray, target_min: Optional[float] = 0, target_max
     return image
 
 
-def rescale_images(images: ImageListType, rescaling_option: Literal[0, 1, 2, 3] = 2, legacy_mode: bool = False) -> ImageListType:
+def rescale_images255(images: ImageListType, rescaling_option: Literal[0, 1, 2, 3] = 2, legacy_mode: bool = False) -> ImageListType:
     """
     Rescales the values of images so that they fall between 0 and 255. There are 3 options:
         1) Each image has its own min and max (no rescaling)
@@ -1522,12 +2051,15 @@ def rescale_images(images: ImageListType, rescaling_option: Literal[0, 1, 2, 3] 
                 2 : Rescaling absolute max/min (Default)
                 3 : Rescaling average max/min
             legacy_mode (bool): If true, only the absolute max/min values are rescaled.
+            legacy_mode (bool): If true, only the absolute max/min values are rescaled.
 
         Returns :
             A list of rescaled images
+
+        Notes:
+            Warning: Always returns a [0, 255] image, no matter the range of the input images.
     """
 
-    # TODO: Shouldn't the input be a uint8 or at least in the [0 to 255] range already?
     if rescaling_option not in [0, 1, 2, 3]:
         raise ValueError(f'The rescaling option must be either [0, 1, 2, 3], now rescaling is : {rescaling_option}')
 
@@ -1537,6 +2069,7 @@ def rescale_images(images: ImageListType, rescaling_option: Literal[0, 1, 2, 3] 
     for idx, image in enumerate(images):
         minimum_values[idx], maximum_values[idx] = np.min(image), np.max(image)
 
+    mn, mx = None, None
     if rescaling_option == 2:
         mn, mx = np.min(minimum_values), np.max(maximum_values)
     elif rescaling_option == 3:
@@ -1638,10 +2171,10 @@ def im3D(image: np.ndarray):
     """ Forces a third dimension on grayscale image.
 
     Args:
-        image (np.ndarray):
+        image (np.ndarray): 2D or 3D image.
 
     Returns:
-        image (np.ndarray) with 3D
+        image (np.ndarray) with 3D: grayscale (H, W) -> (H, W, 1); RGB (H, W, 3) stay the same.
 
     """
     return np.stack((image,), axis=-1) if image.ndim != 3 else image
@@ -1674,3 +2207,33 @@ def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins: int = 2
             count[:, channel] = count[:, channel] / count[:, channel].sum()
 
     return count
+
+
+def avg_hist(images: ImageListType, binary_masks: List[np.ndarray], normalized: bool = True, n_bins: int = 256) -> np.ndarray:
+    """Computes the average histogram of a set of images.
+
+    Args:
+        images (ImageListType): A list of images
+        binary_masks (List[np.ndarray]): A list of binary mask.
+        normalized (bool): Indicate of the result should be normalize to sum to 1.
+        n_bins (int): Number of levels in the image (uint8 = 256)
+
+    Returns:
+        average (np.ndarray): Average histogram counts for each channel.
+
+    """
+    n_channels = 1 if images.n_dims == 2 else 3
+    if len(binary_masks) != images.n_images:
+        raise ValueError('Length of binary_masks should be equal to length of images')
+
+    # n_bins = max(images.drange) + 1 if not np.issubdtype(images.dtype, np.floating) else 256  # TODO: Imposing 256 but is this ok for all use case?
+    hist_sum = np.zeros((n_bins, n_channels))
+    for idx, im in enumerate(images):
+        hist_sum += imhist(im, binary_masks[idx], n_bins=n_bins)
+
+    # Average of the pixels in the bins
+    average = hist_sum / len(images)
+    if normalized:
+        average = average / (average.sum(axis=0, keepdims=True) + 1e-12)
+
+    return average

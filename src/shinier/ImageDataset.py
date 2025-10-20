@@ -48,7 +48,6 @@ class ImageDataset:
         )
         self.n_images = len(self.images)
         self.images_name = [path.name for path in self.images.src_paths if path is not None]
-        self.images._n_channels = self.images[0].shape[-1]
 
         if self.options.whole_image == 3 and self.options.masks_folder != None and self.options.masks_format != None:
             # Load masks if not provided
