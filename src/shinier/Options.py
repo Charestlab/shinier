@@ -88,7 +88,7 @@ class Options:
             1 = 'Noise': Exact specification with noise (legacy code)
                     > Add small uniform noise to break ties (fast; non-deterministic unless seed set).
             2 = 'Moving-average': Coltuc Bolon & Chassery (2006) tie-breaking strategy with moving-average filters.
-                    > Kernels defined in the paper sorted lexicographic for deterministic local ordering.
+                    > Kernels defined in the paper sorted lexicographically for deterministic local ordering.
             3 = 'Gaussian': Coltuc's tie-breaking strategy with gaussian filters.
                     > Adaptive amount of gaussian filters used (min 5, max 7; deterministic local ordering).
             4 = 'Hybrid': Coltuc's tie-breaking strategy with gaussian filters, then noise if isoluminant pixels persist.
