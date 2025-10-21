@@ -7,8 +7,8 @@ from shinier.utils import (
     beta_bounds_from_ssim, ImageListType, separate, imhist, im3D, cart2pol, pol2cart, soft_clip,
     rescale_images255, get_images_spectra, ssim_sens, spectrum_plot, imhist_plot, sf_plot, avg_hist,
     uint8_plus, float01_to_uint, uint_to_float01, noisy_bit_dithering, floyd_steinberg_dithering,
-    exact_histogram, exact_histogram_with_noise, Bcolors, MatlabOperators, compute_rmse, RGB2GRAY_WEIGHTS,
-    histogram_tolerances, exact_histogram_without_ties, has_duplicates, stretch, console_log, print_log
+    exact_histogram, Bcolors, MatlabOperators, compute_rmse, RGB2GRAY_WEIGHTS,
+    has_duplicates, stretch, console_log, print_log
 )
 
 Vector = Iterable[Union[float, int]]
@@ -293,6 +293,11 @@ class ImageProcessor:
         """
 
         def predict_values(original_means, original_stds, original_min_max, target_mean, target_std):
+            """
+            Predicts the minimum, maximum, and range values for a target distribution by transforming the
+            original minimum and maximum values based on the provided target mean and standard deviation.
+            The transformation is performed using the Z-score normalization formula.
+            """
             predicted_min = (np.array(original_min_max)[:, 0] - np.array(original_means)) / np.array(original_stds) * target_std + target_mean
             predicted_max = (np.array(original_min_max)[:, 1] - np.array(original_means)) / np.array(original_stds) * target_std + target_mean
             predicted_range = predicted_max - predicted_min

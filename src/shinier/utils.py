@@ -1613,7 +1613,7 @@ def strip_ansi(s: str) -> str:
     return ANSI_RE.sub("", s)
 
 
-def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, verbose: bool = False):
+def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, verbose: bool = True):
     """
     Logs a message to the console with optional indentation, color, and verbose control.
 
@@ -2034,6 +2034,70 @@ def rescale_image(image: np.ndarray, target_min: Optional[float] = 0, target_max
     image *= (target_max - target_min)
     image += target_min
     return image
+
+
+def load_images_from_folder(folder_path: str) -> List[np.ndarray]:
+    """Load all supported image formats from a folder as NumPy arrays.
+
+    This function searches a given folder for image files with supported extensions
+    (e.g., PNG, JPEG, TIFF, BMP, WEBP, GIF) and loads them into memory as NumPy arrays.
+    Non-image files are ignored. Any unreadable images are skipped with an error message.
+
+    Args:
+        folder_path: Path to the folder containing images.
+
+    Returns:
+        A list of NumPy arrays representing the loaded images. Returns an empty list
+        if the folder does not exist or no valid images are found.
+    """
+    folder = Path(folder_path).expanduser().resolve()
+    if not folder.is_dir():
+        console_log(f"Folder not found: {folder}", color=Bcolors.FAIL)
+        return []
+
+    supported_exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".gif"}
+    image_files = [f for f in folder.iterdir() if f.suffix.lower() in supported_exts]
+
+    if not image_files:
+        console_log(f"No supported image files found in: {folder}", color=Bcolors.WARNING)
+        return []
+
+    arrays: List[np.ndarray] = []
+    for img_path in image_files:
+        try:
+            with Image.open(img_path) as img:
+                arrays.append(np.array(img))
+        except Exception as e:
+            console_log(f"Failed to load {img_path.name}: {e}", color=Bcolors.FAIL)
+
+    console_log(f"Loaded {len(arrays)} image(s) from {folder}", color=Bcolors.OKGREEN)
+    return arrays
+
+
+def load_np_array(path_str: Optional[str]) -> Optional[np.ndarray]:
+    """
+    Loads a NumPy array from a specified file path. If the file path is not provided,
+    does not exist, or is not a supported file type (only `.npy` files are supported),
+    an appropriate message is logged and `None` is returned.
+
+    Args:
+        path_str (Optional[str]): The file path to the `.npy` file. If not provided
+            or invalid, the function returns `None`.
+
+    Returns:
+        Optional[np.ndarray]: Loaded NumPy array if the file exists and is
+            successfully loaded; `None` otherwise.
+    """
+    if not path_str:
+        return None
+    p = Path(path_str).expanduser().resolve()
+    if not p.exists():
+        console_log(f"✗ File not found: {p}", indent_level=1, color=Bcolors.FAIL)
+        return None
+    if p.suffix.lower() == ".npy":
+        return np.load(p, allow_pickle=False)
+    console_log(f"✗ Unsupported file type: {p.suffix} (only .npy supported)", indent_level=1, color=Bcolors.FAIL)
+    return None
 
 
 def rescale_images255(images: ImageListType, rescaling_option: Literal[0, 1, 2, 3] = 2, legacy_mode: bool = False) -> ImageListType:
