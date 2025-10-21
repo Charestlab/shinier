@@ -7,7 +7,7 @@ from PIL import Image
 import re
 
 from shinier import ImageDataset, Options, ImageProcessor
-from shinier.utils import Bcolors, console_log, load_images_from_folder # load_np_array,
+from shinier.utils import Bcolors, console_log, load_images_from_folder, load_np_array
 
 # Compute repo root as parent of /src/shinier/
 REPO_ROOT = Path(__file__).resolve().parents[2]
