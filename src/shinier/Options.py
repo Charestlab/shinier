@@ -11,25 +11,27 @@ class Options:
 
     Args:
     ----------------------------------------------INPUT/OUTPUT images folders-------------------------------------------------
-        images_format (str): png, tif, tiff, jpg, jpeg (default = tif)
+        images_format (str): png, tif, jpg (default = png)
+
         input_folder (Union[str, Path]): relative or absolute path of the image folder (default = ./INPUT)
+
         output_folder (Union[str, Path]): relative or absolute path where processed images will be saved (default = ./OUTPUT)
 
     -------------------------------------------MASKS and FIGURE-GROUND separation----------------------------------------------
-        masks_format (str): png, tif, tiff, jpg, jpeg (default = tif)
+        masks_format (str): png, tif, jpg (default = png)
         masks_folder (Union[str, Path]): relative or absolute path of mask (default = ./MASKS)
 
-        whole_image (Literal): Default = 1
-            1 = whole image (default)
-            2 = figure-ground separated (input images as mask(s))
-            3 = figure-ground separated (based on mask(s))
+        whole_image (Literal[1-3]): (default = 1)
+            1 = Whole image
+            2 = Figure-ground separated (input images as mask(s))
+            3 = Figure-ground separated (based on mask(s))
 
-        background (int or float): Background lum of mask, or 300=automatic (default)
-            (automatically, the luminance that occurs most frequently in the image is used as background lum);
-            basically, all regions of that lum are treated as background
+        background (Union[int, float]): Background grayscale intensity of mask, or 300 = automatic (default = 300)
+            (By default (300), the most frequent luminance intensity in the image is used as the background value);
+            i.e., all regions of that luminance intensity are treated as background
 
     ------------------------------------------SHINIER MODE, COLORS, RAM management---------------------------------------------
-        mode (Literal): Default = 8
+        mode (Literal[1-9]): (default = 8)
             1 = lum_match only
             2 = hist_match only
             3 = sf_match only
@@ -40,82 +42,101 @@ class Options:
             8 = spec_match & hist_match (default)
             9 = only dithering
 
-        as_gray (Optional[int]): Images are converted into grayscale then uint8. Default is no conversion (default = 0).
+        as_gray (Literal[0-4]): Defines how the images are converted into grayscale before being converted to uint8 (default = 0).
             0 = No conversion applied
-            1 = An equal weighted sum of red, green and blue pixels is applied.
-            2 = (legacy mode) Rec.ITU-R 601 is used (see Matlab). Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′ (Standard-Definition monitors)
-            3 = Rec.ITU-R 709 is used. Y′ = 0.2126 R′ + 0.7152 G′ + 0.0722 B′ (High-Definition monitors)
-            4 = Rec.ITU-R 2020 is used. Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′ (Ultra-High-Definition monitors)
+            1 = Equal weighted sum of R, G and B pixels is applied. (Y' = 1/3 R' + 1/3 B' + 1/3 G').
+            2 = Rec.ITU-R 601 is used (legacy mode ; see Matlab).   (Y' = 0.299 R' + 0.587 G' + 0.114 B')    (Standard-Definition monitors)
+            3 = Rec.ITU-R 709 is used.                              (Y' = 0.2126 R' + 0.7152 G' + 0.0722 B') (High-Definition monitors)
+            4 = Rec.ITU-R 2020 is used.                             (Y' = 0.2627 R' + 0.6780 G' + 0.0593 B') (Ultra-High-Definition monitors)
 
-        dithering (Literal): Default = 1, dithering before final conversion to uint8
-            0 = no dithering
-            1 = noisy bit dithering (Allard R. & Faubert J. (2008))
+               >The prime notation (') indicates that the RGB values have been gamma-corrected, meaning they have undergone a 
+                non-linear transformation to match human visual perception and display characteristics, ensuring faithful color
+                reproduction on modern displays.
+
+        dithering (Literal[0-2]): Dithering applied before final conversion to uint8 (default = 1).
+            0 = No dithering
+            1 = Noisy bit dithering (Allard R. & Faubert J., 2008)
             2 = Floyd-Steinberg dithering (Floyd R.W. & Steinberg L., 1976)
 
-        conserve_memory (Optional[bool]): If True (default), uses a temporary directory to store images
-            and keeps only one image in memory at a time. If True and input_data is a list of NumPy arrays,
-            images are first saved as .npy in a temporary directory, and they are loaded in memory one at a time upon request.
+        conserve_memory (Optional[bool]): Controls how images are loaded and stored in memory during processing (default = True).
+            True = Minimizes memory usage by keeping only one image in memory at a time and using a temporary directory to save the images.
+                If the `input_data` is a list of NumPy arrays images are first saved as .npy in a temporary directory, and they are loaded 
+                in memory one at a time upon request.
+            False = Increases memory usage substantially by loading all images into memory at once, but may improve processing speed.
 
-        seed (Optional[Int]): Optional seed to initialize the PRNG. Random is used for noisy bit dithering and for exact histogram
-            specification with noise.
+        seed (Optional[Int]): Seed to initialize the PRNG (default = None).
+            Used for the 'Noisy bit dithering' and hist_specification (with "hybrid" or "noise" tie-breaking strategies).
+            If 'None', int(time.time()) will be used.
+        
+        legacy_mode (Optional[bool]): Enables backward compatibility with older versions while retaining recent optimizations (default = False).
+            True = reproduces the behavior of previous releases by setting:  
+                - `conserve_memory = False`  
+                - `as_gray = 2`  
+                - `dithering = 0`  
+                - `hist_specification = 1`  
+                - `safe_lum_match = False`
+            False = no legacy settings are forced and all options follow their current defaults.
 
-        legacy_mode (bool): If True, ensures compatibility with older versions and workflows, preserving previous functionalities
-            while integrating new optimizations. (conserve_memory = False, as_gray = 2, dithering = 0, hist_specification = 1,
-            safe_lum_match = False)
+        iterations (int): Number of iteration for composites mode (default = 2).
+            For these modes, histogram specification and Fourier amplitude specification affect each other. 
+            Multiple iterations will allows a high degree a joint matching.
 
-        iterations (int): Default = 2, number of iteration for composites mode. For these modes, histogram specification and Fourier
-            amplitude specification affect each other. Multiple iterations will allows a high degree a joint matching.
-            !! The method was develop so that it recalculates the respective target at each iteration (i.e., no target hist/spectrum).
+                >This method of iterating was develop so that it recalculates the respective target at each iteration (i.e., no target hist/spectrum).
 
     --------------------------------------------------HISTOGRAM matching--------------------------------------------------------
-        hist_specification (Literal): Default = 4
-            1 = Exact specification with noise (legacy code)
-            2 = Coltuc Bolon & Chassery (2006) tie-breaking strategy with moving-average filters.
-            3 = Coltuc's tie-breaking strategy with gaussian filters.
-            4 = Coltuc's tie-breaking strategy with gaussian filters, then noise if isoluminant pixels persist.
+        hist_specification (Literal[1-4]): Determines the algorithm used to break the ties (isoluminance) when matching the histogram (default = 4).
+            1 = 'Noise': Exact specification with noise (legacy code)
+                    > Add small uniform noise to break ties (fast; non-deterministic unless seed set).
+            2 = 'Moving-average': Coltuc Bolon & Chassery (2006) tie-breaking strategy with moving-average filters.
+                    > Kernels defined in the paper sorted lexicographically for deterministic local ordering.
+            3 = 'Gaussian': Coltuc's tie-breaking strategy with gaussian filters.
+                    > Adaptive amount of gaussian filters used (min 5, max 7; deterministic local ordering).
+            4 = 'Hybrid': Coltuc's tie-breaking strategy with gaussian filters, then noise if isoluminant pixels persist.
+                    > 'Gaussian' (deterministic) + 'Noise' (stochastic; if needed) - best compromise.
 
-        hist_optim (Literal): Default = 0
-            0 = no SSIM optimization
-            1 = SSIM optimization (Avanaki, 2009; to change the number if iterations (default = 10) and adjust step size (default = 35), see below)
+        hist_optim (bool): Optimization of the histogram-matched images with structural similarity index measure (Avanaki, 2009) (default = False)
+            True = SSIM optimization (Avanaki, 2009)
+                    > To change the number if iterations (default = 10) and adjust step size (default = 35), see below
+            False = No SSIM optimization
+            
+        hist_iterations (int): Number of iterations for SSIM optimization in hist_optim (default is 10).
 
-        hist_iterations (int): Number of iterations for SSIM optimization in hist_optim. Default is 10.
+        step_size (int): Step size for SSIM optimization in hist_optim (default is 35). 
+                    > This initial measure is adjusted during the optimization process using Avanaki's (2009) theoretical bounds.
 
-        step_size (int): Step size for SSIM optimization in hist_optim. Default is 35. This initial measure is adjusted during the optimization process
-            using Avanaki's 2010 theoretical bounds.
-
-        target_hist (Optional[np.ndarray, Literal['equal']]): Target histogram counts (int) or weights (float) to use for histogram or fourier matching. Should be a
-            numpy array of shape (256,) for 8-bit images, or a string 'equal' for histogram equalization.
-            Default is None.
+        target_hist (Optional[np.ndarray, Literal['equal']]): Target histogram counts (int) or weights (float) to use for histogram or fourier matching (default is None). 
+            Should be a numpy array of shape (256,) for 8-bit images, or a string 'equal' for histogram equalization.
+            If 'None', the target histogram is the average histogram of all the input images.
             E.g.,
                 from shinier.utils import imhist
                 target_hist = imhist(im)
 
     --------------------------------------------------LUMINANCE matching------------------------------------------------------
-        safe_lum_match (bool): Default = False.
-            If True, adjusts the target mean and standard deviation to keep all luminance values within [0, 255];
-            the resulting targets may differ from the requested values.
+        safe_lum_match (bool): Adjusting the mean and standard deviation to keep all luminance values [0, 255] (default = False).
+            True = No values will be clipped, but the resulting targets may differ from the requested values.
+            False = Values will be clipped, but the resulting targets will stay the same.
 
-        target_lum (Optional[Iterable[Union[int, float]]]): Default = (0, 0)
-            Pair (mean, std) of target luminance for luminance matching. The mean must be in [0, 255], and the standard deviation must be ≥ 0.
-            The mean must be in [0, 255], and the standard deviation must be ≥ 0.
+        target_lum (Optional[Iterable[Union[int, float]]]): Pair (mean, std) of target luminance for luminance matching (default = (0, 0)).
+            The mean must be in [0, 255], and the standard deviation must be ≥ 0. 
+            If (0, 0), the mean and std will be the average mean and average std of the images.
             Only for mode 1.
 
-        rgb_weights (Optional[int]): RGB values are converted to luminance using a weighted sum for lum_match computation (default = 3).
-            1 = An equal weighted sum of red, green and blue pixels is applied.
-            2 = (legacy mode) Rec.ITU-R 601 is used (see Matlab). Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′ (Standard-Definition monitors)
-            3 = (default) Rec.ITU-R 709 is used. Y′ = 0.2126 R′ + 0.7152 G′ + 0.0722 B′ (High-Definition monitors)
-            4 = Rec.ITU-R 2020 is used. Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′ (Ultra-High-Definition monitors)
+        rgb_weights (Literal[1-4]): RGB values are converted to luminance using a weighted sum for lum_match computation (default = 3).
+            1 = Equal weighted sum of R, G and B pixels is applied. (Y' = 1/3 R' + 1/3 B' + 1/3 G').
+            2 = Rec.ITU-R 601 is used (legacy mode ; see Matlab).   (Y' = 0.299 R' + 0.587 G' + 0.114 B')    (Standard-Definition monitors)
+            3 = Rec.ITU-R 709 is used.                              (Y' = 0.2126 R' + 0.7152 G' + 0.0722 B') (High-Definition monitors)
+            4 = Rec.ITU-R 2020 is used.                             (Y' = 0.2627 R' + 0.6780 G' + 0.0593 B') (Ultra-High-Definition monitors)
 
     --------------------------------------------------FOURIER matching--------------------------------------------------------
-        rescaling (Literal): Default = 2. Post-processing applied after sf_match or spec_match only.
+        rescaling (Literal[0-3]): Post-processing applied after sf_match or spec_match only (default = 2).
             0 = no rescaling
-            1 : Rescaling each image so that it stretches to [0, 1]
-            2 : Rescaling absolute max/min (Default)
-            3 : Rescaling average max/min
+            1 = Rescaling each image so that it stretches to [0, 1] (its own min→0, max→1).
+            2 = Rescaling absolute max/min (shared 0–1 range).
+            3 = Rescaling average max/min.
 
-        target_spectrum: Optional[np.ndarray[float]]: Target magnitude spectrum.
-            Same size as the images of float values. If None, the target magnitude
-            spectrum is the average spectrum of all the input images.
+        target_spectrum: Optional[np.ndarray[float]]: Target magnitude spectrum (default = None).
+            Same size as the images of float values. 
+            If 'None', the target magnitude spectrum is the average spectrum of all the input images.
             Only for mode 3 and 4.
             E.g.,
                 from shinier.utils import cart2pol
@@ -124,13 +145,12 @@ class Options:
                 target_spectrum = rho
 
     --------------------------------------------------EXTRA--------------------------------------------------------
-        verbose (Literal[-1, 0, 1, 2]): Default = 0.
-            -1: Nothing is printed (used for unit tests);
-            0: Minimal processing steps are printed;
-            1: Additional info about image and channels being processed are printed;
-            2: Additional info about the results of internal tests are printed.
-
-
+        verbose (Literal[-1, 0, 1, 2]): Controls verbosity levels (default = 0).
+            -1 = Nothing is printed (used for unit tests);
+            0 = Minimal processing steps are printed;
+            1 = Additional info about image and channels being processed are printed;
+            2 = Additional info about the results of internal tests are printed.
+    
     """
     def __init__(
             self,
@@ -149,16 +169,16 @@ class Options:
             dithering: Literal[0, 1, 2] = 1,
             conserve_memory: bool = True,
             seed: Optional[int] = None,
-            legacy_mode: bool = False,
+            legacy_mode: Optional[bool] = False,
 
             safe_lum_match: bool = False,
             target_lum: Optional[Iterable[Union[int, float]]] = (0, 0),
             rgb_weights: Literal[1, 2, 3, 4] = 3,
 
             hist_specification: Literal[1, 2, 3, 4] = 4,
-            hist_optim: Literal[0, 1] = 0,
+            hist_optim: bool = False,
             hist_iterations: int = 10,
-            step_size: int = 34,
+            step_size: int = 35,
             target_hist: Optional[Union[np.ndarray, Literal['equal']]] = None,
 
             rescaling: Optional[Literal[0, 1, 2, 3]] = 2,
@@ -218,12 +238,12 @@ class Options:
     def _validate_options(self):
         """Validates the options to ensure they are within acceptable ranges."""
         if not self.input_folder.is_dir():
-            raise ValueError(f"{self.input_folder} folder does not exists")
+            raise ValueError(f"{self.input_folder} folder does not exist")
         if not self.output_folder.is_dir():
-            raise ValueError(f"{self.output_folder} folder does not exists")
+            raise ValueError(f"{self.output_folder} folder does not exist")
         if self.masks_folder is not None:
             if not self.masks_folder.is_dir():
-                raise ValueError(f"{self.masks_folder} folder does not exists")
+                raise ValueError(f"{self.masks_folder} folder does not exist")
         if self.images_format not in ['png', 'tif', 'tiff', 'jpg', 'jpeg']:
             raise ValueError("images format must be either 'png', 'tif', 'tiff', 'jpg' or 'jpeg'")
         if self.masks_format not in ['png', 'tif', 'tiff', 'jpg', 'jpeg'] and self.whole_image == 3:
@@ -245,9 +265,6 @@ class Options:
             raise TypeError("seed must be an integer value or None.")
         if not isinstance(self.legacy_mode, bool):
             raise TypeError("legacy_mode must be a boolean value.")
-
-        if not isinstance(self.legacy_mode, bool):
-            raise TypeError("legacy_mode must be a boolean value.")
         if not isinstance(self.safe_lum_match, bool):
             raise TypeError("safe_lum_match must be a boolean value.")
         if not (isinstance(self.target_lum, Iterable) and all([isinstance(item, (float, int)) for item in self.target_lum]) and len(self.target_lum) == 2):
@@ -259,8 +276,8 @@ class Options:
 
         if self.hist_specification not in [1, 2, 3, 4]:
             raise ValueError("hist_specification must be 1, 2, 3 or 4. See Options")
-        if self.hist_optim not in [0, 1]:
-            raise ValueError("Optim must be 0 or 1. See Options")
+        if not isinstance(self.hist_optim, bool):
+            raise TypeError("hist_optim must be a boolean value (True or False).")
         if self.hist_iterations < 1:
             raise ValueError("hist_iterations must be at least 1. See Options")
         if self.iterations < 1:
@@ -293,9 +310,9 @@ class Options:
             raise ValueError("Rescaling must be 0, 1, 2 or 3. See Options")
         if self.target_spectrum is not None :
             if not isinstance(self.target_spectrum, np.ndarray):
-                raise TypeError('The target spectrum must be a numpy array of np.float64.')
+                raise TypeError('The target spectrum must be a numpy array of floats.')
             if not np.issubdtype(self.target_spectrum.dtype, np.floating):
-                raise TypeError('The target spectrum must be a numpy array of np.float64.')
+                raise TypeError('The target spectrum must be a numpy array of floats.')
         if self.mode == 9 and self.dithering == 0:
             raise ValueError("The dithering option cannot be 0 for mode 9. Should be either 1 or 2.")
 

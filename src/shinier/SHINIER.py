@@ -146,8 +146,8 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             hs = prompt_choice("\nHistogram specification", ["Exact (Coltuc)", "Exact with noise (legacy)"], default = 1)
             if hs is not None: kwargs["hist_specification"] = hs - 1
 
-            ho = prompt_choice("\nSSIM optimization (Avanaki)", ["No", "Yes"], default = 1)
-            if ho is not None: kwargs["hist_optim"] = ho - 1
+            ho = prompt_yes_no("\nSSIM optimization (Avanaki)", default = False)
+            if ho is not None: kwargs["hist_optim"] = ho
 
             if ho == 2:
                 iters = prompt_int("\n`SSIM iterations`", 1, 1_000_000, default = 10)

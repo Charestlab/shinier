@@ -450,7 +450,7 @@ class ImageProcessor:
             X = image.copy()
             all_ssim = []
             ssim_increment = []
-            for self._sub_iter in range(n_iter):  # n_iter = 1 when hist_optim == 0
+            for self._sub_iter in range(n_iter):  # n_iter = 1 when hist_optim == False
                 if n_iter > 1 and self._sub_iter < n_iter - 1:
                     console_log(msg=f"Optimization (iter={self._sub_iter + 1}):", indent_level=1, color=Bcolors.BOLD, verbose=self.verbose >= 1)
                 if has_duplicates(X, binary_mask=self.bool_masks[idx]):
