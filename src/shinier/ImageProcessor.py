@@ -105,7 +105,7 @@ class ImageProcessor:
         else:
             console_log(
                 msg=f'To get the output images, you must instantiate ImageProcessor and call get_results() method. \n\tE.g.: output_images = ImageProcessor(dataset=my_dataset).get_results()',
-                indent_level=0, color=Bcolors.WARNING, verbose=self.verbose>=0)
+                indent_level=0, color=Bcolors.WARNING, verbose=self.verbose >= 1)
 
     def get_results(self):
         """Return list of processed np.ndarray if input was arrays, otherwise None."""
@@ -137,12 +137,12 @@ class ImageProcessor:
         im_size = np.array(list(self.dataset.images.reference_size) + [self.dataset.images.n_channels])
         if self.bool_masks[idx] is None:
             if self.options.whole_image == 2:
-                console_log(msg=f'Preparing mask (whole-image: 2)', indent_level=0, color=Bcolors.HEADER, verbose=self.verbose >= 1)
+                console_log(msg=f'Preparing mask (whole-image: 2)', indent_level=0, color=Bcolors.HEADER, verbose=self.verbose > 1)
                 _prepare_mask(image=self.dataset.images[idx])
                 self.bool_masks[idx] = np.stack((self.current_masks[0],) * (3 if n_dims == 3 else 1), axis=-1)
             elif self.options.whole_image == 3:
                 if idx < self.dataset.n_masks:  # If there is one mask, it picks self.bool_masks[0] everytime
-                    console_log(msg=f'Preparing mask (whole-image: 3)', indent_level=0, color=Bcolors.HEADER, verbose=self.verbose >= 1)
+                    console_log(msg=f'Preparing mask (whole-image: 3)', indent_level=0, color=Bcolors.HEADER, verbose=self.verbose > 1)
                     _prepare_mask(image=self.dataset.images[idx], mask=self.dataset.masks[idx])
                     self.bool_masks[idx] = np.stack((self.current_masks[0],) * (3 if n_dims == 3 else 1), axis=-1)
                 else:
@@ -167,7 +167,7 @@ class ImageProcessor:
                 self.ssim_results.append(results)
                 if not is_strictly_increasing and self.verbose > 1:
                     res = f'{Bcolors.OKCYAN}SSIM optimization test for channel {ch}:{Bcolors.ENDC} {Bcolors.FAIL}FAIL{Bcolors.ENDC}'
-                    console_log(msg=res, indent_level=1, verbose=self.verbose >= 1)
+                    console_log(msg=res, indent_level=1, verbose=self.verbose > 1)
                     raise Exception(f"SSIM optimization non-monotonic for channel {ch}: {out[:, ch]}")
 
             res = f'{Bcolors.OKCYAN}SSIM optimization test:{Bcolors.ENDC} {Bcolors.OKGREEN}PASS{Bcolors.ENDC}'
@@ -279,7 +279,7 @@ class ImageProcessor:
             elif dithering == 2:
                 output_collection[idx] = floyd_steinberg_dithering(image=image/255, depth=256, legacy_mode=self.options.legacy_mode)
             else:
-                output_collection[idx] = MatlabOperators.uint8(image) if self.options.legacy_mode else uint8_plus(image=image, verbose=self.verbose>0)
+                output_collection[idx] = MatlabOperators.uint8(image) if self.options.legacy_mode else uint8_plus(image=image, verbose=self.verbose>1)
 
         return output_collection
 
@@ -361,7 +361,7 @@ class ImageProcessor:
             target_std *= scaling_factor
             predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
             target_mean = target_mean + (255 - np.max(predicted_max))
-            console_log(msg=f"Adjusted target values for safe values: M = {target_mean:.4f}, SD = {target_std:.4f}", indent_level=0,color=Bcolors.WARNING, verbose=self.verbose>=0)
+            console_log(msg=f"Adjusted target values for safe values: M = {target_mean:.4f}, SD = {target_std:.4f}", indent_level=0,color=Bcolors.WARNING, verbose=self.verbose > 1)
             predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
             if np.any(predicted_min < -1e-3) or np.any(predicted_max > (255 + 1e-3)):
                 raise Exception(f'Out-of-range values detected: mins = {list(predicted_min)}, maxs = {list(predicted_max)}')
@@ -371,7 +371,7 @@ class ImageProcessor:
             M, SD, min, max = compute_stats(im=im2, binary_mask=self.bool_masks[idx])
 
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
-            console_log(msg=f"Image {self._processed_image}:", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=1)
+            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=1)
             console_log(msg=f"Original: M = {M:.4f}, SD = {SD:.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose>=2)
 
             # Standardization
@@ -446,7 +446,7 @@ class ImageProcessor:
         self._processed_channel = None
         for idx, image in enumerate(buffer_collection):
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
-            console_log(msg=f"Image {self._processed_image}:", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=1)
+            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=1)
 
             image = im3D(image)
             X = image.copy()
@@ -454,13 +454,13 @@ class ImageProcessor:
             ssim_increment = []
             for self._sub_iter in range(n_iter):  # n_iter = 1 when hist_optim == False
                 if n_iter > 1 and self._sub_iter < n_iter - 1:
-                    console_log(msg=f"Optimization (iter={self._sub_iter + 1}):", indent_level=1, color=Bcolors.BOLD, verbose=self.verbose >= 1)
+                    console_log(msg=f"Optimization (iter={self._sub_iter + 1})", indent_level=1, color=Bcolors.BOLD, verbose=self.verbose >= 1)
                 if has_duplicates(X, binary_mask=self.bool_masks[idx]):
                     Y, OA = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=target_hist, tie_strategy=tie_strategy, n_bins=n_bins)
                     if hist_spec_names != 'noise' and (n_iter == 1 or (n_iter > 1 and self._sub_iter < n_iter - 1)):
                         console_log(msg=f"Ordering accuracy per channel = {OA}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose >= 2)
                 else:  # If all values are unique, you don't need any tie-breaking solutions
-                    console_log(msg=f"No ties detected: using 'exact_histogram_without_ties'", indent_level=1, color=Bcolors.OKCYAN, verbose=self.verbose >= 1)
+                    console_log(msg=f"No ties detected: using 'exact_histogram_without_ties'", indent_level=1, color=Bcolors.OKCYAN, verbose=self.verbose >= 2)
                     Y, _ = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=target_hist, tie_strategy='none', n_bins=n_bins)
 
                 # Compute Structural Similarity and gradient map (sens), along with max and min
@@ -585,7 +585,7 @@ class ImageProcessor:
         # Match spatial frequency on rotational average of the magnitude spectrum
         for idx, image in enumerate(buffer_collection):
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
-            console_log(msg=f"Image {self._processed_image}:", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=1)
+            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=1)
             matched_image = []
             magnitude = im3D(self.dataset.magnitudes[idx])
             phase = im3D(self.dataset.phases[idx])
@@ -632,7 +632,7 @@ class ImageProcessor:
                     console_log(
                         msg=f'Out of range values: Actual range [{mn}, {mx}] outside of the admitted range [0, 1].\nWill be rescaled and clipped so that less than 1% falls outside of [0, 1].',
                         indent_level=1, color=Bcolors.WARNING, verbose=self.verbose>=2)
-                    output_image = soft_clip(output_image, min_value=0, max_value=1, max_percent=0.01, verbose=self.verbose>1)
+                    output_image = soft_clip(output_image, min_value=0, max_value=1, max_percent=0.01, verbose=self.verbose>=2)
             buffer_collection[idx] = output_image * 255
 
         buffer_collection.drange = (0, 255)
@@ -698,7 +698,7 @@ class ImageProcessor:
         # Iterate over each image (each entry in the phase collection)
         for idx, image in enumerate(buffer_collection):
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
-            console_log(msg=f"Image {self._processed_image}:", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=1)
+            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=1)
 
             matched_image = []
 
@@ -739,7 +739,7 @@ class ImageProcessor:
                     console_log(
                         msg=f'Out of range values: Actual range [{mn}, {mx}] outside of the admitted range [0, 1].\nWill be rescaled and clipped so that less than 1% falls outside of [0, 1].',
                         indent_level=1, color=Bcolors.WARNING, verbose=self.verbose>=2)
-                    output_image = soft_clip(output_image, min_value=0, max_value=1, max_percent=0.01, verbose=self.verbose>1)
+                    output_image = soft_clip(output_image, min_value=0, max_value=1, max_percent=0.01, verbose=self.verbose >= 1)
 
             # Stack the channels and save into the output collection
             buffer_collection[idx] = output_image * 255
