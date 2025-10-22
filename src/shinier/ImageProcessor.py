@@ -1,6 +1,7 @@
 from typing import Optional, List, Union, Iterable, Tuple, Literal
 from datetime import datetime
 import numpy as np
+from tqdm import tqdm
 from matplotlib import pyplot as plt
 from shinier import ImageDataset, Options
 from shinier.utils import (
@@ -10,6 +11,7 @@ from shinier.utils import (
     exact_histogram, Bcolors, MatlabOperators, compute_rmse, RGB2GRAY_WEIGHTS,
     has_duplicates, stretch, console_log, print_log
 )
+import sys
 
 Vector = Iterable[Union[float, int]]
 
@@ -31,11 +33,12 @@ class ImageProcessor:
             and seed values.
         current_masks (Optional[np.ndarray]): Masks for the current image being processed.
         bool_masks (List): Boolean masks for all images in the dataset.
-        verbose (Literal[-1, 0, 1, 2]): Controls verbosity levels where:
-            -1: No output (used in unit tests);
-             0: Minimal processing information;
-             1: More detailed info about processing steps and channels;
-             2: Detailed internal validation results.
+        verbose (Literal[-1, 0, 1, 2, 3]): Controls verbosity levels (default = 0).
+            -1 = Quiet mode
+            0 = Progress bar with ETA
+            1 = Basic progress steps (no progress bar)
+            2 = Additional info about image and channels being processed are printed (no progress bar)
+            3 = Debug mode for developers (no progress bar)
         log (List): Log messages related to processing.
         validation (List): Results of validation checks during processing.
         ssim_results (List): Structural Similarity Index (SSIM) test results.
@@ -49,12 +52,12 @@ class ImageProcessor:
             - All important processing information (e.g. seed) are logged and stored in output_folder.
     """
 
-    def __init__(self, dataset: ImageDataset, options: Optional[Options] = None, verbose: Optional[Literal[-1, 0, 1, 2]] = None):
+    def __init__(self, dataset: ImageDataset, options: Optional[Options] = None, verbose: Optional[Literal[-1, 0, 1, 2, 3]] = None, from_cli: bool = False):
         self.dataset: ImageDataset = dataset
         self.options: Optional[Options] = options or getattr(dataset, "options", None)
         self.current_masks: Optional[np.ndarray] = None
         self.bool_masks: List = [None] * len(self.dataset.images)
-        self.verbose: Literal[-1, 0, 1, 2] = verbose if verbose is not None else self.options.verbose  # -1: Nothing is printed (used for unit tests); 0: Minimal processing steps are printed; 1: Additional info about image and channels being processed are printed; 2: Additional info about the results of internal tests are printed.
+        self.verbose: Literal[-1, 0, 1, 2, 3] = verbose if verbose is not None else self.options.verbose  # -1: Nothing is printed (used for unit tests); 0: Minimal processing steps are printed; 1: Additional info about image and channels being processed are printed; 2: Additional info about the results of internal tests are printed.
         self.log: List = []
         self.validation: List = []
         self.ssim_results: List = []
@@ -95,7 +98,7 @@ class ImageProcessor:
         self._log_param: dict = {}
         self._is_last_operation: bool = False
         self._sum_bool_masks: List = [None] * len(self.dataset.images)
-
+        self._from_cli: bool = from_cli
         # Run image processing steps
         self.process()
         print_log(logs=self.log, log_path=self.options.output_folder)
@@ -105,7 +108,7 @@ class ImageProcessor:
         else:
             console_log(
                 msg=f'To get the output images, you must instantiate ImageProcessor and call get_results() method. \n\tE.g.: output_images = ImageProcessor(dataset=my_dataset).get_results()',
-                indent_level=0, color=Bcolors.WARNING, verbose=self.verbose >= 1)
+                indent_level=0, color=Bcolors.WARNING, verbose=self.verbose >= 2 and not self._from_cli)
 
     def get_results(self):
         """Return list of processed np.ndarray if input was arrays, otherwise None."""
@@ -167,11 +170,11 @@ class ImageProcessor:
                 self.ssim_results.append(results)
                 if not is_strictly_increasing and self.verbose > 1:
                     res = f'{Bcolors.OKCYAN}SSIM optimization test for channel {ch}:{Bcolors.ENDC} {Bcolors.FAIL}FAIL{Bcolors.ENDC}'
-                    console_log(msg=res, indent_level=1, verbose=self.verbose > 1)
+                    console_log(msg=res, indent_level=1, verbose=self.verbose > 2)
                     raise Exception(f"SSIM optimization non-monotonic for channel {ch}: {out[:, ch]}")
 
             res = f'{Bcolors.OKCYAN}SSIM optimization test:{Bcolors.ENDC} {Bcolors.OKGREEN}PASS{Bcolors.ENDC}'
-            console_log(msg=res, indent_level=1, verbose=self.verbose >= 1)
+            console_log(msg=res, indent_level=1, verbose=self.verbose >= 3)
 
     def _validate(self, observed: List[float], expected: List[float], measures_str: list[str], rmse_tolerance: float = 1e-3):
         """Internal validation"""
@@ -191,12 +194,12 @@ class ImageProcessor:
         res = f'{Bcolors.OKCYAN}Internal test:{Bcolors.ENDC} {res_color}{res_txt}{Bcolors.ENDC}'
         sign = '≮' if res_txt == 'FAIL' else '<'
         obs = '; '.join([f'{msr} (observed vs expected) = |{observed[idx]:4.4f} - {expected[idx]:4.4f}| {sign} {rmse_tolerance:4.4f}' for idx, msr in enumerate(measures_str)])
-        if res_txt == 'FAIL' and self.verbose > 1:
+        if res_txt == 'FAIL' and self.verbose == 3:
             print(res)
             raise Exception(f"At least one difference between expected and observed values is larger than tolerance {rmse_tolerance}: {diff}")
         results['log_result'] = f'{Bcolors.OKBLUE}{obs}{Bcolors.ENDC}\n{res}'
         indent_level = 1 if self._processed_channel is None else 2
-        console_log(msg=results['log_result'], indent_level=indent_level, verbose=self.verbose>=2)
+        console_log(msg=results['log_result'], indent_level=indent_level, verbose=self.verbose==3)
         self.validation.append(results)
 
     def process(self):
@@ -218,11 +221,24 @@ class ImageProcessor:
             self.seed = int(now.timestamp())
         np.random.seed(self.seed)
         self.log.append(f'seed={self.seed}')
-        console_log(msg=f'Use this seed for reproducibility: {self.seed}', color=Bcolors.WARNING, indent_level=0, verbose=self.verbose>=0)
+        console_log(msg=f'Use this seed for reproducibility: {self.seed}', color=Bcolors.WARNING, indent_level=0, verbose=self.verbose>=1 and not self._from_cli)
+
+        # Set tqdm
+        if self.verbose == 0:
+            total_steps = self.options.iterations * len(self._processing_steps)
+            pbar = tqdm(
+                total=total_steps,
+                unit="composite iteration",
+                ncols=80,
+                dynamic_ncols=True,
+                colour="green",
+                file=sys.stdout
+            )
 
         # A first loop runs n times the processing steps associated with given mode.
         # A second loop is for modes associated with multiple steps will run more
         mask_prepared = False
+        cnt = 0
         for self._iter in range(self.options.iterations):
             for self._step, self._processing_function in enumerate(self._processing_steps):
                 self._is_last_operation = self._iter == self.options.iterations - 1 and self._step == self._n_steps - 1
@@ -234,6 +250,9 @@ class ImageProcessor:
                             mask_prepared = True
 
                     # Get the processing function, check and call it
+                    if self.verbose == 0:
+                        pbar.set_description(f'{Bcolors.ALMOST_WHITE}Applying {self._fct_name2process_name[self._processing_function]}... (iter={self._iter}, step={self._step}){Bcolors.ENDC}')
+
                     exec_fct = getattr(self, self._processing_function, None)
                     if exec_fct is None:
                         raise RuntimeError(f'Function {self._processing_function} does not exist in ImageProcessor class')
@@ -242,10 +261,13 @@ class ImageProcessor:
                         msg=f'Applying {self._fct_name2process_name[self._processing_function]}... (iter={self._iter}, step={self._step})',
                         indent_level=0,
                         color=Bcolors.SECTION,
-                        verbose=self.verbose>=0
+                        verbose=self.verbose>=1
                     )
                     exec_fct()
-                    print('') if self.verbose > 0 else None  # Adds \n between process
+                    print('') if self.verbose > 1 else None  # Adds \n between process
+                    if self.verbose == 0:
+                        pbar.update(1)
+                        cnt+=1
 
         # Applies dithering or simply convert into uint8 if no dithering
         self.dataset.images = self.dithering(
@@ -279,7 +301,7 @@ class ImageProcessor:
             elif dithering == 2:
                 output_collection[idx] = floyd_steinberg_dithering(image=image/255, depth=256, legacy_mode=self.options.legacy_mode)
             else:
-                output_collection[idx] = MatlabOperators.uint8(image) if self.options.legacy_mode else uint8_plus(image=image, verbose=self.verbose>1)
+                output_collection[idx] = MatlabOperators.uint8(image) if self.options.legacy_mode else uint8_plus(image=image, verbose=self.verbose==3)
 
         return output_collection
 
@@ -361,7 +383,7 @@ class ImageProcessor:
             target_std *= scaling_factor
             predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
             target_mean = target_mean + (255 - np.max(predicted_max))
-            console_log(msg=f"Adjusted target values for safe values: M = {target_mean:.4f}, SD = {target_std:.4f}", indent_level=0,color=Bcolors.WARNING, verbose=self.verbose > 1)
+            console_log(msg=f"Adjusted target values for safe values: M = {target_mean:.4f}, SD = {target_std:.4f}", indent_level=0,color=Bcolors.WARNING, verbose=self.verbose > 2)
             predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
             if np.any(predicted_min < -1e-3) or np.any(predicted_max > (255 + 1e-3)):
                 raise Exception(f'Out-of-range values detected: mins = {list(predicted_min)}, maxs = {list(predicted_max)}')
@@ -371,8 +393,8 @@ class ImageProcessor:
             M, SD, min, max = compute_stats(im=im2, binary_mask=self.bool_masks[idx])
 
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
-            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=1)
-            console_log(msg=f"Original: M = {M:.4f}, SD = {SD:.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose>=2)
+            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
+            console_log(msg=f"Original: M = {M:.4f}, SD = {SD:.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
 
             # Standardization
             if original_stds[idx] != 0:
@@ -383,7 +405,7 @@ class ImageProcessor:
             M, SD, min, max = compute_stats(im=im2, binary_mask=self.bool_masks[idx])
 
             # Save resulting image
-            console_log(msg=f"Target values: M = {target_mean:.4f}, SD = {target_std:.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose>=2)
+            console_log(msg=f"Target values: M = {target_mean:.4f}, SD = {target_std:.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
             self.dataset.buffer[idx] = im2  # update the dataset
             self._validate(observed=[M, SD], expected=[target_mean, target_std], measures_str=['M', 'SD'])
 
@@ -416,8 +438,9 @@ class ImageProcessor:
         """
 
         hist_optim = self.options.hist_optim
-        hist_spec_names = ['noise', 'moving-average', 'gaussian', 'hybrid']
-        tie_strategy = hist_spec_names[self.options.hist_specification-1]
+        hist_spec_names = ['noise', 'moving-average', 'gaussian', 'hybrid', 'none']
+        hist_specification = 5 if self.options.hist_specification is None else self.options.hist_specification
+        tie_strategy = hist_spec_names[hist_specification-1]
 
         # Get appropriate image collection
         buffer_collection = self.dataset.buffer
@@ -446,7 +469,7 @@ class ImageProcessor:
         self._processed_channel = None
         for idx, image in enumerate(buffer_collection):
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
-            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=1)
+            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
 
             image = im3D(image)
             X = image.copy()
@@ -454,14 +477,19 @@ class ImageProcessor:
             ssim_increment = []
             for self._sub_iter in range(n_iter):  # n_iter = 1 when hist_optim == False
                 if n_iter > 1 and self._sub_iter < n_iter - 1:
-                    console_log(msg=f"Optimization (iter={self._sub_iter + 1})", indent_level=1, color=Bcolors.BOLD, verbose=self.verbose >= 1)
-                if has_duplicates(X, binary_mask=self.bool_masks[idx]):
+                    console_log(msg=f"SSIM optimization (iter={self._sub_iter + 1})", indent_level=1, color=Bcolors.BOLD, verbose=self.verbose >= 2)
+                has_isoluminant_pixels = has_duplicates(X, binary_mask=self.bool_masks[idx])
+                if tie_strategy != 'none' and has_isoluminant_pixels:
                     Y, OA = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=target_hist, tie_strategy=tie_strategy, n_bins=n_bins)
                     if hist_spec_names != 'noise' and (n_iter == 1 or (n_iter > 1 and self._sub_iter < n_iter - 1)):
-                        console_log(msg=f"Ordering accuracy per channel = {OA}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose >= 2)
+                        console_log(msg=f"Ordering accuracy per channel = {OA}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose == 3)
                 else:  # If all values are unique, you don't need any tie-breaking solutions
-                    console_log(msg=f"No ties detected: using 'exact_histogram_without_ties'", indent_level=1, color=Bcolors.OKCYAN, verbose=self.verbose >= 2)
-                    Y, _ = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=target_hist, tie_strategy='none', n_bins=n_bins)
+                    if self._is_last_operation and self._sub_iter == (n_iter - 1) and has_isoluminant_pixels:
+                        Y, OA = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=target_hist, tie_strategy='hybrid', n_bins=n_bins)
+                    else:
+                        if not has_isoluminant_pixels:
+                            console_log(msg=f"No ties detected: using direct histogram mapping", indent_level=1, color=Bcolors.OKCYAN, verbose=self.verbose == 3)
+                        Y, _ = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=target_hist, tie_strategy='none', n_bins=n_bins)
 
                 # Compute Structural Similarity and gradient map (sens), along with max and min
                 sens, ssim = ssim_sens(image, Y, data_range=n_bins-1)
@@ -470,7 +498,7 @@ class ImageProcessor:
                     min_beta, max_beta = beta_bounds[ch][0], beta_bounds[ch][1]
                     if min_beta < original_step_sizes[ch] > max_beta:
                         step_sizes[ch] = np.clip(original_step_sizes[ch], min_beta, max_beta)
-                        console_log(msg=f"Original step size {original_step_sizes[ch]} is out of the optimal range for channel {ch}: [{min_beta}, {max_beta}].\nUsing step_size={step_sizes[ch]} instead.", indent_level=1, color=Bcolors.WARNING, verbose=self.verbose>=2)
+                        console_log(msg=f"Original step size {original_step_sizes[ch]} is out of the optimal range for channel {ch}: [{min_beta}, {max_beta}].\nUsing step_size={step_sizes[ch]} instead.", indent_level=1, color=Bcolors.WARNING, verbose=self.verbose==3)
 
                 # sens, ssim = ssim_sens(image/n_bins, Y/n_bins, n_bins=2)
                 if n_iter > 1 and self._sub_iter < n_iter - 1:
@@ -478,7 +506,7 @@ class ImageProcessor:
                     ssim_increment.append(np.mean(ssim))
 
                 if hist_optim and (n_iter == 1 or (n_iter > 1 and self._sub_iter < n_iter - 1)):
-                    console_log(msg=f"Mean SSIM = {np.mean(ssim):.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose>=2)
+                    console_log(msg=f"Mean SSIM = {np.mean(ssim):.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
                 if hist_optim and self._sub_iter < n_iter - 1:
                     ssim_update = np.zeros(sens.shape)
                     for ch in range(sens.shape[2]):
@@ -502,7 +530,7 @@ class ImageProcessor:
             # Compute statistics
             final_hist = imhist(image=new_image, mask=self.bool_masks[idx], n_bins=n_bins, normalized=True)
             rmse = compute_rmse(final_hist.flatten(), target_hist.flatten())
-            console_log(msg=f"SSIM index between transformed and original image: {np.mean(ssim):.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose>=2)
+            console_log(msg=f"SSIM index between transformed and original image: {np.mean(ssim):.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
             self._validate(observed=[rmse], expected=[0], measures_str=['RMS error'])
 
         buffer_collection.drange = (0, 255)
@@ -585,12 +613,12 @@ class ImageProcessor:
         # Match spatial frequency on rotational average of the magnitude spectrum
         for idx, image in enumerate(buffer_collection):
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
-            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=1)
+            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
             matched_image = []
             magnitude = im3D(self.dataset.magnitudes[idx])
             phase = im3D(self.dataset.phases[idx])
             for self._processed_channel in range(n_channels):
-                console_log(msg=f'Channel {self._processed_channel}:', indent_level=1, verbose=self.verbose>=2, color=Bcolors.BOLD)
+                console_log(msg=f'Channel {self._processed_channel}', indent_level=1, verbose=self.verbose>=2, color=Bcolors.BOLD)
                 fft_image = magnitude[:, :, self._processed_channel]
 
                 # Rotational averages (target vs source) as MEANS over annuli
@@ -631,8 +659,8 @@ class ImageProcessor:
                 if 0 < mn > 1:
                     console_log(
                         msg=f'Out of range values: Actual range [{mn}, {mx}] outside of the admitted range [0, 1].\nWill be rescaled and clipped so that less than 1% falls outside of [0, 1].',
-                        indent_level=1, color=Bcolors.WARNING, verbose=self.verbose>=2)
-                    output_image = soft_clip(output_image, min_value=0, max_value=1, max_percent=0.01, verbose=self.verbose>=2)
+                        indent_level=1, color=Bcolors.WARNING, verbose=self.verbose==3)
+                    output_image = soft_clip(output_image, min_value=0, max_value=1, max_percent=0.01, verbose=self.verbose==3)
             buffer_collection[idx] = output_image * 255
 
         buffer_collection.drange = (0, 255)
@@ -698,7 +726,7 @@ class ImageProcessor:
         # Iterate over each image (each entry in the phase collection)
         for idx, image in enumerate(buffer_collection):
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
-            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=1)
+            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
 
             matched_image = []
 
@@ -707,7 +735,7 @@ class ImageProcessor:
 
             # Process each channel separately
             for self._processed_channel in range(n_channels):
-                console_log(msg=f"Channel {self._processed_channel}:", indent_level=1, color=Bcolors.BOLD, verbose=self.verbose>=2)
+                console_log(msg=f"Channel {self._processed_channel}", indent_level=1, color=Bcolors.BOLD, verbose=self.verbose>=2)
 
                 # Convert polar (magnitude + phase) back to Cartesian
                 XX, YY = pol2cart(target_spectrum[:, :, self._processed_channel], phase[:, :, self._processed_channel])
@@ -738,8 +766,8 @@ class ImageProcessor:
                 if 0 < mn > 1:
                     console_log(
                         msg=f'Out of range values: Actual range [{mn}, {mx}] outside of the admitted range [0, 1].\nWill be rescaled and clipped so that less than 1% falls outside of [0, 1].',
-                        indent_level=1, color=Bcolors.WARNING, verbose=self.verbose>=2)
-                    output_image = soft_clip(output_image, min_value=0, max_value=1, max_percent=0.01, verbose=self.verbose >= 1)
+                        indent_level=1, color=Bcolors.WARNING, verbose=self.verbose==3)
+                    output_image = soft_clip(output_image, min_value=0, max_value=1, max_percent=0.01, verbose=self.verbose == 3)
 
             # Stack the channels and save into the output collection
             buffer_collection[idx] = output_image * 255

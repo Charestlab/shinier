@@ -50,6 +50,9 @@ class Bcolors:
     # COLOR_INPUT = "\033[92m"  # bright green
     DEFAULT_TEXT = "\033[35m"
     CHOICE_VALUE = '\033[93m'
+    GRAY = "\033[2m"
+    MEDIUM_GRAY = "\033[38;5;247m"
+    ALMOST_WHITE = "\033[38;5;255m"
 
     HEADER = '\033[95m'  # Processing steps
     OKBLUE = '\033[94m'  # Processing values

@@ -195,7 +195,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
     kwargs["output_folder"] = Path(out_dir).expanduser().resolve()
 
     # --------- Profile ---------
-    prof = prompt("Options profile?", default=1, kind="choice", choices=["Default options: spectrum and histogram match", "Legacy options (will duplicate the Matlab SHINE TOOLBOX results)", "Customized options"])
+    prof = prompt("Options profile?", default=1, kind="choice", choices=["Default options", "Legacy options (will duplicate the Matlab SHINE TOOLBOX results)", "Customized options"])
     if prof == 1:
         kwargs["whole_image"] = 1
 
@@ -279,16 +279,26 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             kwargs["rgb_weights"] = rgb_weights
 
         if mode in (2, 5, 6, 7, 8):
-            hs = prompt("Which histogram specification?", default=4, kind="choice",
-                        choices=["Exact with noise (legacy)", "Coltuc with moving-average filters", "Coltuc with gaussian filters", "Coltuc with gaussian filters and noise if residual isoluminant pixels"])
-            kwargs["hist_specification"] = hs - 1
-            ho = prompt("Histogram specification with SSIM optimization (Avanaki)?", default='y', kind="bool")
+            ho = prompt("Histogram specification with SSIM optimization (see Avanaki, 2009)?", default='y', kind="bool")
             kwargs["hist_optim"] = ho != 2
             if ho == 2:
                 kwargs["hist_iterations"] = prompt("How many SSIM iterations?", default=5, kind="int", min_v=1, max_v=1_000_000)
                 kwargs["step_size"] = prompt("What is the SSIM step size?", default=34, kind="int", min_v=1, max_v=1_000_000)
-            thp1 = prompt("What should be the target histogram?", default=1, kind="choice",
-                         choices=['Average histogram of input images', 'Flat histogram a.k.a. `histogram equalization`', 'Custom: You provide one as a .npy file'])
+            kwargs["hist_specification"] = None
+            if not kwargs["hist_optim"]:
+                hs = prompt("Which histogram specification?", default=4, kind="choice", choices=[
+                    "Exact with noise (legacy)",
+                    "Coltuc with moving-average filters",
+                    "Coltuc with gaussian filters",
+                    "Coltuc with gaussian filters and noise if residual isoluminant pixels"
+                ])
+                kwargs["hist_specification"] = hs - 1
+
+            thp1 = prompt("What should be the target histogram?", default=1, kind="choice", choices=[
+                'Average histogram of input images',
+                'Flat histogram a.k.a. `histogram equalization`',
+                'Custom: You provide one as a .npy file'
+            ])
             th = [None, 'equal'][thp1-1] if thp1 in [1, 2] else 'custom'
             if th == 'custom':
                 thp2 = prompt("Path to target histogram (.npy)?", kind="str")
@@ -307,20 +317,30 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
                     kwargs["target_spectrum"] = ts
 
         if mode in (5, 6, 7, 8):
-            kwargs["iterations"] = prompt("How many composite iterations (hist/spec coupling)?", default=2,
-                                          kind="int", min_v=1, max_v=1_000_000)
+            kwargs["iterations"] = prompt("How many composite iterations (hist/spec coupling)?", default=2, kind="int", min_v=1, max_v=1_000_000)
 
     # ---- Start SHINIER ----
     try:
         opts = Options(**kwargs)
-        console_log("Starting image processing...\n", color=Bcolors.BOLD)
+
     except Exception as e:
         raise ValueError(f"Invalid configuration: {e}\n")
 
     dataset = ImageDataset(images=images, masks=masks, options=opts) if (images or masks) else ImageDataset(options=opts)
-    ImageProcessor(dataset=dataset, verbose=1)
+    prog_info = prompt('Select verbosity level', kind="choice", default=2, choices=[
+            "None (quiet mode)",
+            "Progress bar with ETA",
+            "Basic progress steps (no progress bar)",
+            "Detailed step-by-step info (no progress bar)",
+            "Debug mode for developers (no progress bar)"
+    ])
+    prog_info = prog_info - 2
+    ImageProcessor(dataset=dataset, verbose=prog_info, from_cli=True)
 
-    console_log("\n=== Options ===", color=Bcolors.SECTION)
+    console_log("╔══════════════════════════════════════════════════════╗")
+    console_log("║                      OPTIONS                         ║")
+    console_log("╚══════════════════════════════════════════════════════╝")
+    # console_log("\n=== Options ===", color=Bcolors.SECTION)
     for key, value in kwargs.items():
         console_log(f"{key:<20}: {value}", indent_level=1, color=Bcolors.OKBLUE)
 

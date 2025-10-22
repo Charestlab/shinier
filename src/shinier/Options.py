@@ -84,7 +84,14 @@ class Options:
                 >This method of iterating was develop so that it recalculates the respective target at each iteration (i.e., no target hist/spectrum).
 
     --------------------------------------------------HISTOGRAM matching--------------------------------------------------------
+        hist_optim (bool): Optimization of the histogram-matched images with structural similarity index measure (Avanaki, 2009) (default = False)
+            True = SSIM optimization (Avanaki, 2009)
+                    > Following Avanaki's experimental results, no tie-breaking strategy is applied when optimizing SSIM except for the very last iteration where the "hybrid" hist_specification is used.
+                    > To change the number if iterations (default = 5) and adjust step size (default = 35), see below
+            False = No SSIM optimization
+
         hist_specification (Literal[1-4]): Determines the algorithm used to break the ties (isoluminance) when matching the histogram (default = 4).
+            >> Set to None if hist_optim is True. See hist_optim for more info.
             1 = 'Noise': Exact specification with noise (legacy code)
                     > Add small uniform noise to break ties (fast; non-deterministic unless seed set).
             2 = 'Moving-average': Coltuc Bolon & Chassery (2006) tie-breaking strategy with moving-average filters.
@@ -93,11 +100,6 @@ class Options:
                     > Adaptive amount of gaussian filters used (min 5, max 7; deterministic local ordering).
             4 = 'Hybrid': Coltuc's tie-breaking strategy with gaussian filters, then noise if isoluminant pixels persist.
                     > 'Gaussian' (deterministic) + 'Noise' (stochastic; if needed) - best compromise.
-
-        hist_optim (bool): Optimization of the histogram-matched images with structural similarity index measure (Avanaki, 2009) (default = False)
-            True = SSIM optimization (Avanaki, 2009)
-                    > To change the number if iterations (default = 10) and adjust step size (default = 35), see below
-            False = No SSIM optimization
 
         hist_iterations (int): Number of iterations for SSIM optimization in hist_optim (default is 10).
 
@@ -145,11 +147,12 @@ class Options:
                 target_spectrum = rho
 
     --------------------------------------------------EXTRA--------------------------------------------------------
-        verbose (Literal[-1, 0, 1, 2]): Controls verbosity levels (default = 0).
-            -1 = Nothing is printed (used for unit tests);
-            0 = Minimal processing steps are printed;
-            1 = Additional info about image and channels being processed are printed;
-            2 = Additional info about the results of internal tests are printed.
+        verbose (Literal[-1, 0, 1, 2, 3]): Controls verbosity levels (default = 0).
+            -1 = Quiet mode
+            0 = Progress bar with ETA
+            1 = Basic progress steps (no progress bar)
+            2 = Additional info about image and channels being processed are printed (no progress bar)
+            3 = Debug mode for developers (no progress bar)
 
     """
     def __init__(
@@ -208,7 +211,7 @@ class Options:
         self.target_lum = target_lum
         self.rgb_weights = rgb_weights
 
-        self.hist_specification = hist_specification
+        self.hist_specification = None if hist_optim else hist_specification
         self.hist_optim = hist_optim
         self.hist_iterations = hist_iterations
         self.step_size = step_size
@@ -220,7 +223,7 @@ class Options:
 
         self.verbose = verbose
 
-        # Override validation and
+        # Override validation
         if not self.legacy_mode:
             self._validate_options()
         else:
@@ -273,7 +276,7 @@ class Options:
         if self.target_lum[1] < 0:
             raise ValueError(f"Standard deviation is {self.target_lum[1]} but should be greater than or equal to 0")
 
-        if self.hist_specification not in [1, 2, 3, 4]:
+        if not self.hist_optim and self.hist_specification not in [1, 2, 3, 4]:
             raise ValueError("hist_specification must be 1, 2, 3 or 4. See Options")
         if not isinstance(self.hist_optim, bool):
             raise TypeError("hist_optim must be a boolean value (True or False).")
