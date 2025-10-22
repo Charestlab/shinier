@@ -166,28 +166,28 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
 
     # --------- General I/O ---------
     if images is None:
-        in_dir = prompt("Input folder (directory path)", default=str(REPO_ROOT / "INPUT"),
+        in_dir = prompt("Input folder (directory path)?", default=str(REPO_ROOT / "INPUT"),
                         kind="str", validator=_validator_dir_exists)
         kwargs["input_folder"] = Path(in_dir).expanduser().resolve()
     else:
         kwargs["input_folder"] = None
 
     formats = ["png", "tif", "jpg"]
-    fmt_choice = prompt("Images format", default=1, kind="choice", choices=formats)
+    fmt_choice = prompt("Images format?", default=1, kind="choice", choices=formats)
     kwargs["images_format"] = formats[fmt_choice - 1]
 
-    out_dir = prompt("Output folder (directory path)", default=str(REPO_ROOT / "OUTPUT"),
+    out_dir = prompt("Output folder (directory path)?", default=str(REPO_ROOT / "OUTPUT"),
                      kind="str", validator=_validator_dir_exists)
     kwargs["output_folder"] = Path(out_dir).expanduser().resolve()
 
     # --------- Profile ---------
-    prof = prompt("Options profile", default=1, kind="choice", choices=["Default options: spectrum and histogram match", "Legacy options (will duplicate the Matlab SHINE TOOLBOX results)", "Customized options"])
+    prof = prompt("Options profile?", default=1, kind="choice", choices=["Default options: spectrum and histogram match", "Legacy options (will duplicate the Matlab SHINE TOOLBOX results)", "Customized options"])
     if prof == 1:
         kwargs["whole_image"] = 1
 
     # --------- Mask ---------
     if prof != 1:
-        whole = prompt("Binary ROI masks: Analysis run on selected pixels (e.g. pixels >= 127).", default=1, kind="choice", choices=[
+        whole = prompt("Binary ROI masks: Analysis run on selected pixels (e.g. pixels >= 127)", default=1, kind="choice", choices=[
             "No ROI mask: Whole images will be analyzed",
             "ROI masks: Analysis run on pixels != a background pixel value you will provide",
             "ROI masks: Analysis run on pixels != most frequent pixel value in the image",
@@ -196,9 +196,9 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
         kwargs["whole_image"] = whole
         if whole == 4:
             if masks is None:
-                mdir = prompt("Masks folder: Will use ", default=str(REPO_ROOT / "MASK"), kind="str", validator=_validator_dir_exists)
+                mdir = prompt("Masks folder? Will use ", default=str(REPO_ROOT / "MASK"), kind="str", validator=_validator_dir_exists)
                 kwargs["masks_folder"] = Path(mdir).expanduser().resolve()
-                mfmt_choice = prompt("Masks format", default=1, kind="choice", choices=formats)
+                mfmt_choice = prompt("Masks format?", default=1, kind="choice", choices=formats)
                 kwargs["masks_format"] = formats[mfmt_choice - 1]
             else:
                 kwargs["masks_folder"] = None
@@ -255,7 +255,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
 
         # ---- Mode-Specific Options ----
         if mode == 1:
-            kwargs["safe_lum_match"] = prompt("Safe luminance matching (will ensure pixel values fall within [0, 255]) ?", default=False, kind="bool")
+            kwargs["safe_lum_match"] = prompt("Safe luminance matching (will ensure pixel values fall within [0, 255])?", default=False, kind="bool")
             kwargs["target_lum"] = prompt("Target luminance list (mean, std)", default="0, 0", kind="tuple")
             rgb_weights = prompt("RGB coefficients for luminance", default=3, kind="choice", choices=[
                 "Equal weights",
@@ -266,35 +266,35 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             kwargs["rgb_weights"] = rgb_weights
 
         if mode in (2, 5, 6, 7, 8):
-            hs = prompt("Histogram specification", default=4, kind="choice",
+            hs = prompt("Which histogram specification?", default=4, kind="choice",
                         choices=["Exact with noise (legacy)", "Coltuc with moving-average filters", "Coltuc with gaussian filters", "Coltuc with gaussian filters and noise if residual isoluminant pixels"])
             kwargs["hist_specification"] = hs - 1
-            ho = prompt("SSIM optimization (Avanaki)", default=1, kind="choice", choices=["No", "Yes"])
-            kwargs["hist_optim"] = ho - 1
+            ho = prompt("SSIM optimization (Avanaki)?", default=1, kind="bool")
+            kwargs["hist_optim"] = ho != 2
             if ho == 2:
-                kwargs["hist_iterations"] = prompt("SSIM iterations", default=10, kind="int", min_v=1, max_v=1_000_000)
-                kwargs["step_size"] = prompt("SSIM step size", default=34, kind="int", min_v=1, max_v=1_000_000)
+                kwargs["hist_iterations"] = prompt("How many SSIM iterations?", default=10, kind="int", min_v=1, max_v=1_000_000)
+                kwargs["step_size"] = prompt("What is the SSIM step size?", default=34, kind="int", min_v=1, max_v=1_000_000)
             thp1 = prompt("What should be the target histogram?", default=1, kind="choice",
                          choices=['Average histogram of input images', 'Flat histogram a.k.a. `histogram equalization`', 'Custom: You provide one as a .npy file'])
             th = [None, 'equal'][thp1-1] if thp1 in [1, 2] else 'custom'
             if th == 'custom':
-                thp2 = prompt("Path to target histogram (.npy)", kind="str")
+                thp2 = prompt("Path to target histogram (.npy)?", kind="str")
                 th = load_np_array(thp2)
             if th is not None:
                 kwargs["target_hist"] = th
 
         if mode in (3, 4, 5, 6, 7, 8):
-            rsel = prompt("Rescaling after sf/spec", default=2, kind="choice",
+            rsel = prompt("What type of rescaling after sf/spec?", default=2, kind="choice",
                           choices=["none", "min/max of all images", "avg min/max"])
             kwargs["rescaling"] = rsel - 1
             if prompt("Use a specific target spectrum?", default=False, kind="bool"):
-                tsp = prompt("Path to target spectrum (.npy/.txt/.csv)", kind="str")
+                tsp = prompt("Path to target spectrum (.npy/.txt/.csv)?", kind="str")
                 ts = load_np_array(tsp)
                 if ts is not None:
                     kwargs["target_spectrum"] = ts
 
         if mode in (5, 6, 7, 8):
-            kwargs["iterations"] = prompt("Composite iterations (hist/spec coupling)", default=2,
+            kwargs["iterations"] = prompt("How many composite iterations (hist/spec coupling)?", default=2,
                                           kind="int", min_v=1, max_v=1_000_000)
 
     # ---- Start SHINIER ----
