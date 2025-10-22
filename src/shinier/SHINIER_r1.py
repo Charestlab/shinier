@@ -3,8 +3,8 @@ from typing import Optional, Dict, Any, List, Callable, Tuple
 import sys
 import numpy as np
 from datetime import datetime
-from PIL import Image
 import re
+import warnings
 
 from shinier import ImageDataset, Options, ImageProcessor
 from shinier.utils import (
@@ -63,22 +63,36 @@ def prompt(
         console_log(f"{tick}{prefix}: {answer}")
         print('')
 
+    # Display question
     default_str = colorize('default', Bcolors.DEFAULT_TEXT)
-    # default_value = colorize(default, Bcolors.DEFAULT_TEXT)
     console_log(f"{Bcolors.COLOR_TEXT}{label} (Enter=[{Bcolors.DEFAULT_TEXT}{default}{Bcolors.COLOR_TEXT}], q=quit):{Bcolors.ENDC}")
+
+    # Check args and set choices
+    if kind == 'choice' and choices is None:
+        raise ValueError('Must provide `choices` when kind == "choice"')
+    if kind == 'bool':
+        if choices is not None:
+            warnings.warn("choices are ignored for kind 'bool'")
+        if not isinstance(default, str):
+            raise ValueError('`default` should be a string ("y" or "n") for kind "bool"')
+
     if kind == "choice" and choices:
         for i, c in enumerate(choices, 1):
-            default_str = f" [{default_str}]" if default == i else ""
-            choice_str = f"{colorize(str(i), Bcolors.DEFAULT_TEXT)}" if default == i else colorize(str(i), Bcolors.CHOICE_VALUE)
-            # choice_str = colorize(str(i), Bcolors.CHOICE_VALUE)
-            console_log(f"[{choice_str}] {c}{default_str}", indent_level=0, color=Bcolors.BOLD)
+            new_default_str = f" [{default_str}]" if default == i else ""
+            choice_color = Bcolors.DEFAULT_TEXT if default == i else Bcolors.CHOICE_VALUE
+            choice_nb = colorize(str(i), choice_color)
+            console_log(f"[{choice_nb}] {c}{new_default_str}", indent_level=0, color=Bcolors.BOLD)
     if kind == 'bool':
         choices = ['Yes', 'No']
+        new_default = None
         for i, c in enumerate(choices):
-            default_str = f" [{default_str}]" if c[0].lower() in default.lower() else ""
+            is_default = c[0].lower() in default.lower()
+            new_default_str = f" [{default_str}]" if is_default else ""
+            if new_default is None and is_default:
+                new_default = i + 1
             choice_str = f"{colorize(c[0].lower(), Bcolors.DEFAULT_TEXT)}" if default == i else colorize(c[0].lower(), Bcolors.CHOICE_VALUE)
-            # choice_str = colorize(c[0].lower(), Bcolors.CHOICE_VALUE)
-            console_log(f"[{choice_str}] {choices[i]}{default_str}", indent_level=0, color=Bcolors.BOLD)
+            console_log(f"[{choice_str}] {choices[i]}{new_default_str}", indent_level=0, color=Bcolors.BOLD)
+        default = new_default
 
     if IS_TTY:
         print("> ", end="", flush=True)
@@ -235,8 +249,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             "Rec.ITU-R 2020 is used.                             (Y' = 0.2627 R' + 0.6780 G' + 0.0593 B') (Ultra-High-Definition monitors)"
         ])
         kwargs["as_gray"] = as_gray - 1
-        kwargs["conserve_memory"] = prompt("Conserve memory (temp dir, 1 image in RAM)?",
-                                           default=True, kind="bool")
+        kwargs["conserve_memory"] = prompt("Conserve memory (temp dir, 1 image in RAM)?", default='y', kind="bool")
 
         # Dithering
         dith_choices = ["No dithering", "Noisy-bit dithering", "Floyd–Steinberg dithering"]
@@ -251,11 +264,11 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
 
         # Seed
         now = datetime.now()
-        kwargs["seed"] = prompt("Random seed", default=int(now.timestamp()), kind="int")
+        kwargs["seed"] = prompt("Provide seed for pseudo-random number generator or use time-stamped default", default=int(now.timestamp()), kind="int")
 
         # ---- Mode-Specific Options ----
         if mode == 1:
-            kwargs["safe_lum_match"] = prompt("Safe luminance matching (will ensure pixel values fall within [0, 255])?", default=False, kind="bool")
+            kwargs["safe_lum_match"] = prompt("Safe luminance matching (will ensure pixel values fall within [0, 255])?", default='n', kind="bool")
             kwargs["target_lum"] = prompt("Target luminance list (mean, std)", default="0, 0", kind="tuple")
             rgb_weights = prompt("RGB coefficients for luminance", default=3, kind="choice", choices=[
                 "Equal weights",
@@ -269,10 +282,10 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             hs = prompt("Which histogram specification?", default=4, kind="choice",
                         choices=["Exact with noise (legacy)", "Coltuc with moving-average filters", "Coltuc with gaussian filters", "Coltuc with gaussian filters and noise if residual isoluminant pixels"])
             kwargs["hist_specification"] = hs - 1
-            ho = prompt("SSIM optimization (Avanaki)?", default=1, kind="bool")
+            ho = prompt("Histogram specification with SSIM optimization (Avanaki)?", default='y', kind="bool")
             kwargs["hist_optim"] = ho != 2
             if ho == 2:
-                kwargs["hist_iterations"] = prompt("How many SSIM iterations?", default=10, kind="int", min_v=1, max_v=1_000_000)
+                kwargs["hist_iterations"] = prompt("How many SSIM iterations?", default=5, kind="int", min_v=1, max_v=1_000_000)
                 kwargs["step_size"] = prompt("What is the SSIM step size?", default=34, kind="int", min_v=1, max_v=1_000_000)
             thp1 = prompt("What should be the target histogram?", default=1, kind="choice",
                          choices=['Average histogram of input images', 'Flat histogram a.k.a. `histogram equalization`', 'Custom: You provide one as a .npy file'])
@@ -287,7 +300,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             rsel = prompt("What type of rescaling after sf/spec?", default=2, kind="choice",
                           choices=["none", "min/max of all images", "avg min/max"])
             kwargs["rescaling"] = rsel - 1
-            if prompt("Use a specific target spectrum?", default=False, kind="bool"):
+            if prompt("Use a specific target spectrum?", default='n', kind="bool"):
                 tsp = prompt("Path to target spectrum (.npy/.txt/.csv)?", kind="str")
                 ts = load_np_array(tsp)
                 if ts is not None:
@@ -305,7 +318,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
         raise ValueError(f"Invalid configuration: {e}\n")
 
     dataset = ImageDataset(images=images, masks=masks, options=opts) if (images or masks) else ImageDataset(options=opts)
-    ImageProcessor(dataset=dataset, verbose=0)
+    ImageProcessor(dataset=dataset, verbose=1)
 
     console_log("\n=== Options ===", color=Bcolors.SECTION)
     for key, value in kwargs.items():
