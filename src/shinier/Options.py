@@ -21,10 +21,10 @@ class Options:
         masks_format (str): png, tif, jpg (default = png)
         masks_folder (Union[str, Path]): relative or absolute path of mask (default = ./MASKS)
 
-        whole_image (Literal[1-3]): (default = 1)
-            1 = Whole image
-            2 = Figure-ground separated (input images as mask(s))
-            3 = Figure-ground separated (based on mask(s))
+        whole_image (Literal[1-3]): Binary ROI masks: Analysis run on selected pixels (default = 1)
+            1 = No ROI mask: Whole images will be analyzed
+            2 = ROI masks: Analysis run on pixels != `background` pixel value
+            3 = ROI masks: Masks loaded from the `MASK` folder and analysis run on pixels >= 127
 
         background (Union[int, float]): Background grayscale intensity of mask, or 300 = automatic (default = 300)
             (By default (300), the most frequent luminance intensity in the image is used as the background value);
@@ -45,11 +45,11 @@ class Options:
         as_gray (Literal[0-4]): Defines how the images are converted into grayscale before being converted to uint8 (default = 0).
             0 = No conversion applied
             1 = Equal weighted sum of R, G and B pixels is applied. (Y' = 1/3 R' + 1/3 B' + 1/3 G').
-            2 = Rec.ITU-R 601 is used (legacy mode ; see Matlab).   (Y' = 0.299 R' + 0.587 G' + 0.114 B')    (Standard-Definition monitors)
+            2 = Rec.ITU-R 601 is used (legacy mode; see Matlab).    (Y' = 0.299 R' + 0.587 G' + 0.114 B') (Standard-Definition monitors)
             3 = Rec.ITU-R 709 is used.                              (Y' = 0.2126 R' + 0.7152 G' + 0.0722 B') (High-Definition monitors)
             4 = Rec.ITU-R 2020 is used.                             (Y' = 0.2627 R' + 0.6780 G' + 0.0593 B') (Ultra-High-Definition monitors)
 
-               >The prime notation (') indicates that the RGB values have been gamma-corrected, meaning they have undergone a 
+               >The prime notation (') indicates that the RGB values have been gamma-corrected, meaning they have undergone a
                 non-linear transformation to match human visual perception and display characteristics, ensuring faithful color
                 reproduction on modern displays.
 
@@ -60,25 +60,25 @@ class Options:
 
         conserve_memory (Optional[bool]): Controls how images are loaded and stored in memory during processing (default = True).
             True = Minimizes memory usage by keeping only one image in memory at a time and using a temporary directory to save the images.
-                If the `input_data` is a list of NumPy arrays images are first saved as .npy in a temporary directory, and they are loaded 
+                If the `input_data` is a list of NumPy arrays images are first saved as .npy in a temporary directory, and they are loaded
                 in memory one at a time upon request.
             False = Increases memory usage substantially by loading all images into memory at once, but may improve processing speed.
 
         seed (Optional[Int]): Seed to initialize the PRNG (default = None).
             Used for the 'Noisy bit dithering' and hist_specification (with "hybrid" or "noise" tie-breaking strategies).
             If 'None', int(time.time()) will be used.
-        
+
         legacy_mode (Optional[bool]): Enables backward compatibility with older versions while retaining recent optimizations (default = False).
-            True = reproduces the behavior of previous releases by setting:  
-                - `conserve_memory = False`  
-                - `as_gray = 2`  
-                - `dithering = 0`  
-                - `hist_specification = 1`  
+            True = reproduces the behavior of previous releases by setting:
+                - `conserve_memory = False`
+                - `as_gray = 2`
+                - `dithering = 0`
+                - `hist_specification = 1`
                 - `safe_lum_match = False`
             False = no legacy settings are forced and all options follow their current defaults.
 
         iterations (int): Number of iteration for composites mode (default = 2).
-            For these modes, histogram specification and Fourier amplitude specification affect each other. 
+            For these modes, histogram specification and Fourier amplitude specification affect each other.
             Multiple iterations will allows a high degree a joint matching.
 
                 >This method of iterating was develop so that it recalculates the respective target at each iteration (i.e., no target hist/spectrum).
@@ -98,13 +98,13 @@ class Options:
             True = SSIM optimization (Avanaki, 2009)
                     > To change the number if iterations (default = 10) and adjust step size (default = 35), see below
             False = No SSIM optimization
-            
+
         hist_iterations (int): Number of iterations for SSIM optimization in hist_optim (default is 10).
 
-        step_size (int): Step size for SSIM optimization in hist_optim (default is 35). 
+        step_size (int): Step size for SSIM optimization in hist_optim (default is 35).
                     > This initial measure is adjusted during the optimization process using Avanaki's (2009) theoretical bounds.
 
-        target_hist (Optional[np.ndarray, Literal['equal']]): Target histogram counts (int) or weights (float) to use for histogram or fourier matching (default is None). 
+        target_hist (Optional[np.ndarray, Literal['equal']]): Target histogram counts (int) or weights (float) to use for histogram or fourier matching (default is None).
             Should be a numpy array of shape (256,) for 8-bit images, or a string 'equal' for histogram equalization.
             If 'None', the target histogram is the average histogram of all the input images.
             E.g.,
@@ -117,7 +117,7 @@ class Options:
             False = Values will be clipped, but the resulting targets will stay the same.
 
         target_lum (Optional[Iterable[Union[int, float]]]): Pair (mean, std) of target luminance for luminance matching (default = (0, 0)).
-            The mean must be in [0, 255], and the standard deviation must be ≥ 0. 
+            The mean must be in [0, 255], and the standard deviation must be ≥ 0.
             If (0, 0), the mean and std will be the average mean and average std of the images.
             Only for mode 1.
 
@@ -135,7 +135,7 @@ class Options:
             3 = Rescaling average max/min.
 
         target_spectrum: Optional[np.ndarray[float]]: Target magnitude spectrum (default = None).
-            Same size as the images of float values. 
+            Same size as the images of float values.
             If 'None', the target magnitude spectrum is the average spectrum of all the input images.
             Only for mode 3 and 4.
             E.g.,
@@ -150,7 +150,7 @@ class Options:
             0 = Minimal processing steps are printed;
             1 = Additional info about image and channels being processed are printed;
             2 = Additional info about the results of internal tests are printed.
-    
+
     """
     def __init__(
             self,
@@ -219,7 +219,6 @@ class Options:
         self.iterations = iterations if mode in [5,6,7,8] else 1
 
         self.verbose = verbose
-
 
         # Override validation and
         if not self.legacy_mode:

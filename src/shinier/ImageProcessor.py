@@ -124,12 +124,13 @@ class ImageProcessor:
 
     def _get_mask(self, idx):
         """ Provide mask if masks exists in the dataset, if not make blank masks (all True). """
-
+        background = 127 if self.options.whole_image == 3 and self.options.background == 300 else self.options.background
+        background_operator = '<' if self.options.whole_image == 3 and self.options.background == 300 else '=='
         def _prepare_mask(image, mask=None):
             if self.options.whole_image == 2:
-                mask_f, mask_b, _ = separate(image, self.options.background)
+                mask_f, mask_b, _ = separate(image, background=background, background_operator=background_operator)
             elif self.options.whole_image == 3:
-                mask_f, mask_b, _ = separate(mask, self.options.background)
+                mask_f, mask_b, _ = separate(mask, background=background, background_operator=background_operator)
             self.current_masks = (mask_f, mask_b)
 
         n_dims = self.dataset.images.n_dims
@@ -147,6 +148,7 @@ class ImageProcessor:
                 else:
                     self.bool_masks[idx] = self.bool_masks[0]
             else:
+                # No ROI mask: Whole image is analyzed
                 self.bool_masks[idx] = np.ones(im_size, dtype=bool) if idx == 0 else self.bool_masks[0]
             self._sum_bool_masks[idx] = [self.bool_masks[idx][..., ch].sum() for ch in range(self.bool_masks[idx].shape[2])]
 

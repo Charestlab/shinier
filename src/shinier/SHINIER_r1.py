@@ -7,15 +7,19 @@ from PIL import Image
 import re
 
 from shinier import ImageDataset, Options, ImageProcessor
-from shinier.utils import Bcolors, console_log, load_images_from_folder, load_np_array
+from shinier.utils import (
+    Bcolors, console_log, load_images_from_folder, load_np_array, colorize,
+    print_shinier_header
+)
 
 # Compute repo root as parent of /src/shinier/
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
+IS_TTY = sys.stdin.isatty()
 
 #########################################
 #            GENERIC PROMPT             #
 #########################################
+
 
 def prompt(
     label: str,
@@ -42,12 +46,44 @@ def prompt(
     Returns:
         The validated and type-converted user input.
     """
-    console_log(f"{label} (Enter=default [{default}], q=quit):", color=color)
+
+    def print_answer(answer: str = '', prefix: str = 'Selected'):
+        """
+        Prints the given answer with a custom prefix and updates the console output.
+        Args:
+            answer (str): The string representing the answer to be displayed.
+            prefix (str): A custom prefix to precede the answer.
+        """
+        tick = ''
+        if IS_TTY:
+            tick = '> '
+            sys.stdout.write("\033[F")  # Move cursor up one line
+            sys.stdout.write("\033[K")  # Clear the line
+
+        console_log(f"{tick}{prefix}: {answer}")
+        print('')
+
+    default_str = colorize('default', Bcolors.DEFAULT_TEXT)
+    # default_value = colorize(default, Bcolors.DEFAULT_TEXT)
+    console_log(f"{Bcolors.COLOR_TEXT}{label} (Enter=[{Bcolors.DEFAULT_TEXT}{default}{Bcolors.COLOR_TEXT}], q=quit):{Bcolors.ENDC}")
     if kind == "choice" and choices:
         for i, c in enumerate(choices, 1):
-            console_log(f"{i}. {c}", indent_level=1, color=Bcolors.BOLD)
+            default_str = f" [{default_str}]" if default == i else ""
+            choice_str = f"{colorize(str(i), Bcolors.DEFAULT_TEXT)}" if default == i else colorize(str(i), Bcolors.CHOICE_VALUE)
+            # choice_str = colorize(str(i), Bcolors.CHOICE_VALUE)
+            console_log(f"[{choice_str}] {c}{default_str}", indent_level=0, color=Bcolors.BOLD)
+    if kind == 'bool':
+        choices = ['Yes', 'No']
+        for i, c in enumerate(choices):
+            default_str = f" [{default_str}]" if c[0].lower() in default.lower() else ""
+            choice_str = f"{colorize(c[0].lower(), Bcolors.DEFAULT_TEXT)}" if default == i else colorize(c[0].lower(), Bcolors.CHOICE_VALUE)
+            # choice_str = colorize(c[0].lower(), Bcolors.CHOICE_VALUE)
+            console_log(f"[{choice_str}] {choices[i]}{default_str}", indent_level=0, color=Bcolors.BOLD)
 
-    raw = input("> ").strip()
+    if IS_TTY:
+        print("> ", end="", flush=True)
+    raw = input().strip()
+    # raw = input("> ").strip()
 
     # ---- Exit ----
     if raw.lower() == "q":
@@ -57,7 +93,8 @@ def prompt(
     # ---- Default ----
     if raw == "":
         if default is not None:
-            console_log(f"Default selected: {default}", indent_level=1, color=Bcolors.OKGREEN)
+            default_ = choices[default-1] if kind in ['bool', 'choice'] else default
+            print_answer(default_, prefix="Default selected")
             return default
         console_log("Please enter a value or specify a default.", indent_level=1, color=Bcolors.FAIL)
         return prompt(label, default, kind, choices, validator, min_v, max_v, color)
@@ -86,8 +123,8 @@ def prompt(
         elif kind == "tuple":
             tokens = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", raw)
             val = tuple(map(float, tokens))
-            if len(val) not in (2, 3):
-                raise ValueError("Expected 2 or 3 float values")
+            if len(val) == 0:
+                raise ValueError("Expected a non-empty list of tuple. E.g.: `0, 2` or `(0, 2)` or `[0, 2]`")
         else:
             val = raw
     except ValueError:
@@ -100,6 +137,12 @@ def prompt(
         if not ok:
             console_log(f"✗ {msg}", indent_level=1, color=Bcolors.FAIL)
             return prompt(label, default, kind, choices, validator, min_v, max_v, color)
+
+    if kind in ['bool', 'choice']:
+        prefix = 'Default selected' if val == default else 'Selected'
+        print_answer(answer=choices[val-1], prefix=prefix)
+    else:
+        print_answer(answer=val, prefix="Answered")
 
     return val
 
@@ -118,7 +161,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
     Returns:
         Options: Configured SHINIER options object.
     """
-    console_log("\n=== SHINIER Options — Interactive CLI ===", color=Bcolors.SECTION)
+    print_shinier_header(is_tty=IS_TTY, version= "v0.1.0")
     kwargs: Dict[str, Any] = {}
 
     # --------- General I/O ---------
@@ -138,22 +181,22 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
     kwargs["output_folder"] = Path(out_dir).expanduser().resolve()
 
     # --------- Profile ---------
-    prof = prompt("Profile", default=1, kind="choice", choices=["default", "legacy", "custom"])
+    prof = prompt("Options profile", default=1, kind="choice", choices=["Default options: spectrum and histogram match", "Legacy options (will duplicate the Matlab SHINE TOOLBOX results)", "Customized options"])
     if prof == 1:
         kwargs["whole_image"] = 1
 
-    # --------- Figure/Ground ---------
+    # --------- Mask ---------
     if prof != 1:
-        whole = prompt("Figure-ground (whole_image)", default=1, kind="choice", choices=[
-            "Whole image",
-            "Figure-ground (input images as masks)",
-            "Figure-ground (MASK folder)"
+        whole = prompt("Binary ROI masks: Analysis run on selected pixels (e.g. pixels >= 127).", default=1, kind="choice", choices=[
+            "No ROI mask: Whole images will be analyzed",
+            "ROI masks: Analysis run on pixels != a background pixel value you will provide",
+            "ROI masks: Analysis run on pixels != most frequent pixel value in the image",
+            "ROI masks: Masks loaded from the `MASK` folder and analysis run on pixels >= 127"
         ])
         kwargs["whole_image"] = whole
-        if whole == 3:
+        if whole == 4:
             if masks is None:
-                mdir = prompt("Masks folder", default=str(REPO_ROOT / "MASK"),
-                              kind="str", validator=_validator_dir_exists)
+                mdir = prompt("Masks folder: Will use ", default=str(REPO_ROOT / "MASK"), kind="str", validator=_validator_dir_exists)
                 kwargs["masks_folder"] = Path(mdir).expanduser().resolve()
                 mfmt_choice = prompt("Masks format", default=1, kind="choice", choices=formats)
                 kwargs["masks_format"] = formats[mfmt_choice - 1]
@@ -162,9 +205,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
                 kwargs["masks_format"] = None
 
         if whole in (2, 3):
-            bg_auto = prompt("Background auto (most frequent luminance)?", default=True, kind="bool")
-            kwargs["background"] = 300 if bg_auto else prompt("Background luminance [0–255]",
-                                                              default=128, kind="int", min_v=0, max_v=255)
+            kwargs["background"] = 300 if whole == 3 else prompt("ROI masks: Analysis will be run on pixels != [input a value between 0–255]", default=127, kind="int", min_v=0, max_v=255)
 
     # --------- Processing Mode ---------
     mode = prompt("Processing mode", default=8, kind="choice", choices=[
@@ -172,11 +213,11 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
         "Histogram only (hist_match)",
         "Spatial frequency only (sf_match)",
         "Spectrum only (spec_match)",
-        "Histogram + SF",
+        "Histogram + Spatial frequency",
         "Histogram + Spectrum",
-        "SF + Histogram",
+        "Spatial frequency + Histogram",
         "Spectrum + Histogram",
-        "Only dithering"
+        "Dithering only"
     ])
     kwargs["mode"] = mode
 
@@ -188,10 +229,10 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
     if prof == 3:
         as_gray = prompt("Load as grayscale?", default=1, kind="choice", choices=[
             "No conversion applied",
-            "Equal weighted grayscale",
-            "Rec. 601 (legacy)",
-            "Rec. 709 (HD monitors)",
-            "Rec. 2020 (UHD monitors)"
+            "Equal weighted sum of R, G and B pixels is applied. (Y' = 1/3 R' + 1/3 B' + 1/3 G')",
+            "Rec.ITU-R 601 is used (legacy mode; see Matlab).    (Y' = 0.299 R' + 0.587 G' + 0.114 B') (Standard-Definition monitors)",
+            "Rec.ITU-R 709 is used.                              (Y' = 0.2126 R' + 0.7152 G' + 0.0722 B') (High-Definition monitors)",
+            "Rec.ITU-R 2020 is used.                             (Y' = 0.2627 R' + 0.6780 G' + 0.0593 B') (Ultra-High-Definition monitors)"
         ])
         kwargs["as_gray"] = as_gray - 1
         kwargs["conserve_memory"] = prompt("Conserve memory (temp dir, 1 image in RAM)?",

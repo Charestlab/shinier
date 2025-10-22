@@ -43,16 +43,50 @@ class Bcolors:
     """
     Provides color-coding for terminal text output.
     """
+    # --- ANSI color constants ---
+    # COLOR_PROMPT = "\033[96m"  # bright cyan
+    COLOR_TEXT = "\033[97m"  # bright white
+    # COLOR_DEFAULT = "\033[93m"  # bright yellow
+    # COLOR_INPUT = "\033[92m"  # bright green
+    DEFAULT_TEXT = "\033[35m"
+    CHOICE_VALUE = '\033[93m'
+
     HEADER = '\033[95m'  # Processing steps
     OKBLUE = '\033[94m'  # Processing values
     OKCYAN = '\033[96m'  # Internal notes
     OKGREEN = '\033[92m'  # Ok values
     WARNING = '\033[93m'
     FAIL = '\033[91m'  # Problematic values
-    ENDC = '\033[0m'
+    ENDC = '\033[0m'  # Reset color
     BOLD = '\033[1m'  # Iteration
     UNDERLINE = '\033[4m'
     SECTION = '\033[4m\033[1m'  # Image loop
+    SECTION_BRIGHT = '\033[4m\033[1m\033[97m'  # Image loop
+
+
+def print_shinier_header(is_tty: bool = True, version: str = "v1.0.0"):
+    """Prints a styled header for the SHINIER CLI."""
+    if is_tty:
+        print("\033[2J")  # clear screen
+
+    date_str = colorize(datetime.now().strftime("%Y-%m-%d %H:%M"), Bcolors.WARNING)
+
+    banner = r"""
+   ███████╗██╗  ██╗██╗███╗  ██╗██╗███████╗██████╗
+   ██╔════╝██║  ██║██║████╗ ██║██║██╔════╝██╔══██╗
+   ███████╗███████║██║██╔██╗██║██║█████╗  ██████╔╝
+   ╚════██║██╔══██║██║██║╚████║██║██╔══╝  ██╔══██╗
+   ███████║██║  ██║██║██║ ╚███║██║███████╗██║  ██║
+   ╚══════╝╚═╝  ╚═╝╚═╝╚═╝  ╚══╝╚═╝╚══════╝╚═╝  ╚═╝
+    """.strip("\n")
+
+    console_log("")
+    console_log(banner)
+    console_log("")
+    console_log(f"SHINIER — Image Normalization & Equalization Toolkit  ({colorize(version, color=Bcolors.OKGREEN)})")
+    console_log(f"Session started: {date_str}")
+    console_log("─" * 60)
+    console_log("")
 
 
 class MatlabOperators:
@@ -1202,7 +1236,7 @@ def gray2rgb(image: Union[np.ndarray, Image.Image]) -> np.ndarray:
     return np.stack((image,) * 3, axis=-1)
 
 
-def separate(mask: np.ndarray, background: Union[int, float] = None, smoothing: bool = False, show_figure: bool = False) -> Tuple[np.ndarray, np.ndarray, float]:
+def separate(mask: np.ndarray, background: Union[int, float] = 0, background_operator: Literal['!=', '==', '>=', '<=', '>', '<', '!='] = '==', smoothing: bool = False, show_figure: bool = False) -> Tuple[np.ndarray, np.ndarray, float]:
     """
     Function for simple figure-ground segregation.
     Args:
@@ -1210,6 +1244,9 @@ def separate(mask: np.ndarray, background: Union[int, float] = None, smoothing: 
         background (Optional[Union[uint8, float64]]); uint8 value of the background ([0,255]) (e.g., 255)
             or float64 value of the background ([0,1]) (e.g., 1); if equals to 300 or not specified, it is the
             value that occurs the most frequently in mask.
+        background_operator (Literal['!=', '==', '>=', '<=', '>', '<', '!=']):
+            Foreground is pixel values `background_operator` `background`.
+            Example: If `background_operator` is '>=' then the foreground = pixels >= background
         smoothing (bool): If true, applies median blur on mask.
         show_figure (bool): If true, shows the foreground and background
 
@@ -1223,7 +1260,7 @@ def separate(mask: np.ndarray, background: Union[int, float] = None, smoothing: 
 
     """
 
-    mask = rgb2gray(mask)
+    mask = im3D(mask)
     mask = mask.astype(np.float64)/255 if np.max(mask) > 1 else mask
     background = background/255 if 1 < background < 256 else background
 
@@ -1232,12 +1269,28 @@ def separate(mask: np.ndarray, background: Union[int, float] = None, smoothing: 
         unique_values, counts = np.unique(mask.flatten(), return_counts=True)
         background = unique_values[np.argmax(counts)]
 
-    mask_bgr = mask == background
+    mask_fgr = np.ones(mask.shape)
+    mask_bgr = np.zeros(mask.shape)
+    if background_operator == '==':
+        mask_bgr = mask == background
+    elif background_operator == '!=':
+        mask_bgr = mask == background
+    elif background_operator == '>':
+        mask_bgr = mask > background
+    elif background_operator == '>=':
+        mask_bgr = mask >= background
+    elif background_operator == '<':
+        mask_bgr = mask < background
+    elif background_operator == '<=':
+        mask_bgr = mask <= background
 
     # Apply median filter to smooth the mask
-    if smoothing:
-        mask_bgr = apply_median_blur(np.uint8(mask_bgr))
-    mask_fgr = (mask_bgr * -1) + 1
+    if mask_bgr.mean() != 1:
+        if smoothing:
+            mask_bgr = apply_median_blur(np.uint8(mask_bgr))
+        mask_fgr = (mask_bgr * -1) + 1
+    else:
+        raise ValueError('All pixels are masked!')
 
     if show_figure:
         plt.figure(figsize=(10, 5))
@@ -1611,6 +1664,11 @@ def print_log(logs: List[str], log_path: Union[Path, str], log_name: Optional[st
 
 def strip_ansi(s: str) -> str:
     return ANSI_RE.sub("", s)
+
+
+def colorize(text: str, color: str) -> str:
+    """Return text wrapped in ANSI color codes."""
+    return f"{color}{text}{Bcolors.ENDC}"
 
 
 def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, verbose: bool = True):
