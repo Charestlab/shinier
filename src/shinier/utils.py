@@ -403,31 +403,61 @@ def sf_plot(im: np.ndarray, qplot: bool = True) -> np.ndarray:
 
     return avg
 
+def spectrum_plot(im: np.ndarray, with_colorbar: bool = True):
+    """2D log-scaled Fourier power spectrum (centered).
 
-def spectrum_plot(spectrum: np.ndarray,
-                  cmap: str = "gray",
-                  log: bool = True,
-                  gamma: float = 1.0,
-                  with_colorbar: bool = True):
-    """Display a Fourier magnitude spectrum with optional log and gamma scaling."""
-    spec = np.abs(spectrum).astype(np.float64)
+    Visualizes the distribution of image energy across spatial frequencies and orientations. 
+    The center of the plot corresponds to low spatial frequencies, while the edges represent
+    high frequencies. The brightness at each point indicates the amplitude |F(u, v)| — that
+    is, the energy contribution of a given spatial frequency (radial distance) and 
+    orientation (angle).
 
-    # log scaling
-    if log:
-        spec = np.log1p(spec)
+    Parameters
+    ----------
+    im : np.ndarray
+        Image array of shape (H, W) or (H, W, 3). Can be uint8 or float.
+        RGB is converted to luminance (ITU-R BT.601).
+    with_colorbarlot : bool, default True
+        If True, show the colorbar on the right side.
 
-    # stretch to [0,1]
-    spec = (spec - spec.min()) / (spec.max() - spec.min())
+    Returns
+    -------
+    fig : Matplotlib image
+    """
+    # --- to grayscale float64 ---
+    arr = np.asarray(im)
+    if arr.ndim == 3 and arr.shape[2] >= 3:
+        # suppose rgb2gray dispo; sinon fais la combinaison manuelle
+        gray = rgb2gray(arr, conversion_type='rec601').astype(np.float64, copy=False)
+    else:
+        gray = arr.astype(np.float64, copy=False)
 
-    # gamma correction
-    if gamma != 1.0:
-        spec = spec ** gamma
+    xs, ys = gray.shape  # rows, cols
+    # Power spectrum (centered)
+    spec = np.abs(np.fft.fftshift(np.fft.fft2(gray)))**2
+    spec = np.log1p(spec)
+    spec = (spec - spec.min()) / (spec.max() - spec.min() + 1e-12)
+    
+    # Axis in cycles/image (cpi) : d=1/N
+    f_x = np.fft.fftshift(np.fft.fftfreq(ys, d=1/ys))
+    f_y = np.fft.fftshift(np.fft.fftfreq(xs, d=1/xs))
 
-    plt.imshow(spec, cmap=cmap)
+    fig, ax = plt.subplots()
+    ax.set_xscale("linear")
+    ax.set_yscale("linear")
+
+    implot = ax.imshow(
+        spec, cmap='gray',
+        extent=(f_x.min(), f_x.max(), f_y.min(), f_y.max())
+    )
+
     if with_colorbar:
-        plt.colorbar()
-    plt.show()
+        fig.colorbar(implot, ax=ax, label="log(1 + |F|²) (normalized)")
 
+    ax.set_xlabel("Spatial frequency (cycles/image)")
+    ax.set_ylabel("Spatial frequency (cycles/image)")
+    fig.tight_layout()
+    return fig
 
 def stretch(arr: np.ndarray) -> np.ndarray:
     """Stretch an array to the range [0, 1].
