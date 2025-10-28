@@ -1,3 +1,26 @@
 [build-system]
-requires = ["setuptools>=68", "wheel", "Cython>=3.0", "numpy>=1.22"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "shinier"
+version = "0.1.0"
+description = "Python port of the SHINE toolbox with added options (color mgmt, dithering, EHS), optimized for large image sets."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "CharestLab" }]
+keywords = ["vision", "psychophysics", "SHINE", "images", "equalization"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+# If you have runtime deps, list them here:
+# dependencies = ["numpy>=1.23", "scipy>=1.10", "imageio>=2.22", "tqdm>=4.66"]
+
+[project.urls]
+Homepage = "https://github.com/Charestlab/shinier"
+Issues = "https://github.com/Charestlab/shinier/issues"
+Source = "https://github.com/Charestlab/shinier"
