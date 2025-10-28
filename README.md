@@ -1,7 +1,7 @@
 # 🌟 SHINIER - Complete Technical Documentation
 
 <p align="center">
-  <img src="../../assets/SHINIER_logo.jpg" width="400" alt="SHINIER Logo">
+  <img src="https://github.com/Charestlab/shinier/blob/main/assets/SHINIER_logo.jpg" width="400" alt="SHINIER Logo">
 </p>
 
 ## 📋 Table of Contents
