@@ -18,7 +18,7 @@ classifiers = [
 ]
 
 # If you have runtime deps, list them here:
-# dependencies = ["numpy>=1.23", "scipy>=1.10", "imageio>=2.22", "tqdm>=4.66"]
+# dependencies = ["numpy>=1.23", "Cython>=3.0", "scipy>=1.10", "imageio>=2.22", "tqdm>=4.66"]
 
 [project.urls]
 Homepage = "https://github.com/Charestlab/shinier"
