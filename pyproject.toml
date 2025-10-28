@@ -4,13 +4,20 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shinier"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python port of the SHINE toolbox with added options (color mgmt, dithering, EHS), optimized for large image sets."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [{ name = "CharestLab" }]
 keywords = ["vision", "psychophysics", "SHINE", "images", "equalization"]
+dependencies = [
+  "numpy>=1.23",
+  "scipy>=1.10",
+  "imageio>=2.22",
+  "tqdm>=4.66",
+  "cython>=3.0"
+]
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: MIT License",
