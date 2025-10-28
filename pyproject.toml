@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shinier"
-version = "0.1.1"
+version = "0.1.2"
 description = "Python port of the SHINE toolbox with added options (color mgmt, dithering, EHS), optimized for large image sets."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -16,7 +16,8 @@ dependencies = [
   "scipy>=1.10",
   "imageio>=2.22",
   "tqdm>=4.66",
-  "cython>=3.0"
+  "cython>=3.0",
+  "matplotlib>=3.9"
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -24,8 +25,6 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 
-# If you have runtime deps, list them here:
-# dependencies = ["numpy>=1.23", "Cython>=3.0", "scipy>=1.10", "imageio>=2.22", "tqdm>=4.66"]
 
 [project.urls]
 Homepage = "https://github.com/Charestlab/shinier"
