@@ -1,9 +1,16 @@
 # conftest.py
 from __future__ import annotations
 
-import os, shutil, uuid, pytest
+import os, shutil, uuid
 from pathlib import Path
 from typing import Iterator
+try:
+    import pytest
+except ImportError:
+    raise ImportError(
+        "pytest is required to run the Shinier test suite. "
+        "Install with: pip install shinier[dev]"
+    )
 
 
 def _compute_base_tmp(worker_id: str) -> Path:
@@ -62,6 +69,7 @@ def _safe_rmtree(path: Path) -> None:
         shutil.rmtree(path, ignore_errors=True, onerror=_onerror)  # type: ignore[arg-type]
 
 
+
 @pytest.fixture(scope="session", autouse=True)
 def _session_tmp_root(request) -> Path:
     """Create/clean the per-worker temp root at session start.
@@ -104,7 +112,7 @@ def test_tmpdir(_session_tmp_root: Path) -> Iterator[Path]:
     Yields:
         Path: A unique directory for this test function.
     """
-    d: Path = _session_tmp_root / f"case-{uuid.uuid4().hex[:12]}"
+    d: Path = _session_tmp_root / f"case-{uuid.uuid4().hex}"
     d.mkdir(parents=True, exist_ok=False)
     try:
         yield d

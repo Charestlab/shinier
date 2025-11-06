@@ -1,16 +1,18 @@
-# Global imports
-from typing import Optional, List
+from __future__ import annotations
+from typing import Optional, List, Literal, Union, Any
 from datetime import datetime
 import numpy as np
 from pathlib import Path
+from pydantic import Field, model_validator, ConfigDict
 
 # Local imports
 from shinier import Options
 from .ImageListIO import ImageListIO
-from .ImageListIO import ImageListType
+from shinier.utils import print_log
+from shinier.base import ImageListType, InformativeBaseModel
 
 
-class ImageDataset:
+class ImageDataset(InformativeBaseModel):
     """
     Class to load and manage a collection of images and masks, keeping track of their state throughout image processing.
 
@@ -30,108 +32,189 @@ class ImageDataset:
         processing_logs (List[str]): List of processing steps applied to the dataset along with relevant image metrics and information.
         options (Options): Configuration options for the dataset.
     """
-    def __init__(
-        self,
-        images: ImageListType = None,
-        masks: ImageListType = None,
-        options: Optional[Options] = None
-    ):
-        self.options = options if options else Options()  # Instantiate with default values if not provided.
-        self.processing_logs = []
 
-        # Load images if not provided
-        self.images = ImageListIO(
-            input_data = images if images else Path(self.options.input_folder) / f"*.{self.options.images_format}",
-            conserve_memory = self.options.conserve_memory,
-            as_gray = self.options.as_gray,
-            save_dir = self.options.output_folder
-        )
-        self.n_images = len(self.images)
-        self.images_name = [path.name for path in self.images.src_paths if path is not None]
+    # --- Pydantic config ---
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,  # allow np.ndarray, Path, ImageListIO, etc.
+        extra="forbid",
+        validate_assignment=True,
+    )
 
-        if self.options.whole_image == 3 and self.options.masks_folder != None and self.options.masks_format != None:
-            # Load masks if not provided
-            self.masks = ImageListIO(
-                input_data = masks if masks else Path(self.options.masks_folder) / f"*.{self.options.masks_format}",
-                conserve_memory = self.options.conserve_memory,
-                as_gray = self.options.as_gray,
-                save_dir = self.options.masks_folder
+    # --- User-provided / externally settable attributes ---
+    images: Optional[Union[ImageListIO, ImageListType]] = None
+    masks: Optional[Union[ImageListIO, ImageListType]] = None
+    options: Options = Field(default_factory=Options)
+
+    # --- Internally constructed / derived attributes ---
+    processing_logs: List[str] = Field(default_factory=list)
+    n_images: Optional[int] = None
+    n_masks: Optional[int] = None
+    images_name: Optional[List[str]] = None
+    masks_name: Optional[List[str]] = None
+
+    magnitudes: Optional[ImageListIO] = None
+    phases: Optional[ImageListIO] = None
+    buffer: Optional[ImageListIO] = None
+    buffer_other: Optional[ImageListIO] = None
+
+    # ----------------------------------------------------------------------
+    # Post-init hook — runs after Pydantic validation, but before returning
+    # ----------------------------------------------------------------------
+    def post_init(self, __context: Any) -> None:
+        """Called automatically after Pydantic validation."""
+
+        # Initialization of attributes
+        self.initialize_dataset()
+
+        # Internal validation
+        self._validate_dataset()
+
+    # =====================================================================================
+    # Post-initialization logic (dataset loading, validation, buffer setup)
+    # =====================================================================================
+
+    def initialize_dataset(self) -> ImageDataset:
+        """Perform dataset construction and validation after field initialization."""
+
+        # Determine grayscale behavior
+        as_gray: Literal[0, 1, 2, 3, 4] = 1 if self.options.as_gray and self.options.color_treatment == 0 else 0
+
+        # ------------------------- Load images -------------------------
+        if isinstance(self.images, ImageListIO):
+            # Make new shallow copy and force run initialization script (model_post_init)
+            # to account for updated values (e.g. as_gray)
+            images = self.images.model_copy(update={"as_gray": as_gray, "conserve_memory": self.options.conserve_memory, "save_dir": self.options.output_folder})
+            images.model_post_init(None)
+        else:
+            images = ImageListIO(
+                input_data=self.images if self.images else Path(self.options.input_folder) / f"*.{self.options.images_format}",
+                conserve_memory=self.options.conserve_memory,
+                as_gray=as_gray,  # Now done in ImageProcessor (previous code: self.options.as_gray)
+                save_dir=self.options.output_folder
             )
-            self.n_masks = len(self.masks)
-            self.masks_name = [path.name for path in self.masks.src_paths]
+        object.__setattr__(self, "images", images)
+        object.__setattr__(self, "n_images", len(images))
+        object.__setattr__(self, "images_name", [p.name for p in images.src_paths if p is not None])
 
+        # ------------------------- Load masks if required -------------------------
+        if self.options.whole_image == 3 and self.options.masks_folder and self.options.masks_format:
+            if isinstance(self.masks, ImageListIO):
+                # Make new shallow copy and force run initialization script (model_post_init)
+                # to account for updated values (e.g. as_gray)
+                masks = self.masks.model_copy(
+                    update={"as_gray": as_gray, "conserve_memory": self.options.conserve_memory,
+                            "save_dir": self.options.masks_folder})
+                masks.model_post_init(None)
+            else:
+                masks = ImageListIO(
+                    input_data=self.masks if self.masks else Path(self.options.masks_folder) / f"*.{self.options.masks_format}",
+                    conserve_memory=self.options.conserve_memory,
+                    as_gray=as_gray,  # Now done in ImageProcessor (previous code: self.options.as_gray)
+                    save_dir=self.options.masks_folder,
+                )
+            object.__setattr__(self, "masks", masks)
+            object.__setattr__(self, "n_masks", len(self.masks))
+            object.__setattr__(self, "masks_name", [p.name for p in self.masks.src_paths])
+
+        # ------------------------- Allocate buffers -------------------------
         # Create placeholders for magnitudes and phases if options.mode in [3, 4, 5, 6, 7, 8]
         self.magnitudes, self.phases, self.buffer = None, None, None
+        buffer_size = self.images[0].shape[:2] if self.options.color_treatment == 1 or self.options.as_gray == 1 else self.images[0].shape
 
-        # Create placeholders for buffer if options.mode include hist_match or fourier_match
-        if options.mode >= 1:
-            # Create placeholders for buffer
-            input_data = [np.zeros(self.images[0].shape, dtype=bool) for idx in range(len(self.images))]
-            self.buffer = ImageListIO(
+        # Create placeholders for buffer
+        input_data = [np.zeros(buffer_size, dtype=bool) for idx in range(len(self.images))]
+        buffer = ImageListIO(
+            input_data=input_data,
+            conserve_memory=True,  # <--- FORCE
+            # conserve_memory=self.options.conserve_memory,
+            as_gray=0,  # Now done in ImageProcessor (previous code: self.options.as_gray)
+            save_dir=self.options.output_folder
+        )
+        object.__setattr__(self, "buffer", buffer)
+
+        # Create placeholders for buffer_ab if as_gray==0 and color_treatment==1
+        if self.options.color_treatment == 1:
+            buffer_other = ImageListIO(
                 input_data=input_data,
                 conserve_memory=True,  # <--- FORCE
                 # conserve_memory=self.options.conserve_memory,
-                as_gray=self.options.as_gray,
+                as_gray=0,  # Now done in ImageProcessor (previous code: self.options.as_gray)
                 save_dir=self.options.output_folder
             )
+            object.__setattr__(self, "buffer_other", buffer_other)
 
-            # Create placeholders for spectra
-            if options.mode >= 3 and options.mode != 9:
-                self.magnitudes = ImageListIO(
-                    input_data=input_data,
-                    conserve_memory=True,  # <--- FORCE
-                    # conserve_memory=self.options.conserve_memory,
-                    as_gray=self.options.as_gray
-                )
-                self.phases = ImageListIO(
-                    input_data=input_data,
-                    conserve_memory=True,  # <--- FORCE
-                    # conserve_memory=self.options.conserve_memory,
-                    as_gray=self.options.as_gray
-                )
+        # Create placeholders for spectra
+        if self.options.mode >= 3 and self.options.mode != 9:
+            magnitudes = ImageListIO(
+                input_data=input_data,
+                conserve_memory=True,  # <--- FORCE
+                # conserve_memory=self.options.conserve_memory,
+                as_gray=0,  # Now done in ImageProcessor (previous code: self.options.as_gray)
+            )
+            object.__setattr__(self, "magnitudes", magnitudes)
+            phases = ImageListIO(
+                input_data=input_data,
+                conserve_memory=True,  # <--- FORCE
+                # conserve_memory=self.options.conserve_memory,
+                as_gray=0,  # Now done in ImageProcessor (previous code: self.options.as_gray)
+            )
+            object.__setattr__(self, "phases", phases)
 
-        self._validate_dataset()
+        return self
 
-    def _validate_dataset(self):
+    # =====================================================================================
+    # Internal validation
+    # =====================================================================================
+    def _validate_dataset(self) -> None:
         """
         Perform the following checks on the dataset:
         - Masks and images should have compatible sizes if both are provided
         - At least one image to process
         - Number of masks should be either 1 or equal to the number of images.
         """
-        if self.n_images <= 1:
-            raise ValueError(f"There are {self.n_images} images stored in the dataset. More than one image should be loaded.")
-        if self.options.whole_image == 3 and self.options.masks_folder != None and self.options.masks_format != None:
-            if self.n_masks > 0:
-                if self.n_masks not in [1, self.n_images]:
-                    raise ValueError("The number of masks should be either 1 or equal to the number of images.")
+        if self.n_images is None or self.n_images <= 1:
+            raise ValueError(f"Invalid dataset: {self.n_images} images found. At least two are required.")
 
-            # Ensure masks and images have compatible sizes if both are provided
+        if self.options.whole_image == 3 and self.options.masks_folder and self.options.masks_format:
+            if self.n_masks not in (1, self.n_images):
+                raise ValueError("Number of masks must be 1 or match number of images.")
+
             if self.masks and self.images:
                 if self.masks[0].shape[:2] != self.images[0].shape[:2]:
-                    raise ValueError(f"Masks and images should have the same shape")
+                    raise ValueError("Masks and images must have identical spatial dimensions.")
 
-    def save_images(self):
+    # =====================================================================================
+    # Lifecycle helpers
+    # =====================================================================================
+    def save_images(self) -> None:
+        """Save processed images to disk."""
         self.images.final_save_all()
 
     def print_log(self) -> None:
-        """ Record processing_steps list for reproducibility """
-        # Generate a filename with the full date and time
-        current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = Path(self.options.output_folder) / f"log_{current_datetime}.txt"
+        """Record processing steps to a timestamped log file."""
+        print_log(logs=self.processing_logs, log_path=Path(self.options.output_folder))
 
-        # Write each step to a new line in the file
-        with open(filename, 'w') as file:
-            for step in self.processing_logs:
-                file.write(step + '\n')
-
-    def close(self):
-        self.images.close()
-        if self.options.whole_image == 3 and self.options.masks_folder != None and self.options.masks_format != None:
+    def close(self) -> None:
+        """Release all loaded image and buffer resources."""
+        if self.images:
+            self.images.close()
+        if self.masks:
             self.masks.close()
-        if hasattr(self, 'magnitudes') and self.magnitudes is not None:
-            self.magnitudes.close()
-            self.phases.close()
-        if hasattr(self, 'buffer') and self.buffer is not None:
-            self.buffer.close()
+        for attr in ("magnitudes", "phases", "buffer", "buffer_other"):
+            obj = getattr(self, attr, None)
+            if obj is not None:
+                obj.close()
 
+    def __setattr__(self, name, value):
+        """Prevent reassignment of `images` if dimensions/metadata differ."""
+        if name == "images" and hasattr(self, "images") and getattr(self, "images") is not None:
+            # Only enforce the check if the new value is an ImageListIO
+            old = getattr(self, "images")
+            if isinstance(value, type(old)):
+                for field in ["reference_size", "n_dims", "n_images", "n_channels"]:
+                    if not (hasattr(value, field) and hasattr(old, field) and getattr(value, field) == getattr(old, field)):
+                        raise ValueError(
+                            "Cannot reassign `images`: new dataset does not match "
+                            "reference size, n_dims, n_images, or n_channels."
+                        )
+        super().__setattr__(name, value)

@@ -6,7 +6,7 @@ Tests are organized into **unit** and **validation (integration)** levels.
 ---
 
 ## ⚙️ Pytest Configuration
-
+Make sure you did to install all dev dependencies: ```pip install shinier[dev]```
 
 ```ini
 [pytest]

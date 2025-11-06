@@ -1,19 +1,23 @@
-# External package imports
+from __future__ import annotations
 from pathlib import Path
 import numpy as np
-from typing import Any, Optional, Tuple, Union, NewType, List, Iterator, Callable, Literal
+from typing import Any, Optional, Tuple, Union, List, Iterator, Literal, ClassVar, Annotated, get_args
 from PIL import Image
-import atexit, shutil, tempfile, weakref, os, time, sys
-from shinier.utils import rgb2gray, uint8_plus, RGB2GRAY_WEIGHTS
-import copy
+import atexit, shutil, tempfile, weakref, os, time, sys, copy
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, BeforeValidator
 
-# Type definition
-ImageListType = Union[str, Path, List[Union[str, Path]], List[np.ndarray]]
+from shinier.utils import uint8_plus
+from shinier.base import ImageListType, InformativeBaseModel
+from shinier.color.Converter import rgb2gray, RGB2GRAY_WEIGHTS
+from shinier.Options import ACCEPTED_IMAGE_FORMATS
+ACCEPTED_IMAGE_FORMATS = [f".{ext.lower()}" for ext in get_args(ACCEPTED_IMAGE_FORMATS)]
 
 
-# ---- Temp management (tiny, in-file) ---------------------------------
-_TEMP_ROOT: Optional[Path] = None  # created lazily: /tmp/shinier-<pid>
-_LIVE_DIRS: set[Path] = set()  # per-instance temp dirs to remove at exit
+# -----------------------------------------------------------------------------
+# Temp management utilities (unchanged)
+# -----------------------------------------------------------------------------
+_TEMP_ROOT: Optional[Path] = None
+_LIVE_DIRS: set[Path] = set()
 
 
 def cleanup_all_temp_dirs(max_age_hours: int = 0) -> None:
@@ -36,19 +40,18 @@ def cleanup_all_temp_dirs(max_age_hours: int = 0) -> None:
 
 
 def _pid_alive(pid: int) -> bool:
-    # Best effort; on Windows kill(pid, 0) may raise, so we fall back to age-based cleanup.
+    """Check if a process ID is still alive."""
     try:
         if sys.platform.startswith("win"):
-            return True  # skip PID test on Windows; we'll use age cutoff
-        else:
-            os.kill(pid, 0)  # does not kill; checks permission/existence
             return True
+        os.kill(pid, 0)
+        return True
     except OSError:
         return False
 
 
 def _sweep_stale_roots(max_age_hours: int = 168) -> None:
-    """Remove old /tmp/shinier-<pid> roots from previous/crashed runs."""
+    """Remove old /tmp/shinier-<pid> roots from previous or crashed runs."""
     tmp = Path(tempfile.gettempdir())
     now = time.time()
     for p in tmp.glob("shinier-*"):
@@ -58,7 +61,6 @@ def _sweep_stale_roots(max_age_hours: int = 168) -> None:
             pid = int(p.name.split("-")[-1])
         except ValueError:
             continue
-        # Remove if PID not alive (Unix) OR folder is older than cutoff
         age_ok = (now - p.stat().st_mtime) < (max_age_hours * 3600)
         if (not sys.platform.startswith("win") and not _pid_alive(pid)) or not age_ok:
             shutil.rmtree(p, ignore_errors=True)
@@ -84,15 +86,14 @@ def _unregister_temp_dir(p: Path) -> None:
 
 
 def _cleanup_process_root() -> None:
-    """On normal interpreter exit, remove all registered dirs and the root."""
+    """Remove all registered temporary dirs and the process root at exit."""
     for p in list(_LIVE_DIRS):
         shutil.rmtree(p, ignore_errors=True)
     if _TEMP_ROOT and _TEMP_ROOT.exists():
         shutil.rmtree(_TEMP_ROOT, ignore_errors=True)
-# ----------------------------------------------------------------------
 
 
-class ImageListIO:
+class ImageListIO(InformativeBaseModel):
     """
     Class to manage a list of images with read and write capabilities.
     Inspired by the skimage.io.ImageCollection class.
@@ -101,57 +102,78 @@ class ImageListIO:
         input_data (ImageListType):
             File pattern, list of file paths, or list of in-memory NumPy arrays.
         conserve_memory (Optional[bool]): If True (default), uses a temporary directory to store images
-            and keeps only one image in memory at a time. If True and input_data is a list of NumPy arrays,
-            images are first saved as .npy in a temporary directory, and they are loaded in memory one at a time upon request.
-        as_gray (Optional[int]): Images are converted into grayscale then uint8 on load only. Default is no conversion (default = 0).
-            0 = No conversion applied
-            1 = An equal weighted sum of red, green and blue pixels is applied.
-            2 = (legacy mode) Rec.ITU-R 601 is used (see Matlab). Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′
-            3 = Rec.ITU-R 709 is used. Y′ = 0.2126 R′ + 0.7152 G′ + 0.0722 B′
-            4 = Rec.ITU-R 2020 is used. Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′
-        save_dir (Optional[str]): Directory to save final images. Defaults to the
-            current working directory if not specified.
+            and keeps only one image in memory at a time.
+        as_gray (Optional[int]): Images are converted into grayscale then uint8 on load only.
+            0 = No conversion
+            1 = Equal weighted sum of R,G,B
+            2 = Rec. ITU-R 601
+            3 = Rec. ITU-R 709
+            4 = Rec. ITU-R 2020
+        save_dir (Optional[str]): Directory to save final images. Defaults to cwd.
 
-    Attributes:
-        data: The list of images.
-        src_paths: The list of original file paths or identifiers.
-        store_paths: The list of current file paths or identifiers.
-        reference_size: Reference image size (x, y) for validation.
-        n_dims: Number of dimensions of the image
+    Notes:
+        Validity of the collection's image attributes (i.e. dtype, n_dims, n_channels, reference_size) is only guaranteed
+            after first initialization. Then, only reference_size is checked. This provides flexibility to update the
+            collection with different data type and different channels (e.g. bool -> float). See more information below.
+        __getitem__:
+            - Height and width of the item should match reference_size.
+            - Item will be automatically casted to float if collection dtype is float
+            - n_channels is neither validated nor checked.
+        __setitem__:
+            - Height and width of the new item should match reference_size.
+            - New item dtype is accepted as is and determines collection dtype.
+            - n_channels is neither validated nor checked.
     """
 
-    DEFAULT_GRAY_MODE = 'L'
-    DEFAULT_COLOR_MODE = 'RGB'
+    # --- Pydantic config ---
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        validate_assignment=True,
+        extra="forbid"
+    )
 
-    def __init__(
-        self,
-        input_data: ImageListType,
-        conserve_memory: bool = True,
-        as_gray: Literal[0, 1, 2, 3, 4] = 0,
-        save_dir: Optional[str] = None
-    ) -> None:
-        self.conserve_memory: bool = conserve_memory
-        self.as_gray: Literal[0, 1, 2, 3, 4] = int(as_gray) if as_gray is not None else 0
-        if self.as_gray not in (0, 1, 2, 3, 4):
-            raise ValueError("as_gray must be 0 (no conversion), 1 (equal), 2 (Rec. ITU-R 601), 3 (Rec. ITU-R 709), 4 (Rec. ITU-R 2020)")
-        self.save_dir: Path = Path(save_dir or Path.cwd())
-        self.data: List[Optional[np.ndarray]] = []
-        self.src_paths: List[Optional[Path]] = []  # immutable provenance
-        self.store_paths: List[Path] = []
-        self.reference_size: Optional[Tuple[int, int]] = None
-        self.n_channels: Optional[int] = None
-        self.n_dims: Optional[int] = None
-        self.n_images: int = 0
-        self._temp_dir: Optional[Path] = None
-        self._finalizer = None
-        self.dtype: Optional[type] = None  # Initial state when loading images
-        self.drange: Optional[tuple] = None
-        self.has_list_array: bool = False
-        self._read_only: bool = False
-        self._initialize_collection(input_data)
+    # --- Static class constants ---
+    DEFAULT_GRAY_MODE: ClassVar[str] = "L"
+    DEFAULT_COLOR_MODE: ClassVar[str] = "RGB"
+    ACCEPTED_EXTENSIONS: ClassVar[List[str]] = ACCEPTED_IMAGE_FORMATS
 
+    # --- User-provided attributes ---
+    input_data: ImageListType
+    conserve_memory: bool = True
+    as_gray: Literal[0, 1, 2, 3, 4] = 0
+    save_dir: Optional[Path] = None
+
+    # --- Public runtime attributes ---
+    data: List[Optional[np.ndarray]] = Field(default_factory=list)
+    src_paths: List[Optional[Path]] = Field(default_factory=list)
+    store_paths: List[Optional[Path]] = Field(default_factory=list)
+    reference_size: Optional[Tuple[int, int]] = Field(default=None)
+    n_channels: Optional[int] = Field(default=None)
+    n_dims: Optional[int] = Field(default=None)
+    n_images: int = Field(default=0)
+    dtype: Optional[np.dtype] = Field(default=None)
+    drange: Optional[Tuple[Any, Any]] = Field(default=None)
+    has_list_array: bool = Field(default=False)
+
+    # --- Private runtime attributes ---
+    _temp_dir: Optional[Path] = PrivateAttr(default=None)
+    _finalizer: Any = PrivateAttr(default=None)
+    _read_only: bool = PrivateAttr(default=False)
+
+    # ------------------------------------------------------------------
+    # Post-init constructor (replaces manual __init__)
+    # ------------------------------------------------------------------
+    def post_init(self, __context: Any) -> None:
+        """Perform initialization and collection setup after Pydantic validation."""
+        self.data = []
+        self.save_dir = Path(self.save_dir or Path.cwd())
+        self._initialize_collection(self.input_data)  # This also runs _initial_validation
+
+    # ------------------------------------------------------------------
+    # Core methods
+    # ------------------------------------------------------------------
     def __getitem__(self, idx: int) -> np.ndarray:
-        """ Access an image by index. """
+        """ Access an image by index from list or store_paths. Cast to collection dtype if necessary."""
         if idx < -self.n_images or idx >= self.n_images:
             raise IndexError("Index out of range.")
         if idx < 0:
@@ -160,30 +182,43 @@ class ImageListIO:
             if self.conserve_memory:
                 # If conserve memory, keep only one image in memory
                 self._reset_data()
-                img = self._validate_image(self._load_image(self.store_paths[idx]))
-                # Cast to collection dtype if not compatible
-                if self.dtype is not None and img.dtype != self.dtype:
+                img = self._validate_image_attr(self._load_image(self.store_paths[idx]), attr_names=['reference_size'])
+
+                # Cast to float if necessary
+                if img.dtype != self.dtype and np.issubdtype(self.dtype, np.floating):
                     img = img.astype(self.dtype, copy=False)
+
+                # img = self._validate_image(self._load_image(self.store_paths[idx]))
+
+                # # Cast to collection dtype if not compatible
+                # if self.dtype is not None and img.dtype != self.dtype:
+                #     img = img.astype(self.dtype, copy=False)
                 self.data[idx] = img
             else:
                 raise ValueError(f"Data at index {idx} is None. This should not happen when conserve_memory is False.")
+
         return self.data[idx]
 
     def __setitem__(self, idx: int, new_image: np.ndarray) -> None:
-        """ Modify an image at a given index. """
+        """Modify an image at a given index. Do not cast to current dtype — modify dataset dtype with new image.dtype"""
         if getattr(self, "_read_only", False):
             raise RuntimeError("This ImageListIO fork is read-only; cannot modify items.")
 
         if idx < 0 or idx >= self.n_images:
             raise IndexError("Index out of range.")
 
-        self.dtype = new_image.dtype
-        self._update_drange()
-        new_image = self._validate_image(new_image)
+        # Must be the same height and width
+        new_image = self._validate_image_attr(new_image, attr_names=['reference_size'])
+
+        # Update collection dtype, n_channels and n_dims (but not enforced: attributes might thus not be accurate)
+        self._update_image_attr(new_image, attr_names=['dtype', 'n_channels', 'n_dims'])
+
+        # new_image = self._validate_image(new_image)
         # new_image = self._to_gray(new_image)
         if self.conserve_memory:
             self._reset_data()
             self._save_image(idx, new_image, save_dir=self._temp_dir)
+
         self.data[idx] = new_image
 
     def __len__(self) -> int:
@@ -196,43 +231,34 @@ class ImageListIO:
             yield self[idx]
 
     def readonly_copy(self):
-        """Produce a read-only copy of an instance."""
-        cls = self.__class__
-        new = cls.__new__(cls)
+        """Produce a read-only copy of the instance."""
+        # Use Pydantic's safe model duplication
+        new = self.model_copy(deep=True)
 
-        # --- simple attributes copied verbatim ---
-        new.conserve_memory = self.conserve_memory
-        new.as_gray = self.as_gray
-        new.save_dir = self.save_dir
-
-        # --- path metadata: new lists, same Path objects (lazy, no bytes copied) ---
-        new.src_paths = list(self.src_paths)
-        new.store_paths = list(self.store_paths)
-
-        # --- detached runtime state ---
-        new.n_images = self.n_images
-        new.reference_size = self.reference_size
-        new.n_dims = self.n_dims
-        new.has_list_array = self.has_list_array
-
-        # Keep dtype/drange (or set to None if you prefer re-infer)
-        new.dtype = copy.copy(self.dtype)
-        new.drange = copy.copy(self.drange)
-
-        # Fresh, empty caches; do NOT copy pixel arrays
-        new.data = [None] * self.n_images
-
-        # No temp/staging is carried over
+        # Reset runtime-only attributes
         new._temp_dir = None
         new._finalizer = None
-        new._staging_dir = None
-        new._staging_paths = None
-        new._staging_enabled = False
 
         # Mark as read-only by wrapping __setitem__
         new._read_only = True
 
+        # Clear pixel arrays for memory efficiency
+        new.data = [None] * self.n_images
+
+        # No temp/staging is carried over
+        new._staging_dir = None
+        new._staging_paths = None
+        new._staging_enabled = False
+
         return new
+
+    def copy_with_image_list(self):
+        # Construct a new instance. This will run normal model validation and initialization.
+        return self.__class__(input_data=self.to_list(), conserve_memory=False)
+
+    def to_list(self):
+        """Produce a list of numpy arrays, one for each image in the collection."""
+        return list(self)
 
     def _ensure_temp_dir(self):
         """Create this instance's temp dir lazily under the process root."""
@@ -264,29 +290,49 @@ class ImageListIO:
                 self._finalizer()  # mark finalizer as done
                 self._finalizer = None
 
-    def _validate_image(self, image: np.ndarray) -> np.ndarray:
+    def _validate_image_attr(self, image: np.ndarray, attr_names: List[str], update_nonexistant: bool = True) -> np.ndarray:
         """ Validate the image and return it. """
-        image_size = image.shape[:2]
-        if self.reference_size is None:
-            self.reference_size = image_size
-            self.n_dims = image.ndim
-            self.n_channels = image.shape[2] if self.n_dims == 3 else 1
-        elif self.reference_size != image_size:
-            raise ValueError(f"Image size {image_size} does not match reference size {self.reference_size}.")
-        if self.dtype is None:
-            self.dtype = image.dtype
-            self._update_drange()
-        else:
-            if self.dtype != image.dtype:
-                raise ValueError(f"Image dtype {image.dtype} does not match collection dtype {self.dtype}.")
+        for attr_name in attr_names:
+            value = getattr(image, attr_name, None)
+            if value is None:
+                if update_nonexistant:
+                    self._update_image_attr(image, [attr_name])
+            else:
+                if attr_name == "reference_size":
+                    if value != image.shape[:2]:
+                        raise ValueError(f"Image size {image.shape[:2]} does not match reference size {value}.")
+                elif attr_name == "n_dims":
+                    if value != image.ndim:
+                        raise ValueError(f"Image ndim {image.ndim} do not match collection n_dims {value}.")
+                elif attr_name == "n_channels":
+                    n_channels = image.shape[2] if value == 3 else 1
+                    if value != n_channels:
+                        raise ValueError(f"Image has {n_channels} channels which does not match collection n_channels {value}.")
+                elif attr_name == "dtype":
+                    if value != image.dtype:
+                        raise ValueError(f"Image dtype {image.dtype} does not match collection dtype {value}.")
         return image
 
-    def _to_gray(self, image: np.ndarray):
+    def to_gray(self):
+        """Public-facing version of _to_gray() that converts all images to grayscale."""
+        for idx, img in enumerate(self.images):
+            self.images[idx] = self._to_gray(img)
+
+    def _to_gray(self, image: np.ndarray) -> np.ndarray:
         if image.ndim == 3:
             if self.as_gray > 0:
                 image = rgb2gray(image, conversion_type=RGB2GRAY_WEIGHTS['int2key'][self.as_gray])
                 image = uint8_plus(image)
         return image
+
+    def _is_image(self, file: Path) -> bool:
+        """Check if a file is an image."""
+        return file.is_file() and len(file.suffix) > 1 and file.suffix.lower() in self.ACCEPTED_EXTENSIONS
+
+    def _initial_validation(self, image: np.ndarray) -> np.ndarray:
+        """Update image attribute if non-existent and make sure all images have the same attributes"""
+        self._update_image_attr(image, ['reference_size', 'n_dims', 'n_channels', 'dtype'], force_update=False)
+        return self._validate_image_attr(image, ['reference_size', 'n_dims', 'n_channels', 'dtype'], update_nonexistant=False)
 
     def _initialize_collection(self, input_data: ImageListType) -> None:
         """ Initialize the image collection from input data. """
@@ -311,10 +357,11 @@ class ImageListIO:
             if "*" in str(input_path):  # Check if it's a glob pattern
                 directory = input_path.parent
                 pattern = input_path.name
-                self.src_paths = sorted(directory.glob(pattern))
+                all_files = sorted(directory.glob(pattern))
             else:
-                self.src_paths = [input_path] if input_path.is_file() else sorted(input_path.glob("*"))
-
+                all_files = [input_path] if input_path.is_file() else sorted(input_path.glob("*"))
+            # Filter to include only recognized image files
+            self.src_paths = sorted([p for p in all_files if self._is_image(p)])
             if not self.src_paths:
                 raise FileNotFoundError(f"No files found matching pattern '{input_data}'")
 
@@ -331,12 +378,12 @@ class ImageListIO:
                     self._ensure_temp_dir()
                     self.store_paths = [self._temp_dir / f'image_{idx}.npy' for idx in range(self.n_images)]
                     for idx, im in enumerate(input_data):
-                        self._save_image(idx, im, save_dir=self._temp_dir)
+                        self._save_image(idx, self._to_gray(im), save_dir=self._temp_dir)
                     self._reset_data()  # Data will not be stored in self.data when conserve_memory is True
-                    self.data[0] = self._validate_image(self._load_image(self.store_paths[0]))
+                    self.data[0] = self._initial_validation(self._load_image(self.store_paths[0]))
                 else:
                     self.has_list_array = True
-                    self.data = [self._to_gray(self._validate_image(image)) for image in input_data]
+                    self.data = [self._to_gray(self._initial_validation(image)) for image in input_data]
                     self._update_drange()
 
                     if self.store_paths.__len__() == 0:
@@ -356,14 +403,33 @@ class ImageListIO:
             if self.conserve_memory:
                 # Only load the first image to initialize attributes
                 self._reset_data()  # Data will not be stored in self.data when conserve_memory is True
-                self.data[0] = self._validate_image(self._load_image(self.store_paths[0]))
+                self.data[0] = self._initial_validation(self._load_image(self.store_paths[0]))
             elif not self.data and all([isinstance(fp, (str, Path)) for fp in self.store_paths]):
                 # Load all images into self.data --- This could not happen:
-                self.data = [self._validate_image(self._load_image(fpath)) for fpath in self.store_paths]
+                self.data = [self._initial_validation(self._load_image(fpath)) for fpath in self.store_paths]
             elif not all([isinstance(d, np.ndarray) for d in self.data]):
                 raise ValueError('Input data should be either a list of np.ndarray or a glob pattern or a list of Path.')
-        self.reference_size = self.data[0].shape[:2]
-        self.n_dims = self.data[0].ndim
+
+        # Make sure all values have been initialized
+        self._initial_validation(self.data[0])
+
+    def _update_image_attr(self, image: np.ndarray, attr_names: List[str], force_update: bool = True) -> None:
+        """Update image attributes if force_update is True or attribute is None"""
+        for attr_name in attr_names:
+            if attr_name == 'n_dims':
+                self.n_dims = image.ndim if self.n_dims is None or force_update else self.n_dims
+            elif attr_name == 'n_channels':
+                n_channels = image.shape[-1] if image.ndim == 3 else 1
+                self.n_channels = n_channels if self.n_channels is None or force_update else self.n_channels
+            elif attr_name == 'reference_size':
+                self.reference_size = image.shape[:2] if self.reference_size is None or force_update else self.reference_size
+            elif attr_name == 'dtype':
+                self.dtype = image.dtype if self.dtype is None or force_update else self.dtype
+                self._update_drange()
+            elif attr_name == 'drange':
+                self._update_drange()
+            elif attr_name == 'n_images':
+                self.n_images = len(self.data) if self.n_images is None or force_update else self.n_images
 
     def _update_drange(self) -> None:
         """Update numeric dynamic range based on current self.dtype."""
@@ -383,10 +449,11 @@ class ImageListIO:
 
     def _load_image(self, image_path: Path) -> np.ndarray:
         """ Load an image from a file path. """
+        image = None
         try:
             if image_path.suffix == ".npy":
                 image = np.load(image_path)
-                self.dtype = image.dtype
+                # self.dtype = image.dtype
             else:
                 with Image.open(image_path) as pil_image:
                     # Load as RGB and convert to grayscale if required
@@ -394,8 +461,8 @@ class ImageListIO:
                     image = np.array(pil_image)
                     image = self._to_gray(image)
 
-                self.dtype = image.dtype
-            self._update_drange()
+                # self.dtype = image.dtype
+            # self._update_drange()
         except IOError as e:
             raise IOError(f"Failed to load image from {image_path}: {e}")
 
@@ -451,7 +518,7 @@ class ImageListIO:
             '.jpg': 'JPEG', '.jpeg': 'JPEG', '.png': 'PNG',
             '.bmp': 'BMP', '.tiff': 'TIFF', '.tif': 'TIFF', '.npy': '.npy'
         }
-        return format_mapping.get(ext, 'TIFF')
+        return format_mapping.get(ext, 'PNG')
 
     def final_save_all(self) -> None:
         """ Save images to save_dir. If needed (self.conserve_memory) loads images and clears up temp files. """

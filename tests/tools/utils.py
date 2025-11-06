@@ -6,14 +6,15 @@ import json
 import re
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple, Union, Literal
+import sqlite3
+from typing import Any, Dict, Iterable, List, Tuple, Union, Literal, get_args
 import pickle
-
+import copy
 import numpy as np
 from PIL import Image
-
 from shinier import utils
-
+from shinier.ImageListIO import ImageListIO
+from shinier.color import ColorTreatment, REC_STANDARD, RGB_STANDARD
 
 # ---------------------------------------------------------------------------
 # Constants & helpers
@@ -40,6 +41,109 @@ ComboType = Tuple[
 ]
 
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+DB_PATH = Path(__file__).resolve().parent.parent / "hash_registry.db"
+
+
+# ---------------------------------------------------------------------
+# SQLite-backed HASH registry
+# ---------------------------------------------------------------------
+def combo_hash(combo: Dict) -> str:
+    """Return a short, deterministic hash for a given Options combo."""
+    combo_serialized = json.dumps(combo, sort_keys=True, default=str)
+    return hashlib.sha1(combo_serialized.encode()).hexdigest()
+
+
+def _ensure_db() -> None:
+    """Create the SQLite registry if it doesn't exist."""
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hashes (
+                hash TEXT PRIMARY KEY,
+                status TEXT DEFAULT 'pending',
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                error TEXT
+            )
+            """
+        )
+        conn.commit()
+
+
+def is_already_done(hash_str: str) -> bool:
+    """Return True if the given combo hash is already marked complete."""
+    _ensure_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute(
+            "SELECT 1 FROM hashes WHERE hash = ? AND status = 'done' LIMIT 1",
+            (hash_str,),
+        )
+        return cur.fetchone() is not None
+
+
+def register_hash(hash_str: str, status: str = "done", error: Optional[str] = None) -> bool:
+    """
+    Register (or update) a hash in the SQLite registry.
+
+    Args:
+        hash_str (str): The combo hash.
+        status (str): 'done' (default), 'failed', or custom tag.
+        error (Optional[str]): Optional error message if run failed.
+
+    Returns:
+        bool: True if newly inserted, False if it already existed.
+    """
+    _ensure_db()
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        try:
+            conn.execute(
+                "INSERT INTO hashes (hash, status, error) VALUES (?, ?, ?)",
+                (hash_str, status, error),
+            )
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            # Entry exists — we can still update its status if desired
+            conn.execute(
+                "UPDATE hashes SET status = ?, error = ?, timestamp = CURRENT_TIMESTAMP WHERE hash = ?",
+                (status, error, hash_str),
+            )
+            conn.commit()
+            return False
+
+
+def reset_hash_registry(confirm: bool = True) -> None:
+    """Safely reset the hash registry."""
+    if confirm:
+        _ensure_db()
+        with sqlite3.connect(DB_PATH, timeout=30) as conn:
+            conn.execute("DROP TABLE IF EXISTS hashes")
+            conn.commit()
+        _ensure_db()
+
+
+def count_hashes(status: Optional[str] = None) -> int:
+    """Count total or per-status hashes."""
+    _ensure_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        if status:
+            cur = conn.execute("SELECT COUNT(*) FROM hashes WHERE status = ?", (status,))
+        else:
+            cur = conn.execute("SELECT COUNT(*) FROM hashes")
+        (count,) = cur.fetchone()
+        return count
+
+
+def get_all_hashes(status: Optional[str] = None) -> List[Tuple[str, str, str, Optional[str]]]:
+    """Retrieve all hashes from the SQLite registry, optionally filtered by status."""
+    _ensure_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        if status:
+            cur.execute("SELECT hash, status, timestamp, error FROM hashes WHERE status = ? ORDER BY timestamp DESC",(status,),)
+        else:
+            cur.execute("SELECT hash, status, timestamp, error FROM hashes ORDER BY timestamp DESC")
+        return cur.fetchall()
 
 
 def ensure_paths_exist(paths: Iterable[Path]) -> None:
@@ -230,27 +334,27 @@ def get_small_imgs_path(dirpath: Path) -> List[Path]:
     return sorted(p for p in dirpath.iterdir() if p.suffix.lower() in extensions)
 
 
-def select_n_imgs(all_paths: List[Path], n: int = 2, seed: int = 0) -> List[Path]:
-    """Randomly select ``n`` image paths without replacement.
+def select_n_imgs(all_items: Iterable[object], n: int = 2, seed: int = 0) -> List[Path]:
+    """Randomly select `n` item(s) without replacement.
 
     Args:
-        all_paths: List of image paths to sample from.
-        n: Number of paths to select (1 ≤ n ≤ len(all_paths)).
+        all_items: List of objects to sample from.
+        n: Number of objects to select (1 ≤ n ≤ len(all_items)).
         seed: Seed for reproducibility.
 
     Returns:
-        A list of ``n`` distinct paths.
+        A list of ``n`` distinct objects.
 
     Raises:
         ValueError: If ``n`` is outside the valid range.
     """
-    total = len(all_paths)
+    total = len(all_items)
     if not (1 <= n <= total):
         raise ValueError(
-            f"n must be in [1, {total}], got n={n} with {total} available images."
+            f"n must be in [1, {total}], got n={n} with {total} available objects."
         )
     rng = np.random.default_rng(seed)
-    return list(rng.choice(all_paths, size=n, replace=False))
+    return list(rng.choice(all_items, size=n, replace=False))
 
 
 def make_imgs(dirpath: Path, h: int = 64, w: int = 64, n: int = 2, seed: int = 0) -> None:
@@ -288,7 +392,46 @@ def make_masks(dirpath: Path, h: int = 64, w: int = 64, n: int = 1) -> None:
         Image.fromarray(mask).save(dirpath / (f"mask_{i}.png" if n > 1 else "mask.png"))
 
 
-def precompute_targets(src_img: np.ndarray) -> Dict[str, Dict[int, np.ndarray]]:
+def prepare_images(path_img: Path) -> None:
+
+    out = {"buffers": {0: {0: {}, 1: {0: {}, 1: {}}}, 1: {0: {}, 1: {}}}}
+    out['buffers_other'] = copy.deepcopy(out['buffers'])
+    out['images'] = None
+
+    rec_standards = [r for r in get_args(REC_STANDARD)]
+    images = ImageListIO(input_data=path_img)
+    out['images'] = images
+
+    list_buffer = [np.zeros(im.shape, dtype=bool) for im in images]
+    for ag in (0, 1):
+        for ct in (0, 1):
+            for rs in (1, 2, 3):
+                # ag, ct, rs = 0, 1, 2
+
+                # Prepare the images
+                buffers = ImageListIO(input_data=copy.deepcopy(list_buffer), conserve_memory=False)
+                buffers_other = ImageListIO(input_data=copy.deepcopy(list_buffer), conserve_memory=False)
+                for idx, image in enumerate(images):
+                    buffers[idx] = image.astype(float)
+                buffers.drange = (0, 255)
+
+                # Convert them into xyY color space
+                rec_stardard = rec_standards[rs - 1]
+                output = ColorTreatment.forward_color_treatment(
+                    rec_standard=rec_stardard,
+                    input_images=buffers,
+                    output_images=buffers,
+                    output_other=buffers_other,
+                    color_treatment=ct,
+                    as_gray=ag,
+                )
+                _buffers, _buffers_other = output if isinstance(output, tuple) else (output, None)
+                out["buffers"][ag][ct][rs] = _buffers
+                out["buffers_other"][ag][ct][rs] = _buffers_other
+    return out
+
+
+def precompute_targets(images_buffers: Dict[str, Any]) -> Dict[str, Dict[int, np.ndarray]]:
     """Precompute target histogram/spectrum for all as_gray modes using utils.
 
     For each `as_gray` ∈ {0,1,2,3,4}:
@@ -303,17 +446,10 @@ def precompute_targets(src_img: np.ndarray) -> Dict[str, Dict[int, np.ndarray]]:
           - "hist": {ag: hist_ndarray}
           - "spec": {ag: spectrum_mag_ndarray}
     """
-    out = {"hist": {}, "spec": {}}
-
-    # Color space (as_gray == 0)
-    out["hist"][0] = utils.imhist(src_img)  # (256, 3)
-    out["spec"][0], _ = utils.image_spectrum(src_img)
-
-    # Grayscale variants (as_gray in {1,2,3,4})
-    for ag in (1, 2, 3, 4):
-        conv = AS_GRAY_NAME[ag]
-        g = utils.rgb2gray(src_img, conversion_type=conv)
-        out["hist"][ag] = utils.imhist(g)       # (256,)
-        out["spec"][ag], _ = utils.image_spectrum(g)
-
+    out = {"hist": {0: {0: {}, 1: {0: {}, 1: {}}}, 1: {0: {}, 1: {}}}, "spec": {0: {0: {}, 1: {}}, 1: {0: {}, 1: {}}}}
+    for ag in (0, 1):
+        for ct in (0, 1):
+            for rs in (1, 2, 3):
+                out["hist"][ag][ct][rs] = utils.imhist(images_buffers['buffers'][ag][ct][rs][0])       # (256,)
+                out["spec"][ag][ct][rs], _ = utils.image_spectrum(images_buffers['buffers'][ag][ct][rs][0])
     return out

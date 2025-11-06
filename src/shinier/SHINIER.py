@@ -8,7 +8,7 @@ import warnings
 
 from shinier import ImageDataset, Options, ImageProcessor, REPO_ROOT
 from shinier.utils import (
-    Bcolors, console_log, load_images_from_folder, load_np_array, colorize,
+    Bcolors, console_log, load_np_array, colorize,
     print_shinier_header
 )
 

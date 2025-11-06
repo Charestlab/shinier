@@ -4,38 +4,36 @@
 # TODO: Optimization: Check image type and use np.fft.rfft2 for faster computations.
 
 # External package imports
+from __future__ import annotations
 import warnings
 from pathlib import Path
 import numpy as np
 from datetime import datetime
 from numpy.lib.stride_tricks import sliding_window_view
-from typing import Any, Optional, Tuple, Union, NewType, List, Iterable, Callable, Literal, Dict
+from typing import Any, Optional, Tuple, Union, NewType, List, Iterable, Callable, Literal, Dict, Annotated, TYPE_CHECKING
 from PIL import Image
 from itertools import chain
-import matplotlib.pyplot as plt
+from pydantic import BeforeValidator
+
+from tests.manual_test import magnitudes
+
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import re
 
 # Local package imports
-try:
-    from . import _cconvolve
-    _HAS_CYTHON = True
-except ImportError:
-    _HAS_CYTHON = False
+from .base import ImageListType
+from shinier.color.Converter import rgb2gray, gray2rgb
+from . import _HAS_CYTHON
+if TYPE_CHECKING:
+    from .ImageListIO import ImageListIO
 
-# Type definition
-ImageListType = Union[str, Path, List[Union[str, Path]], List[np.ndarray]]
-RGB2GRAY_WEIGHTS = {
-    'equal': [1 / 3, 1 / 3, 1 / 3],
-    '709': [0.2125, 0.7154, 0.0721],
-    '601': [0.299, 0.587, 0.114],
-    '2020': [0.2627, 0.6780, 0.0593],
-}
-for k, v in RGB2GRAY_WEIGHTS.items():
-    RGB2GRAY_WEIGHTS[k] /= np.sum(v)
-int2key_mapping = dict(zip(range(1, len(RGB2GRAY_WEIGHTS)+1), RGB2GRAY_WEIGHTS.keys()))
-RGB2GRAY_WEIGHTS['int2key'] = int2key_mapping
-RGB2GRAY_WEIGHTS['key2int'] = dict(zip(RGB2GRAY_WEIGHTS['int2key'].values(), RGB2GRAY_WEIGHTS['int2key'].keys()))
+if _HAS_CYTHON:
+    from . import _cconvolve
+
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -237,6 +235,12 @@ def imhist_plot(
         (fig, (ax_img, ax_bar, ax_hist))
     """
     # ---- normalize image to uint8, ignore alpha if present ----
+    if plt is None:
+        raise RuntimeError(
+            "Matplotlib is not installed. "
+            "Install with: pip install shinier[viz]"
+        )
+
     arr = np.asarray(img)
     if arr.ndim == 3 and arr.shape[2] >= 4:
         arr = arr[..., :3]  # drop alpha
@@ -338,6 +342,11 @@ def sf_plot(im: np.ndarray, qplot: bool = True) -> np.ndarray:
         1D array of rotationally averaged energy for integer radii
         1..floor(min(H, W)/2), matching the MATLAB implementation.
     """
+    if plt is None:
+        raise RuntimeError(
+            "Matplotlib is not installed. "
+            "Install with: pip install shinier[viz]"
+        )
 
     # --- to grayscale float64 ---
     arr = np.asarray(im)
@@ -403,61 +412,91 @@ def sf_plot(im: np.ndarray, qplot: bool = True) -> np.ndarray:
 
     return avg
 
-def spectrum_plot(im: np.ndarray, with_colorbar: bool = True):
-    """2D log-scaled Fourier power spectrum (centered).
 
-    Visualizes the distribution of image energy across spatial frequencies and orientations. 
-    The center of the plot corresponds to low spatial frequencies, while the edges represent
-    high frequencies. The brightness at each point indicates the amplitude |F(u, v)| — that
-    is, the energy contribution of a given spatial frequency (radial distance) and 
-    orientation (angle).
+def spectrum_plot(spectrum: np.ndarray,
+                  cmap: str = "gray",
+                  log: bool = True,
+                  gamma: float = 1.0,
+                  with_colorbar: bool = True,
+                  colorbar_label: str = 'log(1 + |F|) (stretched)'):
 
-    Parameters
-    ----------
-    im : np.ndarray
-        Image array of shape (H, W) or (H, W, 3). Can be uint8 or float.
-        RGB is converted to luminance (ITU-R BT.601).
-    with_colorbarlot : bool, default True
-        If True, show the colorbar on the right side.
+    """Display a Fourier magnitude spectrum with optional log and gamma scaling."""
+    if plt is None:
+        raise RuntimeError(
+            "Matplotlib is not installed. "
+            "Install with: pip install shinier[viz]"
+        )
 
-    Returns
-    -------
-    fig : Matplotlib image
-    """
-    # --- to grayscale float64 ---
-    arr = np.asarray(im)
-    if arr.ndim == 3 and arr.shape[2] >= 3:
-        # suppose rgb2gray dispo; sinon fais la combinaison manuelle
-        gray = rgb2gray(arr, conversion_type='rec601').astype(np.float64, copy=False)
-    else:
-        gray = arr.astype(np.float64, copy=False)
+    spec = np.abs(spectrum).astype(np.float64)
 
-    xs, ys = gray.shape  # rows, cols
-    # Power spectrum (centered)
-    spec = np.abs(np.fft.fftshift(np.fft.fft2(gray)))**2
-    spec = np.log1p(spec)
-    spec = (spec - spec.min()) / (spec.max() - spec.min() + 1e-12)
-    
+    # log scaling
+    if log:
+        spec = np.log1p(spec)
+
+    # stretch to [0,1]
+    spec = stretch(spec)
+
+    # gamma correction
+    if gamma != 1.0:
+        spec = spec ** gamma
+
     # Axis in cycles/image (cpi) : d=1/N
-    f_x = np.fft.fftshift(np.fft.fftfreq(ys, d=1/ys))
-    f_y = np.fft.fftshift(np.fft.fftfreq(xs, d=1/xs))
+    xs, ys = spec.shape  # rows, cols
+    f_x = np.fft.fftshift(np.fft.fftfreq(ys, d=1 / ys))
+    f_y = np.fft.fftshift(np.fft.fftfreq(xs, d=1 / xs))
 
     fig, ax = plt.subplots()
     ax.set_xscale("linear")
     ax.set_yscale("linear")
 
     implot = ax.imshow(
-        spec, cmap='gray',
+        spec, cmap=cmap,
         extent=(f_x.min(), f_x.max(), f_y.min(), f_y.max())
     )
 
     if with_colorbar:
-        fig.colorbar(implot, ax=ax, label="log(1 + |F|²) (normalized)")
+        fig.colorbar(implot, ax=ax, label=colorbar_label)
 
     ax.set_xlabel("Spatial frequency (cycles/image)")
     ax.set_ylabel("Spatial frequency (cycles/image)")
     fig.tight_layout()
+
     return fig
+
+
+def im_power_spectrum_plot(im: np.ndarray, with_colorbar: bool = True):
+    """2D log-scaled Fourier power spectrum (centered).
+
+    Visualizes the distribution of image energy across spatial frequencies and orientations.
+    The center of the plot corresponds to low spatial frequencies, while the edges represent
+    high frequencies. The brightness at each point indicates the amplitude |F(u, v)| — that
+    is, the energy contribution of a given spatial frequency (radial distance) and
+    orientation (angle).
+
+    Args:
+        im : np.ndarray
+            Image array of shape (H, W) or (H, W, 3). Can be uint8 or float.
+            RGB is converted to luminance (ITU-R BT.601).
+        with_colorbarlot : bool, default True
+            If True, show the colorbar on the right side.
+
+    Returns:
+        fig : Matplotlib image
+    """
+    # --- to grayscale float64 ---
+    arr = np.asarray(im)
+    if arr.ndim == 3 and arr.shape[2] >= 3:
+        # suppose rgb2gray dispo; sinon fais la combinaison manuelle
+        gray = rgb2gray(arr, conversion_type='rec709').astype(np.float64, copy=False)
+    else:
+        gray = arr.astype(np.float64, copy=False)
+
+    # Power spectrum (centered)
+    magnitude, _ = image_spectrum(gray)
+    spec = magnitude ** 2
+    fig = spectrum_plot(spectrum=spec, cmap='gray', with_colorbar=with_colorbar, colorbar_label='log(1 + |F|²) (normalized)')
+    return fig
+
 
 def stretch(arr: np.ndarray) -> np.ndarray:
     """Stretch an array to the range [0, 1].
@@ -832,6 +871,7 @@ def exact_histogram(
 
     # --- Histogram mapping stage ---
     im_out = apply_histogram_mapping(im_sort, target_hist, binary_mask)
+    im_out[binary_mask==0] = image[binary_mask==0]
     return im_out, OA
 
 
@@ -1203,72 +1243,6 @@ def cart2pol(x, y) -> Tuple[np.ndarray, np.ndarray]:
     return magnitude, angle
 
 
-def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: Union[str] = 'equal') -> np.ndarray:
-    """
-    Convert an R'G'B' image to grayscale (luma, Y′) using ITU luma coefficients.
-
-    Parameters
-    ----------
-    image (np.ndarray or Image.Image):
-        RGB image array with last dimension = 3. Assumed to be gamma-encoded R′G′B′ (i.e., not linear light), which
-        matches typical sRGB/Rec.709-style images loaded from files (e.g. png or jpg images).
-    conversion_type : {"equal", "rec601", "rec709", "rec2020"}, default "rec709"
-        Choice of luma standard:
-          - "equal" → Y′ = 0.333 R′ + 0.333 G′ + 0.333 B′
-          - "rec601" → Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′
-          - "rec709" → Y′ = 0.2125 R′ + 0.7154 G′ + 0.0721 B′
-          - "rec2020" → Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′
-
-    Returns
-    -------
-    gray : np.ndarray
-        Grayscale image (same shape as input but last channel removed).
-
-    Notes
-    -----
-    - This computes luma (Y′) from gamma-encoded components, as defined by the ITU
-      matrices for Y′CbCr / Y′CbcCrc. For physical linear luminance, you would need
-      to first linearize R′G′B′ using the appropriate transfer function,
-      mix with linear-light coefficients, then re-encode if desired.
-
-    """
-    if isinstance(image, Image.Image):
-        image = np.array(image)
-    elif not isinstance(image, np.ndarray):
-        raise ValueError(f"Invalid image type {type(image)}. Supported values are Image.Image and np.ndarray")
-    ct = ['equal'] if conversion_type.lower() == 'equal' else re.findall(r'\d+', conversion_type)
-    if np.sum([c not in conversion_type for c in ['709', '601', '2020', 'equal']])==1 or len(ct) == 0:
-        raise ValueError('Conversion type must be either 709, 601, 2020, equal')
-
-    if image.ndim > 2:
-        return np.dot(image[..., :3].astype(np.float64), RGB2GRAY_WEIGHTS[ct[0]])
-    elif image.ndim == 2:
-        return image
-    else:
-        raise ValueError(f"Invalid image dimension {image.shape}. Supported values are >= 2")
-
-
-def gray2rgb(image: Union[np.ndarray, Image.Image]) -> np.ndarray:
-    """
-    Convert a grayscale image to RGB.
-
-    Args:
-        image (Union[np.ndarray, Image.Image]): The input grayscale image.
-
-    Returns:
-        np.ndarray: The RGB image.
-    """
-    if isinstance(image, Image.Image):
-        image = np.array(image).astype(np.float32)
-    elif not isinstance(image, np.ndarray):
-        raise ValueError(f"Invalid image type {type(image)}. Supported values are Image.Image and np.ndarray")
-
-    if image.ndim > 2:
-        image = image[:, :, 0]
-
-    return np.stack((image,) * 3, axis=-1)
-
-
 def separate(mask: np.ndarray, background: Union[int, float] = 0, background_operator: Literal['!=', '==', '>=', '<=', '>', '<', '!='] = '==', smoothing: bool = False, show_figure: bool = False) -> Tuple[np.ndarray, np.ndarray, float]:
     """
     Function for simple figure-ground segregation.
@@ -1292,6 +1266,11 @@ def separate(mask: np.ndarray, background: Union[int, float] = 0, background_ope
             define the background in the original image
 
     """
+    if plt is None:
+        raise RuntimeError(
+            "Matplotlib is not installed. "
+            "Install with: pip install shinier[viz]"
+        )
 
     mask = im3D(mask)
     mask = mask.astype(np.float64)/255 if np.max(mask) > 1 else mask
@@ -1689,10 +1668,10 @@ def print_log(logs: List[str], log_path: Union[Path, str], log_name: Optional[st
 
     filename = Path(log_path) / log_name
 
-    # Write each step to a new line in the file
+    # Write each log to a new line in the file
     with open(filename, 'w') as file:
-        for step in logs:
-            file.write(step + '\n')
+        for log in logs:
+            file.write(strip_ansi(log) + '\n')
 
 
 def strip_ansi(s: str) -> str:
@@ -1802,9 +1781,12 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, data_range: Optional[float
         image1 (np.ndarray): First image as a 3D array.
         image2 (np.ndarray): Second image as a 3D array.
         data_range (int, optional): Dynamic range of pixel values.
+        use_sample_covariance (bool): If True, use sample covariance when computing SSIM.
+            - Note that Avanaki (2009) and Wang et al. (2004) used population covariance.
+        binary_mask (np.ndarray): Binary mask used to zero-out all masked regions and normalize accordingly.
 
     Returns:
-        Tuple[np.ndarray, float]:
+        Tuple[np.ndarray, np.ndarray]:
             - Gradient of SSIM (sensitivity) as a 2D array.
             - Mean SSIM value as a float.
 
@@ -1826,10 +1808,13 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, data_range: Optional[float
     # Assumes `im3D` is available in your codebase and returns HxWxC (C>=1).
     img1_3D = im3D(image1)
     img2_3D = im3D(image2)
+    binary_mask = np.ones(img1_3D.shape, dtype=bool) if binary_mask is None else im3D(binary_mask)
 
     # ---- Basic checks ----
     if img1_3D.shape != img2_3D.shape:
         raise ValueError("image1 and image2 must have the same shape")
+    if binary_mask.shape != img2_3D.shape:
+        raise ValueError("binary_mask and image1 and image2 must have the same shape")
 
     H, W, C = img1_3D.shape
 
@@ -1852,7 +1837,6 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, data_range: Optional[float
     win_size = 2 * r + 1  # 11-tap
     pad = r
     NP = win_size * win_size
-    use_sample_covariance = True
     cov_norm = (NP / (NP - 1.0)) if use_sample_covariance else 1.0
 
     # Build normalized 1D Gaussian kernel (to mimic ndimage.gaussian, mode='reflect')
@@ -1861,9 +1845,11 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, data_range: Optional[float
     g1d /= g1d.sum()
 
     # ---- Constants (Wang et al.) ----
-    K1, K2 = 0.01, 0.03
+    K1, K2 = 0.01, 0.03  # Original proposed values
+    # K1, K2 = 0.005, 0.003  # See Avanaki, 2010 in the context of exact histogram spec with SSIM optimization
     C1 = (K1 * R) ** 2
     C2 = (K2 * R) ** 2
+    # C3 = C2 / 2
 
     all_sens = []
     all_mssim = []
@@ -1886,32 +1872,50 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, data_range: Optional[float
         vxy = cov_norm * (uxy - ux * uy)
 
         # SSIM components (Wang 2004, Eq. 6)
+        # - Luminance factor (L)
         A1 = 2.0 * ux * uy + C1
-        A2 = 2.0 * vxy + C2
-        B1 = ux * ux + uy * uy + C1
-        B2 = vx + vy + C2
+        B1 = ux**2 + uy**2 + C1
+        # L = A1/B1
 
-        D = B1 * B2
-        S = (A1 * A2) / D
+        # - Contrast factor (C)
+        A2 = 2.0 * vxy + C2
+        B2 = vx + vy + C2
+        # C = A2/B2
+
+        # # - Structural factor (S): No need to be specified if factor L, C and S have the same weight and C3 == C2/2
+        # A3 = vxy + C3
+        # B3 = vx * vy + C3
+        # S = A3/B3
+        #
+        # # Combine the 3 factors -> SSIM
+        # SSIM2 = L * C * S
+        D = (B1 * B2)
+        SSIM = (A1 * A2) /D
 
         # Crop a border of width `pad` before averaging (skimage behavior)
-        if pad > 0 and min(*S.shape) > 2 * pad:
-            S_valid = S[pad:-pad, pad:-pad]
-        else:
-            S_valid = S
-        mssim = S_valid.mean(dtype=np.float64)
+        # if pad > 0 and min(*SSIM.shape) > 2 * pad:
+        #     SSIM_valid = SSIM[pad:-pad, pad:-pad][binary_mask[...,ch]]
+        # else:
+        SSIM_valid = SSIM[binary_mask[...,ch]]
+        mssim = SSIM_valid.mean(dtype=np.float64)
         all_mssim.append(mssim)
 
         # Gradient (Avanaki 2009, Eqs. 7–8), filtered with the same Gaussian
-        term1 = A1 / D
-        term2 = -S / B2
-        term3 = (ux * (A2 - A1) - uy * (B2 - B1) * S) / D
-
+        # (1) Luminance–contrast coupling term
+        term1 = 2.0 * (A1 / D)  # factor of 2 comes from ∂(2*m_x*m_y)/∂Y
         sens = convolve_2d(term1, g1d) * X
-        sens += convolve_2d(term2, g1d) * Y
-        sens += convolve_2d(term3, g1d)
-        sens *= (2.0 / (H * W))  # equivalent to skimage scaling for a single-channel call
 
+        # (2) Contrast–structure term (negative feedback through Y)
+        term2 = -2.0 * (SSIM / B2)  # factor of 2 from ∂(2*σ_xy)/∂Y
+        sens += convolve_2d(term2, g1d) * Y
+
+        # (3) Cross interaction term between mean and variance components
+        term3 = 2.0 * (ux * (A2 - A1) - uy * (B2 - B1) * SSIM) / D
+        sens += convolve_2d(term3, g1d)
+
+        # Normalize to obtain gradient of *mean* SSIM (as in Avanaki’s Eq. 8)
+        sens /= np.sum(binary_mask[...,ch])
+        sens[binary_mask[...,ch] == False] = 0.0
         all_sens.append(sens)
 
     sens_out = np.stack(all_sens, axis=-1)
@@ -1921,35 +1925,159 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, data_range: Optional[float
     return sens_out, ssim_vals
 
 
-def hist_match_validation(images: ImageListType, binary_masks: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
+class StepSizeController:
+    """Three-regime adaptive step-size controller for SSIM optimization.
+
+    Behavior:
+      A) If SSIM increases noticeably → accept, keep weight.
+      B) If SSIM increases only slightly (stall) → restart with larger weight.
+      C) If SSIM decreases → restart with smaller weight.
+
+    Attributes:
+        gain_up (float): Multiplier when escaping a stall (default=1.3).
+        gain_down (float): Multiplier when correcting overshoot (default=0.6).
+        stall_thresh (float): ΔSSIM below which we consider a stall (default=1e-5).
+        alpha_min (float): Minimum allowed step size.
+        alpha_max (float): Maximum allowed step size.
+        max_stall_iter (int): Maximum allowed number of stalled iterations.
+    """
+
+    def __init__(
+        self,
+        gain_up: float = 1.3,
+        gain_down: float = 0.6,
+        stall_thresh: float = 1e-5,
+        alpha_min: float = 1e-4,
+        alpha_max: float = 10.0,
+        max_stall_iter: int = 5
+    ):
+        self.gain_up = gain_up
+        self.gain_down = gain_down
+        self.stall_thresh = stall_thresh
+        self.alpha_min = alpha_min
+        self.alpha_max = alpha_max
+        self.max_stall_iter = max_stall_iter
+
+        # Internal state
+        self.stall_iter: int = 0
+        self.best_ssim: float = -np.inf
+        self.best_image = None
+        self.best_gradient = None
+        self.last_ssim = None
+        self.all_ssim = []
+        self.restart_reason = ' '
+
+    def update(self, alpha: float, ssim_new: float, Y_new: np.ndarray, gradient_new: np.ndarray) -> Tuple[float, np.ndarray, bool]:
+        """Update step size and decide whether to restart or accept.
+
+        Args:
+            alpha (float): Current step-size weight.
+            ssim_new (float): Current mean SSIM value.
+            Y_new (np.ndarray): Current image.
+            gradient_new (np.ndarray): Current gradient from ssim_sens()
+
+        Returns:
+            (alpha_new, Y_next, restart)
+                alpha_new       : Updated step-size weight.
+                Y_next          : Either new image or reverted one.
+                gradient_next   : Either new gradient or reverted one.
+                restart         : Whether a restart is needed.
+        """
+        restart = False
+        self.restart_reason = " "
+        done = False
+        # rounded_sim = np.round(ssim_new * 1/self.stall_thresh) * self.stall_thresh
+        self.all_ssim.append(ssim_new)
+        all_ssim = np.asarray(self.all_ssim)
+        max_ssim = np.max(all_ssim)
+        self.stall_iter = np.count_nonzero(all_ssim == max_ssim)
+
+        # First iteration initialization
+        if self.last_ssim is None:
+            self.last_ssim = ssim_new
+            self.best_ssim = ssim_new
+            self.best_image = Y_new.copy()
+            self.best_gradient = gradient_new.copy()
+            return alpha, ssim_new, Y_new, gradient_new, False, done
+
+        delta_ssim = ssim_new - self.last_ssim
+
+        # Case A: Clear improvement
+        if delta_ssim > self.stall_thresh:
+            # Significant increase → accept progress
+            self.last_ssim = ssim_new
+            self.best_ssim = ssim_new
+            np.copyto(self.best_image, Y_new)
+            np.copyto(self.best_gradient, gradient_new)
+            self.restart_reason = "SSIM increased!"
+
+        # Case B: Stalling or negligible improvement
+        elif delta_ssim == 0:
+        # elif 0 <= delta_ssim <= self.stall_thresh:
+            # Restart from best with larger alpha
+            alpha = np.clip(alpha * self.gain_up, self.alpha_min, self.alpha_max)
+            self.last_ssim = self.best_ssim
+            Y_new = self.best_image
+            gradient_new = self.best_gradient
+            restart = True
+            self.restart_reason = "SSIM stalled: rollback"
+
+        # Case C: Regression (SSIM decreased)
+        elif delta_ssim < 0:
+            # Rollback and reduce alpha
+            alpha = np.clip(alpha * self.gain_down, self.alpha_min, self.alpha_max)
+            self.last_ssim = self.best_ssim
+            Y_new = self.best_image
+            gradient_new = self.best_gradient
+            restart = True
+            self.restart_reason = "SSIM decreased: rollback"
+
+        ssim_new = self.last_ssim
+        if self.stall_iter > self.max_stall_iter:
+            done = True
+        return alpha, ssim_new, Y_new, gradient_new, restart, done
+
+
+def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], target_hist: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """
     Validates the histogram matching process by comparing initial histograms of images
     to a target histogram. Uses correlation coefficients and root mean square error
     (RMSE) as metrics for validation.
 
     Args:
-        images (ImageListType): A list-like object containing images. Each image should
+        images (ImageListIO): A list-like object containing images. Each image should
             represent its histogram and dimensional attributes appropriately.
         binary_masks ([np.ndarray]). A list of binary masks with same size as image.
+        target_hist (Optional[np.ndarray]). A target histogram to compare against.
+        normalize_rmse (bool): Return normalized RMSE using its actual range.
 
     Returns:
         Tuple[np.ndarray, np.ndarray]: A tuple where the first element is an array
             of correlation coefficients, and the second element is an array of RMS
             values for all images compared against the target histogram.
     """
-
     def normalize_hist(a_hist):
         a_hist = np.float64(a_hist)
         return a_hist / (a_hist.sum(axis=0, keepdims=True) + 1e-12)
 
     initial_hist = []
     image = im3D(images[0])
-    target_hist = np.zeros((images.drange[-1]+1, image.shape[-1]))
+    n_channels = image.shape[2]
+    compute_target_hist = target_hist is None
+    if not compute_target_hist:
+        n_channels_th = target_hist.shape[1] if target_hist.ndim == 2 else 1
+        if n_channels_th != n_channels:
+            raise ValueError(f"Target histogram has {n_channels_th} channels, but image has {n_channels} channels")
+
+    target_hist = np.zeros((images.drange[-1]+1, n_channels)) if compute_target_hist else target_hist
     for idx, image in enumerate(images):
         initial_hist.append(imhist(image, mask=binary_masks[idx]))
-        target_hist += initial_hist[-1]
+        if compute_target_hist:
+            target_hist += initial_hist[-1]
         initial_hist[-1] = normalize_hist(initial_hist[-1])
-    target_hist /= len(images)
+    if compute_target_hist:
+        target_hist /= len(images)
+
     target_hist = normalize_hist(target_hist)
 
     # Compute metric
@@ -1957,11 +2085,14 @@ def hist_match_validation(images: ImageListType, binary_masks: List[np.ndarray])
     corr, rms = np.zeros((N,)), np.zeros((N,))
     for idx, a_hist in enumerate(initial_hist):
         corr[idx] = np.corrcoef(a_hist.ravel(), target_hist.ravel())[0, 1]
-        rms[idx] = compute_rmse(a_hist.ravel(), target_hist.ravel())
+        if normalize_rmse:
+            rms[idx] = normalized_rmse(a_hist.ravel(), target_hist.ravel(), mode='actual range')
+        else:
+            rms[idx] = compute_rmse(a_hist.ravel(), target_hist.ravel())
     return corr, rms
 
 
-def sf_match_validation(images: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def sf_match_validation(images: np.ndarray, target_spectrum: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """
     Validates spectral match between a set of input images by comparing their
     rotational averages of magnitude spectra against a computed target spectrum.
@@ -1971,6 +2102,8 @@ def sf_match_validation(images: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     Args:
         images (np.ndarray): Array of images for which the spectral validation
             is performed. Each image is assumed to have three channels (e.g., RGB).
+        target_spectrum (Optional[np.ndarray]). A target spectrum to compare against.
+        normalize_rmse (Optional[bool]): Whether to normalize the RMSE
 
     Returns:
         Tuple[np.ndarray, np.ndarray]: A tuple containing two arrays:
@@ -1986,16 +2119,22 @@ def sf_match_validation(images: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 
     x_size, y_size = images[0].shape[:2]
     n_channels = 1 if images[0].ndim == 2 else 3
+    compute_target_spectrum = target_spectrum is None
+    if not compute_target_spectrum:
+        n_channels_ts = target_spectrum.shape[2] if target_spectrum.ndim == 3 else 1
+        if n_channels_ts != n_channels:
+            raise ValueError(f"Target spectrum has {n_channels_ts} channels but images have {n_channels} channels")
 
     # Compute spectra and mean spectrum
     magnitudes, phases = get_images_spectra(images=images)
-    target_spectrum = im3D(np.zeros(images[0].shape))
-    for idx, mag in enumerate(magnitudes):
-        target_spectrum += mag
-    target_spectrum /= len(magnitudes)
-    target_spectrum = im3D(target_spectrum)
+    target_spectrum = im3D(np.zeros(images[0].shape)) if compute_target_spectrum else im3D(target_spectrum)
+    if compute_target_spectrum:
+        for idx, mag in enumerate(magnitudes):
+            target_spectrum += mag
+        target_spectrum /= len(magnitudes)
+        target_spectrum = im3D(target_spectrum)
 
-    #  Returns the frequencies of the image, bins range from -0.5f to 0.5f (0.5f is the Nyquist frequency) 1/y_size is the distance between each pixel in the image
+    # Returns the frequencies of the image, bins range from -0.5f to 0.5f (0.5f is the Nyquist frequency) 1/y_size is the distance between each pixel in the image
     f_cols = np.fft.fftshift(np.fft.fftfreq(y_size, d=1 / y_size))  # like f1 in MATLAB
     f_rows = np.fft.fftshift(np.fft.fftfreq(x_size, d=1 / x_size))  # like f2 in MATLAB
     XX, YY = np.meshgrid(f_cols, f_rows)
@@ -2033,11 +2172,14 @@ def sf_match_validation(images: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     corr, rms = np.zeros((N,)), np.zeros((N,))
     for idx, ira in enumerate(initial_rot_avg):
         corr[idx] = np.corrcoef(ira.ravel(), target_rot_avg[idx].ravel())[0, 1]
-        rms[idx] = compute_rmse(ira.ravel(), target_rot_avg[idx].ravel())
+        if normalize_rmse:
+            rms[idx] = normalized_rmse(ira.ravel(), target_rot_avg[idx].ravel(), mode='actual range')
+        else:
+            rms[idx] = compute_rmse(ira.ravel(), target_rot_avg[idx].ravel())
     return corr, rms
 
 
-def spec_match_validation(images: ImageListType) -> Tuple[np.ndarray, np.ndarray]:
+def spec_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """
     Validates spectral matching of input images by comparing the spectra of each
     image with a target spectrum. The target spectrum is computed as the average
@@ -2048,6 +2190,8 @@ def spec_match_validation(images: ImageListType) -> Tuple[np.ndarray, np.ndarray
     Args:
         images: List or array of images for which spectral matching needs to be
             validated. Each image should have the same shape.
+        target_spectrum (Optional[np.ndarray]). A target spectrum to compare against.
+        normalize_rmse (Optional[bool]): Whether to normalize the RMSE
 
     Returns:
         Tuple[np.ndarray, np.ndarray]: A tuple containing two numpy arrays. The
@@ -2057,11 +2201,19 @@ def spec_match_validation(images: ImageListType) -> Tuple[np.ndarray, np.ndarray
     """
     magnitudes, phases = get_images_spectra(images=images)
 
-    target_spectrum = im3D(np.zeros(images[0].shape))
-    for idx, mag in enumerate(magnitudes):
-        target_spectrum += mag
-    target_spectrum /= len(magnitudes)
-    target_spectrum = im3D(target_spectrum)
+    n_channels = 1 if images[0].ndim == 2 else 3
+    compute_target_spectrum = target_spectrum is None
+    if not compute_target_spectrum:
+        n_channels_ts = target_spectrum.shape[2] if target_spectrum.ndim == 3 else 1
+        if n_channels_ts != n_channels:
+            raise ValueError(f"Target spectrum has {n_channels_ts} channels but images have {n_channels} channels")
+
+    target_spectrum = im3D(np.zeros(images[0].shape)) if compute_target_spectrum else im3D(target_spectrum)
+    if compute_target_spectrum:
+        for idx, mag in enumerate(magnitudes):
+            target_spectrum += mag
+        target_spectrum /= len(magnitudes)
+        target_spectrum = im3D(target_spectrum)
 
     # Compute metric
     N = len(magnitudes)
@@ -2069,7 +2221,10 @@ def spec_match_validation(images: ImageListType) -> Tuple[np.ndarray, np.ndarray
     for idx, a_mag in enumerate(magnitudes):
         a_mag = im3D(a_mag)
         corr[idx] = np.corrcoef(a_mag.ravel(), target_spectrum.ravel())[0, 1]
-        rms[idx] = compute_rmse(a_mag.ravel(), target_spectrum.ravel())
+        if normalize_rmse:
+            rms[idx] = normalized_rmse(a_mag.ravel(), target_spectrum.ravel(), mode='actual range')
+        else:
+            rms[idx] = compute_rmse(a_mag.ravel(), target_spectrum.ravel())
     return corr, rms
 
 
@@ -2078,22 +2233,80 @@ def compute_rmse(image1: np.ndarray, image2: np.ndarray) -> float:
     return np.sqrt(np.mean((image1 - image2) ** 2))
 
 
-def get_images_spectra(images: ImageListType, magnitudes: Optional[ImageListType] = None, phases: Optional[ImageListType] = None, rescale: bool = True) -> Union[List[np.ndarray], ImageListType]:
+def normalized_rmse(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    mode: Literal["assume [0, 1]", "actual range", "expected range"] = "actual range",
+    expected_range: Optional[float] = None,
+    eps: float = 1e-12,
+    verbose: bool = False,
+) -> float:
+    """Compute RMS error guaranteed to lie in [0, 1].
+
+    Args:
+        y_true: Reference array.
+        y_pred: Predicted or reconstructed array (same shape as y_true).
+        mode:
+            - "assume [0, 1]": assumes both arrays are already scaled to [0, 1];
+              RMSE is directly bounded to [0, 1].
+            - "actual range": divides by the actual dynamic range of y_true
+              (max(y_true) - min(y_true)).
+            - "expected range": divides by a user-specified `expected_range`
+              (e.g. 255 for 8-bit data or 1.0 for normalized floats).
+        expected_range: Known dynamic range when using "expected range".
+        eps: Small constant to avoid divide-by-zero.
+        verbose: Out-of-range value warnings if True
+
+    Returns:
+        float: Normalized RMSE in [0, 1].
+
+    Raises:
+        ValueError: If shapes differ or `expected_range` is missing when required.
+    """
+    if y_true.shape != y_pred.shape:
+        raise ValueError("Shapes must match.")
+
+    rmse = compute_rmse(y_true, y_pred)
+    if mode == "assume [0, 1]":
+        # Data already in [0,1], so RMSE is naturally bounded.
+        norm_rmse = rmse
+
+    if mode == "actual range":
+        actual_range = float(np.max([np.max(y_true), np.max(y_pred)]) - np.min([np.min(y_true), np.min(y_pred)]))
+        norm_rmse = rmse / max(actual_range, eps)
+
+    if mode == "expected range":
+        if expected_range is None:
+            raise ValueError("`expected_range` must be provided for mode='expected range'.")
+        norm_rmse = rmse / max(expected_range, eps)
+
+    if verbose and not (0.0 <= norm_rmse <= 1.0):
+        warnings.warn(
+            f"Normalized RMSE ({norm_rmse:.4f}) is outside [0, 1]. "
+            f"This suggests inconsistent range assumptions.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    return norm_rmse
+
+
+def get_images_spectra(images: ImageListIO, magnitudes: Optional[ImageListIO] = None, phases: Optional[ImageListIO] = None, rescale: bool = True) -> Tuple[ImageListIO, ImageListIO]:
     """
     Get spectrum over list of images
     Args:
-        images (ImageListType): List of images.
-        magnitudes (Optional[ImageListType]): If provided, inserts new magnitudes into this list.
-        phases (Optional[ImageListType]): If provided, inserts new phases into this list.
+        images (ImageListIO): List of images.
+        magnitudes (Optional[ImageListIO]): If provided, inserts new magnitudes into this list.
+        phases (Optional[ImageListIO]): If provided, inserts new phases into this list.
         rescale (bool): Determines if input is stretched to [0, 1] range.
 
     Returns:
-        magnitudes, phases (Union[List[np.ndarray], ImageListType])
+        magnitudes, phases (Tuple[ImageListIO, ImageListIO])
 
     """
     n_images = len(images)
-    x_size, y_size = images.reference_size[:2]
-    n_channels = 3 if images.n_dims == 3 else 1
+    x_size, y_size = images[0].shape[:2]
+    n_channels = 3 if len(images[0].shape) == 3 else 1
     phases = [None] * n_images if phases is None else phases
     magnitudes = [None] * n_images if magnitudes is None else magnitudes
     for idx, image in enumerate(images):
@@ -2191,7 +2404,7 @@ def load_np_array(path_str: Optional[str]) -> Optional[np.ndarray]:
     return None
 
 
-def rescale_images255(images: ImageListType, rescaling_option: Literal[0, 1, 2, 3] = 2, legacy_mode: bool = False) -> ImageListType:
+def rescale_images255(images: ImageListIO, rescaling_option: Literal[0, 1, 2, 3] = 2, legacy_mode: bool = False) -> ImageListIO:
     """
     Rescales the values of images so that they fall between 0 and 255. There are 3 options:
         1) Each image has its own min and max (no rescaling)
@@ -2351,8 +2564,8 @@ def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins: int = 2
     image = im3D(image)
 
     # If no mask provided, make a blank mask with all True
-    mask = np.ones(image.shape).astype(bool) if mask is None else mask.astype(bool)
-    mask = np.stack((mask, ) * image.shape[-1], axis=-1) if mask.ndim < image.ndim else im3D(mask)
+    mask = np.ones(image.shape).astype(bool) if mask is None else im3D(mask.astype(bool))
+    mask = np.repeat(mask, image.shape[2], axis=2) if mask.shape[2] < image.shape[2] else mask
     n_channels = image.shape[-1]
     count = np.zeros((n_bins, n_channels))
     for channel in range(n_channels):
@@ -2364,11 +2577,11 @@ def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins: int = 2
     return count
 
 
-def avg_hist(images: ImageListType, binary_masks: List[np.ndarray], normalized: bool = True, n_bins: int = 256) -> np.ndarray:
+def avg_hist(images: ImageListIO, binary_masks: List[np.ndarray], normalized: bool = True, n_bins: int = 256) -> np.ndarray:
     """Computes the average histogram of a set of images.
 
     Args:
-        images (ImageListType): A list of images
+        images (ImageListIO): A list of images
         binary_masks (List[np.ndarray]): A list of binary mask.
         normalized (bool): Indicate of the result should be normalize to sum to 1.
         n_bins (int): Number of levels in the image (uint8 = 256)

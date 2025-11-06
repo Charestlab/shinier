@@ -1,22 +1,35 @@
-from typing import Optional, List, Union, Iterable, Tuple, Literal
+from __future__ import annotations
+
+import copy
+from typing import Optional, List, Union, Iterable, Tuple, Literal, Dict, ClassVar, get_args, Any
 from datetime import datetime
 import numpy as np
+from pydantic import Field, PrivateAttr, ConfigDict
+
 from tqdm import tqdm
-from matplotlib import pyplot as plt
+import sys
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
+
+# Local imports
+from shinier.base import InformativeBaseModel, ImageListType
 from shinier import ImageDataset, Options
 from shinier.utils import (
-    beta_bounds_from_ssim, ImageListType, separate, imhist, im3D, cart2pol, pol2cart, soft_clip,
+    beta_bounds_from_ssim, separate, imhist, im3D, cart2pol, pol2cart, soft_clip,
     rescale_images255, get_images_spectra, ssim_sens, spectrum_plot, imhist_plot, sf_plot, avg_hist,
     uint8_plus, float01_to_uint, uint_to_float01, noisy_bit_dithering, floyd_steinberg_dithering,
-    exact_histogram, Bcolors, MatlabOperators, compute_rmse, RGB2GRAY_WEIGHTS,
-    has_duplicates, stretch, console_log, print_log
+    exact_histogram, Bcolors, MatlabOperators, compute_rmse,
+    has_duplicates, stretch, console_log, print_log, StepSizeController
 )
-import sys
+from shinier.color import ColorConverter, ColorTreatment, rgb2gray, gray2rgb, RGB2GRAY_WEIGHTS, RGB_STANDARD
 
+RGB_STANDARD_LIST = [r for r in get_args(RGB_STANDARD)]
 Vector = Iterable[Union[float, int]]
 
 
-class ImageProcessor:
+class ImageProcessor(InformativeBaseModel):
     """
     Provides functionality for image processing with multiple configurable steps.
 
@@ -31,7 +44,6 @@ class ImageProcessor:
         dataset (ImageDataset): The dataset containing the images to be processed.
         options (Optional[Options]): Options for processing, including mode, verbosity,
             and seed values.
-        current_masks (Optional[np.ndarray]): Masks for the current image being processed.
         bool_masks (List): Boolean masks for all images in the dataset.
         verbose (Literal[-1, 0, 1, 2, 3]): Controls verbosity levels (default = 0).
             -1 = Quiet mode
@@ -47,75 +59,145 @@ class ImageProcessor:
 
         Notes:
             - Using exact_histogram_without_ties whenever possible for faster and deterministic results.
-            - Input images are transformed into floats [0, 255] at the very beginning. A buffer image dataset
-                is used to store intermediate results. Output images are reconverted into uint8.
+            - Input images are transformed into floats [0, 255] and then converted into relevant color space
+                at the very beginning. A buffer image dataset is used to store intermediate results. Output images
+                are reconverted back into sRGG and into uint8 at the end of all image processing steps.
             - All important processing information (e.g. seed) are logged and stored in output_folder.
     """
 
-    def __init__(self, dataset: ImageDataset, options: Optional[Options] = None, verbose: Optional[Literal[-1, 0, 1, 2, 3]] = None, from_cli: bool = False):
-        self.dataset: ImageDataset = dataset
-        self.options: Optional[Options] = options or getattr(dataset, "options", None)
-        self.current_masks: Optional[np.ndarray] = None
-        self.bool_masks: List = [None] * len(self.dataset.images)
-        self.verbose: Literal[-1, 0, 1, 2, 3] = verbose if verbose is not None else self.options.verbose  # -1: Nothing is printed (used for unit tests); 0: Minimal processing steps are printed; 1: Additional info about image and channels being processed are printed; 2: Additional info about the results of internal tests are printed.
-        self.log: List = []
-        self.validation: List = []
-        self.ssim_results: List = []
-        self.ssim_data: List = []
-        self.seed: int = self.options.seed
+    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=False)
 
-        # Private attributes
-        self._dataset_map = {
-            id(self.dataset.images): 'images',
-        }
-        if hasattr(self.dataset, 'buffer'):
-            self._dataset_map[id(self.dataset.buffer)] = 'buffer'
+    # --- Public attributes ---
+    dataset: ImageDataset
+    options: Optional[Options] = None
+    verbose: Literal[-1, 0, 1, 2, 3] = 0
+    log: List[str] = Field(default_factory=list)
+    validation: List[dict] = Field(default_factory=list)
+    ssim_results: List[dict] = Field(default_factory=list)
+    ssim_data: List[dict] = Field(default_factory=list)
+    seed: Optional[int] = None
+    bool_masks: List = Field(default_factory=list)
+    from_cli: bool = Field(default=False)
+    from_unit_test: bool = Field(default=False)
+    from_validation_test: bool = Field(default=False)
+
+    # --- Private attributes ---
+    _dataset_map: dict = PrivateAttr(default_factory=dict)
+    _mode2processing_steps: dict = PrivateAttr(default_factory=dict)
+    _fct_name2process_name: dict = PrivateAttr(default_factory=dict)
+    _iter_num: int = PrivateAttr(default=0)
+    _processing_steps: List[str] = PrivateAttr(default_factory=list)
+    _n_steps: int = PrivateAttr(default=0)
+    _step: int = PrivateAttr(default=0)
+    _processing_function: Optional[str] = PrivateAttr(default=None)
+    _processed_image: Optional[str] = PrivateAttr(default=None)
+    _processed_channel: Optional[int] = PrivateAttr(default=None)
+    _log_param: dict = PrivateAttr(default_factory=dict)
+    _is_last_operation: bool = PrivateAttr(default=False)
+    _sum_bool_masks: List = PrivateAttr(default_factory=list)
+    _complete: bool = PrivateAttr(default=False)
+    _rec_standard: str = PrivateAttr(default="rec709")
+    _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
+    _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
+    _final_buffers: Optional[ImageListType] = PrivateAttr(default=None)
+
+    def post_init(self, __context: Any) -> None:
+        """Run initialization logic after Pydantic validation and only once at instantiation."""
+        if self.options is None:
+            self.options = getattr(self.dataset, "options", None)
+
+        if not self.bool_masks:
+            self.bool_masks = [None] * len(self.dataset.images)
+        self.verbose = self.verbose or getattr(self.options, "verbose", 0)
+
+        self._dataset_map = {id(self.dataset.images): "images"}
+        if hasattr(self.dataset, "buffer"):
+            self._dataset_map[id(self.dataset.buffer)] = "buffer"
 
         self._mode2processing_steps = {
-            1: ['lum_match'],
-            2: ['hist_match'],
-            3: ['sf_match'],
-            4: ['spec_match'],
-            5: ['hist_match', 'sf_match'],
-            6: ['hist_match', 'spec_match'],
-            7: ['sf_match', 'hist_match'],
-            8: ['spec_match', 'hist_match'],
-            9: [None]}
-        self._fct_name2process_name = {
-            'lum_match': 'luminance matching',
-            'hist_match': 'histogram matching',
-            'sf_match': 'spatial frequency matching',
-            'spec_match': 'fourier spectrum matching',
-            None: 'dithering',
+            1: ["lum_match"],
+            2: ["hist_match"],
+            3: ["sf_match"],
+            4: ["spec_match"],
+            5: ["hist_match", "sf_match"],
+            6: ["hist_match", "spec_match"],
+            7: ["sf_match", "hist_match"],
+            8: ["spec_match", "hist_match"],
+            9: [None],
         }
-        self._iter: int = 0
-        self._processing_steps: List[str] = self._mode2processing_steps[self.options.mode]
-        self._n_steps: int = len(self._processing_steps)
-        self._step: int = 0
-        self._processing_function: str
-        self._processed_image: str
-        self._processed_channel: Optional[int] = None
-        self._log_param: dict = {}
-        self._is_last_operation: bool = False
-        self._sum_bool_masks: List = [None] * len(self.dataset.images)
-        self._from_cli: bool = from_cli
-        # Run image processing steps
+
+        self._fct_name2process_name = {
+            "lum_match": "luminance matching",
+            "hist_match": "histogram matching",
+            "sf_match": "spatial frequency matching",
+            "spec_match": "fourier spectrum matching",
+            None: "dithering",
+        }
+
+        self._rec_standard = RGB_STANDARD_LIST[self.options.rec_standard]
+        self._processing_steps = self._mode2processing_steps[self.options.mode]
+        self._n_steps = len(self._processing_steps)
+        self._sum_bool_masks = [None] * len(self.dataset.images)
+        if self.from_unit_test:
+            return
+
+        # Run your pipeline
         self.process()
-        print_log(logs=self.log, log_path=self.options.output_folder)
-        if not self.dataset.images.has_list_array:
+        self.print_log_results()
+
+        if not getattr(self.dataset.images, "has_list_array", False):
             self.dataset.save_images()
             self.dataset.close()
         else:
             console_log(
-                msg=f'To get the output images, you must instantiate ImageProcessor and call get_results() method. \n\tE.g.: output_images = ImageProcessor(dataset=my_dataset).get_results()',
-                indent_level=0, color=Bcolors.WARNING, verbose=self.verbose >= 2 and not self._from_cli)
+                msg=(
+                    "To get the output images, you must instantiate ImageProcessor "
+                    "and call get_results()."
+                ),
+                indent_level=0,
+                color=Bcolors.WARNING,
+                verbose=self.verbose >= 2 and not self.from_cli,
+            )
+
+    def print_log_results(self):
+        """
+        Compiles and prints logs related to regular processing steps,
+        SSIM validation results, and function validation results. The logs are
+        formatted and stored in the specified output folder.
+        """
+
+        # Print regular logs
+        if self.verbose >= 0:
+            logs = []
+            if len(self.log) > 0:
+                logs = logs + ['[Regular logs]'] + self.log + ['']
+
+            # Print SSIM validation results
+            if len(self.ssim_results):
+                _logs = [f"iter={res['iter']}; step={res['step']}; image={res['image']}; channel={res['channel']}; result={res['valid_result']}" for res in self.ssim_results]
+                logs = logs + ['[SSIM validation results]'] + _logs + ['']
+
+            # Print function validation results
+            if len(self.validation):
+                _logs = [f"iter={res['iter']}; step={res['step']}; image={res['image']}; channel={res['channel']}; processing function={res['processing_function']}; result={res['valid_result']}; other={res['log_result']}" for res in self.validation]
+                logs = logs + ['[Processing validation results]'] + _logs + ['']
+
+            if len(logs):
+                print_log(logs=logs, log_path=self.options.output_folder)
 
     def get_results(self):
         """Return list of processed np.ndarray if input was arrays, otherwise None."""
         sp = getattr(self.dataset.images, "store_paths", None)
-        if not sp or sp[0] is None:
-            return self.dataset.images.data
-        return None
+        if self._complete:
+            if not sp or sp[0] is None:
+                return self.dataset.images.data
+            else:
+                return self.dataset.images
+        else:
+            raise RuntimeError(
+                "Cannot retrieve results: ImageProcessor has not run yet. "
+                "Call `.process()` before `.get_results()`."
+            )
 
     @staticmethod
     def uint8_to_float255(input_collection: ImageDataset, output_collection: ImageDataset) -> ImageDataset:
@@ -129,30 +211,37 @@ class ImageProcessor:
         """ Provide mask if masks exists in the dataset, if not make blank masks (all True). """
         background = 127 if self.options.whole_image == 3 and self.options.background == 300 else self.options.background
         background_operator = '<' if self.options.whole_image == 3 and self.options.background == 300 else '=='
+
         def _prepare_mask(image, mask=None):
             if self.options.whole_image == 2:
-                mask_f, mask_b, _ = separate(image, background=background, background_operator=background_operator)
+                self.bool_masks[idx], _, _ = separate(image, background=background, background_operator=background_operator)
             elif self.options.whole_image == 3:
-                mask_f, mask_b, _ = separate(mask, background=background, background_operator=background_operator)
-            self.current_masks = (mask_f, mask_b)
+                self.bool_masks[idx], _, _ = separate(mask, background=background, background_operator=background_operator)
 
-        n_dims = self.dataset.images.n_dims
-        im_size = np.array(list(self.dataset.images.reference_size) + [self.dataset.images.n_channels])
+        n_dims = self.dataset.buffer.n_dims
+        im_size = np.array(list(self.dataset.buffer.reference_size) + [self.dataset.buffer.n_channels])
         if self.bool_masks[idx] is None:
             if self.options.whole_image == 2:
                 console_log(msg=f'Preparing mask (whole-image: 2)', indent_level=0, color=Bcolors.HEADER, verbose=self.verbose > 1)
                 _prepare_mask(image=self.dataset.images[idx])
-                self.bool_masks[idx] = np.stack((self.current_masks[0],) * (3 if n_dims == 3 else 1), axis=-1)
             elif self.options.whole_image == 3:
                 if idx < self.dataset.n_masks:  # If there is one mask, it picks self.bool_masks[0] everytime
                     console_log(msg=f'Preparing mask (whole-image: 3)', indent_level=0, color=Bcolors.HEADER, verbose=self.verbose > 1)
                     _prepare_mask(image=self.dataset.images[idx], mask=self.dataset.masks[idx])
-                    self.bool_masks[idx] = np.stack((self.current_masks[0],) * (3 if n_dims == 3 else 1), axis=-1)
                 else:
                     self.bool_masks[idx] = self.bool_masks[0]
             else:
                 # No ROI mask: Whole image is analyzed
                 self.bool_masks[idx] = np.ones(im_size, dtype=bool) if idx == 0 else self.bool_masks[0]
+
+            # Resize masks' 3rd dimension
+            self.bool_masks[idx] = im3D(self.bool_masks[idx])
+            if im_size[2] > self.bool_masks[idx].shape[2]:
+                self.bool_masks[idx] = np.repeat(self.bool_masks[idx], 3, axis=2)
+            elif im_size[2] < self.bool_masks[idx].shape[1]:
+                self.bool_masks[idx] = self.bool_masks[idx][:, :, :im_size[2]]
+
+            # Compute number of unmasked pixels per channel
             self._sum_bool_masks[idx] = [self.bool_masks[idx][..., ch].sum() for ch in range(self.bool_masks[idx].shape[2])]
 
     def _validate_ssim(self, ssim: List[float]):
@@ -161,7 +250,7 @@ class ImageProcessor:
             for ch in range(out.shape[1]):
                 is_strictly_increasing = np.all(np.diff(out[:, ch], axis=0) > -1e-3)
                 results = {
-                    'iter': self._iter,
+                    'iter': self._iter_num,
                     'step': self._step,
                     'image': self._processed_image,
                     'channel': self._processed_channel,
@@ -182,7 +271,7 @@ class ImageProcessor:
             raise ValueError('observed, expected and measures_str lists must be the same size')
         diff = [np.abs(obs - expected[idx]) for idx, obs in enumerate(observed)]
         results = {
-            'iter': self._iter,
+            'iter': self._iter_num,
             'step': self._step,
             'processing_function': self._processing_function,
             'image': self._processed_image,
@@ -215,13 +304,26 @@ class ImageProcessor:
         # Put input images into buffer dataset and convert to float [0, 255]
         self.dataset.buffer = self.uint8_to_float255(self.dataset.images, self.dataset.buffer)
 
+        # Apply relevant color treatment
+        buffer_other = self.dataset.buffer_other if self.options.color_treatment else None
+        self.dataset.buffer, buffer_other = ColorTreatment.forward_color_treatment(
+            rec_standard=self._rec_standard,
+            input_images=self.dataset.buffer,
+            output_images=self.dataset.buffer,
+            output_other=buffer_other,
+            color_treatment=self.options.color_treatment,
+            as_gray=self.options.as_gray,
+            conversion_type='sRGB_to_xyY')
+        if buffer_other is not None:
+            self.dataset.buffer_other = buffer_other
+
         # Set a seed for the random generator used in exact histogram specification
         if self.seed is None:
             now = datetime.now()
             self.seed = int(now.timestamp())
         np.random.seed(self.seed)
         self.log.append(f'seed={self.seed}')
-        console_log(msg=f'Use this seed for reproducibility: {self.seed}', color=Bcolors.WARNING, indent_level=0, verbose=self.verbose>=1 and not self._from_cli)
+        console_log(msg=f'Use this seed for reproducibility: {self.seed}', color=Bcolors.WARNING, indent_level=0, verbose=self.verbose>=1 and not self.from_cli)
 
         # Set tqdm
         if self.verbose == 0:
@@ -239,9 +341,9 @@ class ImageProcessor:
         # A second loop is for modes associated with multiple steps will run more
         mask_prepared = False
         cnt = 0
-        for self._iter in range(self.options.iterations):
+        for self._iter_num in range(self.options.iterations):
             for self._step, self._processing_function in enumerate(self._processing_steps):
-                self._is_last_operation = self._iter == self.options.iterations - 1 and self._step == self._n_steps - 1
+                self._is_last_operation = self._iter_num == self.options.iterations - 1 and self._step == self._n_steps - 1
                 if self._processing_function is not None:
                     # Prepare masks if not done
                     if not mask_prepared:
@@ -251,29 +353,44 @@ class ImageProcessor:
 
                     # Get the processing function, check and call it
                     if self.verbose == 0:
-                        pbar.set_description(f'{Bcolors.ALMOST_WHITE}Applying {self._fct_name2process_name[self._processing_function]}... (iter={self._iter}, step={self._step}){Bcolors.ENDC}')
+                        pbar.set_description(f'{Bcolors.ALMOST_WHITE}Applying {self._fct_name2process_name[self._processing_function]}... (iter={self._iter_num}, step={self._step}){Bcolors.ENDC}')
 
                     exec_fct = getattr(self, self._processing_function, None)
                     if exec_fct is None:
                         raise RuntimeError(f'Function {self._processing_function} does not exist in ImageProcessor class')
 
                     console_log(
-                        msg=f'Applying {self._fct_name2process_name[self._processing_function]}... (iter={self._iter}, step={self._step})',
+                        msg=f'Applying {self._fct_name2process_name[self._processing_function]}... (iter={self._iter_num}, step={self._step})',
                         indent_level=0,
                         color=Bcolors.SECTION,
-                        verbose=self.verbose>=1
+                        verbose=self.verbose >= 1
                     )
                     exec_fct()
                     print('') if self.verbose > 1 else None  # Adds \n between process
                     if self.verbose == 0:
                         pbar.update(1)
-                        cnt+=1
+                        cnt += 1
+
+        # Apply relevant inverse color treatment
+        buffer_other = self.dataset.buffer_other if self.options.color_treatment else None
+        if self.from_validation_test:
+            self._final_buffers = self.dataset.buffer.copy_with_image_list()
+
+        self.dataset.buffer = ColorTreatment.backward_color_treatment(
+            rec_standard=self._rec_standard,
+            input_images=self.dataset.buffer,
+            input_other=buffer_other,
+            output_images=self.dataset.buffer,
+            color_treatment=self.options.color_treatment,
+            as_gray=self.options.as_gray,
+            conversion_type='xyY_to_sRGB')
 
         # Applies dithering or simply convert into uint8 if no dithering
         self.dataset.images = self.dithering(
             input_collection=self.dataset.buffer,
             output_collection=self.dataset.images,
             dithering=self.options.dithering)
+        self._complete = True
 
     def dithering(self, input_collection: ImageListType, output_collection: ImageListType, dithering: Literal[0, 1, 2]):
         """
@@ -393,7 +510,7 @@ class ImageProcessor:
             M, SD, min, max = compute_stats(im=im2, binary_mask=self.bool_masks[idx])
 
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
-            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
+            console_log(msg=f"\nImage {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
             console_log(msg=f"Original: M = {M:.4f}, SD = {SD:.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
 
             # Standardization
@@ -448,71 +565,101 @@ class ImageProcessor:
         n_bins = 2 ** bit_size
 
         # Get target histogram
-        target_hist = self.options.target_hist
-        if isinstance(target_hist, str):
-            target_hist = np.ones((n_bins, buffer_collection.n_channels))/n_bins
-        if target_hist is None:
-            target_hist = avg_hist(buffer_collection, binary_masks=self.bool_masks, n_bins=n_bins)  # Placeholder for avgHist
-        else:
-            if target_hist.shape[0] != n_bins:
-                raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
-            if target_hist.max()>1:
-                target_hist = target_hist.astype(np.float64)
-                target_hist /= (target_hist.sum(axis=0, keepdims=True) + 1e-12)
+        if self._target_hist is None:
+            target_hist = self.options.target_hist
+            if isinstance(target_hist, str):
+                target_hist = np.ones((n_bins, buffer_collection.n_channels))/n_bins
+            if target_hist is None:
+                target_hist = avg_hist(buffer_collection, binary_masks=self.bool_masks, n_bins=n_bins)
+            else:
+                if target_hist.shape[0] != n_bins:
+                    raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
+                if target_hist.max() > 1:
+                    target_hist = target_hist.astype(np.float64)
+                    target_hist /= (target_hist.sum(axis=0, keepdims=True) + 1e-12)
+            if target_hist.ndim > 1 and target_hist.shape[-1] != buffer_collection.n_channels:
+                raise ValueError(f"target_hist must have {buffer_collection.n_channels} channels, ")
+            self._target_hist = target_hist
 
         # If hist_optim disable, will run only one loop (n_iter = 1)
         n_iter = self.options.hist_iterations + 1 if hist_optim else 1  # See important note below to explain the +1. Also, note that the number of iterations for SSIM optimization (default = 10)
-        step_sizes = self.options.step_size * np.ones(buffer_collection.n_channels)  # Step size (default = 34)
-        original_step_sizes = step_sizes
+        step_sizes = np.zeros(buffer_collection.n_channels)  # Step size (default = 34)
 
         # Match the histogram
         self._processed_channel = None
         for idx, image in enumerate(buffer_collection):
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
-            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
+            console_log(msg=f"\nImage {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
 
+            step_sizes_weight = .5
+            controller = StepSizeController(gain_up=1.3, gain_down=0.6) if hist_optim else None
+            ssim_prev = 0.0
+            all_ssim = []
+            ssim = None
+            ssim_increment = []
             image = im3D(image)
             X = image.copy()
-            all_ssim = []
-            ssim_increment = []
-            for self._sub_iter in range(n_iter):  # n_iter = 1 when hist_optim == False
+            self._sub_iter = 0
+            while self._sub_iter < n_iter:  # n_iter = 1 when hist_optim == False
                 if n_iter > 1 and self._sub_iter < n_iter - 1:
-                    console_log(msg=f"SSIM optimization (iter={self._sub_iter + 1})", indent_level=1, color=Bcolors.BOLD, verbose=self.verbose >= 2)
+                    console_log(msg=f"\nSSIM optimization (iter={self._sub_iter + 1})", indent_level=1, color=Bcolors.BOLD, verbose=self.verbose >= 2)
+
+                # Compute histogram specification
                 has_isoluminant_pixels = has_duplicates(X, binary_mask=self.bool_masks[idx])
-                if tie_strategy != 'none' and has_isoluminant_pixels:
-                    Y, OA = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=target_hist, tie_strategy=tie_strategy, n_bins=n_bins)
+                if not has_isoluminant_pixels or (tie_strategy == 'none' and not (self._is_last_operation and self._sub_iter == (n_iter - 1))):
+                    if not has_isoluminant_pixels and tie_strategy != 'none':
+                        console_log(msg=f"No ties detected: using direct histogram mapping", indent_level=1, color=Bcolors.OKCYAN, verbose=self.verbose == 3)
+                    Y, _ = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=self._target_hist, tie_strategy='none', n_bins=n_bins)
+                else:
+                    Y, OA = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=self._target_hist, tie_strategy=tie_strategy, n_bins=n_bins)
                     if hist_spec_names != 'noise' and (n_iter == 1 or (n_iter > 1 and self._sub_iter < n_iter - 1)):
                         console_log(msg=f"Ordering accuracy per channel = {OA}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose == 3)
-                else:  # If all values are unique, you don't need any tie-breaking solutions
-                    if self._is_last_operation and self._sub_iter == (n_iter - 1) and has_isoluminant_pixels:
-                        Y, OA = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=target_hist, tie_strategy='hybrid', n_bins=n_bins)
-                    else:
-                        if not has_isoluminant_pixels:
-                            console_log(msg=f"No ties detected: using direct histogram mapping", indent_level=1, color=Bcolors.OKCYAN, verbose=self.verbose == 3)
-                        Y, _ = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=target_hist, tie_strategy='none', n_bins=n_bins)
 
                 # Compute Structural Similarity and gradient map (sens), along with max and min
-                sens, ssim = ssim_sens(image, Y, data_range=n_bins-1)
-                beta_bounds = beta_bounds_from_ssim(sens, ssim, self.bool_masks[idx])
-                for ch in range(len(beta_bounds)):
-                    min_beta, max_beta = beta_bounds[ch][0], beta_bounds[ch][1]
-                    if min_beta < original_step_sizes[ch] > max_beta:
-                        step_sizes[ch] = np.clip(original_step_sizes[ch], min_beta, max_beta)
-                        console_log(msg=f"Original step size {original_step_sizes[ch]} is out of the optimal range for channel {ch}: [{min_beta}, {max_beta}].\nUsing step_size={step_sizes[ch]} instead.", indent_level=1, color=Bcolors.WARNING, verbose=self.verbose==3)
+                if self._sub_iter < n_iter - 1:
+                    sens, ssim = ssim_sens(image, Y, data_range=n_bins-1, use_sample_covariance=False, binary_mask=self.bool_masks[idx])
 
-                # sens, ssim = ssim_sens(image/n_bins, Y/n_bins, n_bins=2)
+                if self._sub_iter == n_iter - 1:
+                    break
+
+                # Compute theoretical bounds for step size on first iteration only
+                if self._sub_iter == 0:
+                    beta_bounds = beta_bounds_from_ssim(gradients=sens, ssim=ssim, binary_mask=self.bool_masks[idx])
+                    for ch in range(len(beta_bounds)):
+                        min_beta, max_beta = beta_bounds[ch][0], beta_bounds[ch][1]
+                        step_sizes[ch] = (max_beta - 0)
+
                 if n_iter > 1 and self._sub_iter < n_iter - 1:
                     all_ssim.append(ssim)
                     ssim_increment.append(np.mean(ssim))
 
                 if hist_optim and (n_iter == 1 or (n_iter > 1 and self._sub_iter < n_iter - 1)):
-                    console_log(msg=f"Mean SSIM = {np.mean(ssim):.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
+                    console_log(msg=f"Mean SSIM = {np.mean(ssim):.5f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
+
+                # Update step size weight:
+                #   - if SSIM decreases: rollback one iteration with lower weight
+                #   - if SSIM stalls: rollback one iteration with higher weight
+                #   - if SSIM increases: continue
+                restart, done = False, False
                 if hist_optim and self._sub_iter < n_iter - 1:
-                    ssim_update = np.zeros(sens.shape)
-                    for ch in range(sens.shape[2]):
-                        ssim_update[:, :, ch] = sens[:, :, ch] * step_sizes[ch] * self._sum_bool_masks[idx][ch]
-                        X[:, :, ch] = Y[:, :, ch] + ssim_update[:, :, ch]  # X float64, Y uint8/uint16
-                        # X = np.rint(np.clip(X, 0, 2 ** bit_size - 1)).astype(f'uint{bit_size}')
+                    ssim_mean = float(np.mean(ssim))
+                    previous_weight = step_sizes_weight
+                    step_sizes_weight, ssim_mean, Y, sens, restart, done = controller.update(step_sizes_weight, ssim_mean, Y, sens)
+                    if done:
+                        console_log(f'Exiting optimization: SSIM stalled for more than {controller.stall_iter - 1} iterations (see StepSizeController.max_stall_iter)', indent_level=1, color=Bcolors.WARNING, verbose=self.verbose>=3)
+                        break
+                    if 'rollback' in controller.restart_reason:
+                        console_log(f"{controller.restart_reason}: step_size_weight= {previous_weight: 1.5f} -> {step_sizes_weight: 1.5f}", indent_level=1, color=Bcolors.WARNING, verbose=self.verbose>=3)
+
+                # Update image with gradient maps, step size and weight
+                if hist_optim and self._sub_iter < n_iter - 1:
+                    mask_sum = np.array(self._sum_bool_masks[idx].copy())
+                    X = Y + sens * step_sizes[np.newaxis, np.newaxis, :] * mask_sum[np.newaxis, np.newaxis, :] * step_sizes_weight
+                    if restart:
+                        # restart from last good point
+                        continue
+
+                self._sub_iter += 1
 
             # Test monotonic increase of ssim between first and last iteration
             if self.options.hist_optim and len(all_ssim) >=2:
@@ -529,8 +676,9 @@ class ImageProcessor:
 
             # Compute statistics
             final_hist = imhist(image=new_image, mask=self.bool_masks[idx], n_bins=n_bins, normalized=True)
-            rmse = compute_rmse(final_hist.flatten(), target_hist.flatten())
-            console_log(msg=f"SSIM index between transformed and original image: {np.mean(ssim):.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
+            rmse = compute_rmse(final_hist.flatten(), self._target_hist.flatten())
+            if ssim is not None:
+                console_log(msg=f"SSIM index between transformed and original image: {np.mean(ssim):.5f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
             self._validate(observed=[rmse], expected=[0], measures_str=['RMS error'])
 
         buffer_collection.drange = (0, 255)
@@ -565,7 +713,6 @@ class ImageProcessor:
         # input images should be matched. Should be a 2D or 3D array
         # compatible with the image dimensions, typically of shape
         # (H, W, C).
-        target_spectrum = self.options.target_spectrum
 
         # Get proper input and output image collections
         buffer_collection = self.dataset.buffer
@@ -577,22 +724,24 @@ class ImageProcessor:
         self.dataset.magnitudes, self.dataset.phases = get_images_spectra(
             images=buffer_collection,
             magnitudes=self.dataset.magnitudes,
-            phases=self.dataset.phases, rescale=self.options.rescaling)
+            phases=self.dataset.phases, rescale=False)
 
         # If target_spectrum is None, target magnitude is the average of all spectra
-        if target_spectrum is None:
-            target_spectrum = np.zeros(self.dataset.magnitudes[0].shape)
-            for idx, mag in enumerate(self.dataset.magnitudes):
-                target_spectrum += mag
-            target_spectrum /= len(self.dataset.magnitudes)
-        else:
-            if target_spectrum.shape[:2] != self.dataset.images.reference_size:
-                raise TypeError('The target spectrum must have the same size as the images.')
+        if self._target_spectrum is None:
+            target_spectrum = self.options.target_spectrum
+            if target_spectrum is None or isinstance(target_spectrum, str):
+                target_spectrum = np.zeros(self.dataset.magnitudes[0].shape)
+                for idx, mag in enumerate(self.dataset.magnitudes):
+                    target_spectrum += mag
+                target_spectrum /= len(self.dataset.magnitudes)
+            else:
+                if target_spectrum.shape[:2] != self.dataset.buffer.reference_size:
+                    raise TypeError('The target spectrum must have the same size as the images.')
+            self._target_spectrum = im3D(target_spectrum)
 
-        target_spectrum = im3D(target_spectrum)
-        x_size, y_size, n_channels = target_spectrum.shape[:3]
+        x_size, y_size, n_channels = self._target_spectrum.shape[:3]
 
-        #  Returns the frequencies of the image, bins range from -0.5f to 0.5f (0.5f is the Nyquist frequency) 1/y_size is the distance between each pixel in the image
+        # Returns the frequencies of the image, bins range from -0.5f to 0.5f (0.5f is the Nyquist frequency) 1/y_size is the distance between each pixel in the image
         f_cols = np.fft.fftshift(np.fft.fftfreq(y_size, d=1 / y_size))  # like f1 in MATLAB
         f_rows = np.fft.fftshift(np.fft.fftfreq(x_size, d=1 / x_size))  # like f2 in MATLAB
         XX, YY = np.meshgrid(f_cols, f_rows)
@@ -613,16 +762,16 @@ class ImageProcessor:
         # Match spatial frequency on rotational average of the magnitude spectrum
         for idx, image in enumerate(buffer_collection):
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
-            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
+            console_log(msg=f"\nImage {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
             matched_image = []
             magnitude = im3D(self.dataset.magnitudes[idx])
             phase = im3D(self.dataset.phases[idx])
             for self._processed_channel in range(n_channels):
-                console_log(msg=f'Channel {self._processed_channel}', indent_level=1, verbose=self.verbose>=2, color=Bcolors.BOLD)
+                console_log(msg=f'\nChannel {self._processed_channel}', indent_level=1, verbose=self.verbose>=2, color=Bcolors.BOLD)
                 fft_image = magnitude[:, :, self._processed_channel]
 
                 # Rotational averages (target vs source) as MEANS over annuli
-                target_ra = rot_avg(target_spectrum[:, :, self._processed_channel], radius=r1)
+                target_ra = rot_avg(self._target_spectrum[:, :, self._processed_channel], radius=r1)
                 source_ra = rot_avg(fft_image, radius=r1)
 
                 # Per-radius scale coefficients; avoid divide-by-zero on empty/zero annuli
@@ -649,14 +798,13 @@ class ImageProcessor:
                 t = target_ra[:R]
                 o = obtained_ra[:R]
                 rmse = compute_rmse(t, o)
-                self._validate(observed=[rmse], expected=[0],
-                               measures_str=['RMS error'])
+                self._validate(observed=[rmse], expected=[0], measures_str=['RMS error'])
 
             # Soft-clip output values: As this transformation typically produces out-of-range values
             output_image = np.stack(matched_image, axis=-1).squeeze()
             if self._is_last_operation:
                 mn, mx = output_image.min(), output_image.max()
-                if 0 < mn > 1:
+                if mn < 0 or mx > 1:
                     console_log(
                         msg=f'Out of range values: Actual range [{mn}, {mx}] outside of the admitted range [0, 1].\nWill be rescaled and clipped so that less than 1% falls outside of [0, 1].',
                         indent_level=1, color=Bcolors.WARNING, verbose=self.verbose==3)
@@ -667,7 +815,7 @@ class ImageProcessor:
 
         # buffer_collection dtype is np.float64 and drange is close but out of [0, 1] before rescaling of any sort
         # TODO: NEEDS TO BE CHECKED
-        if self.options.rescaling and self._is_last_operation:
+        if self.options.rescaling not in [0, None] and self._is_last_operation:
             buffer_collection = rescale_images255(buffer_collection, rescaling_option=self.options.rescaling)
             # If legacy mode is turned on, rescale_images255 will output uint8
             if not np.issubdtype(buffer_collection.dtype, np.floating):
@@ -695,7 +843,6 @@ class ImageProcessor:
         # input images should be matched. Should be a 2D or 3D array
         # compatible with the image dimensions, typically of shape
         # (H, W, C).
-        target_spectrum = self.options.target_spectrum
 
         # Get proper input and output image collections
         buffer_collection = self.dataset.buffer
@@ -710,23 +857,26 @@ class ImageProcessor:
             phases=self.dataset.phases)
 
         # If target_spectrum is None, target magnitude is the average of all spectra
-        if target_spectrum is None:
-            target_spectrum = np.zeros(self.dataset.magnitudes[0].shape)
-            for idx, mag in enumerate(self.dataset.magnitudes):
-                target_spectrum += mag
-            target_spectrum /= len(self.dataset.magnitudes)
+        if self._target_spectrum is None:
+            target_spectrum = self.options.target_spectrum
+            if target_spectrum is None:
+                target_spectrum = np.zeros(self.dataset.magnitudes[0].shape)
+                for idx, mag in enumerate(self.dataset.magnitudes):
+                    target_spectrum += mag
+                target_spectrum /= len(self.dataset.magnitudes)
 
-        # Ensure the target spectrum is 3D (H, W, C)
-        target_spectrum = im3D(target_spectrum)
-        x_size, y_size, n_channels = target_spectrum.shape[:3]
-        image = im3D(self.dataset.images[0])
-        if target_spectrum.shape != image.shape:
+            # Ensure the target spectrum is 3D (H, W, C)
+            self._target_spectrum = im3D(target_spectrum)
+
+        x_size, y_size, n_channels = self._target_spectrum.shape[:3]
+        image = im3D(buffer_collection[0])
+        if self._target_spectrum.shape != image.shape:
             raise TypeError('The target spectrum must have the same size as the images.')
 
         # Iterate over each image (each entry in the phase collection)
         for idx, image in enumerate(buffer_collection):
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
-            console_log(msg=f"Image {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
+            console_log(msg=f"\nImage {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
 
             matched_image = []
 
@@ -735,10 +885,10 @@ class ImageProcessor:
 
             # Process each channel separately
             for self._processed_channel in range(n_channels):
-                console_log(msg=f"Channel {self._processed_channel}", indent_level=1, color=Bcolors.BOLD, verbose=self.verbose>=2)
+                console_log(msg=f"\nChannel {self._processed_channel}", indent_level=1, color=Bcolors.BOLD, verbose=self.verbose>=2)
 
                 # Convert polar (magnitude + phase) back to Cartesian
-                XX, YY = pol2cart(target_spectrum[:, :, self._processed_channel], phase[:, :, self._processed_channel])
+                XX, YY = pol2cart(self._target_spectrum[:, :, self._processed_channel], phase[:, :, self._processed_channel])
 
                 # Combine into a complex Fourier spectrum
                 new = XX + YY * 1j  # 1j = sqrt(-1)
@@ -752,7 +902,7 @@ class ImageProcessor:
                 obtained_mag = np.abs(np.fft.fftshift(np.fft.fft2(output)))
 
                 # Flatten for metrics
-                t = target_spectrum[:, :, self._processed_channel].flatten().astype(np.float64)
+                t = self._target_spectrum[:, :, self._processed_channel].flatten().astype(np.float64)
                 o = obtained_mag.ravel().astype(np.float64, copy=False)
 
                 rmse = compute_rmse(t, o)
@@ -763,7 +913,7 @@ class ImageProcessor:
             output_image = np.stack(matched_image, axis=-1).squeeze()
             if self._is_last_operation:
                 mn, mx = output_image.min(), output_image.max()
-                if 0 < mn > 1:
+                if mn < 0 or mx > 1:
                     console_log(
                         msg=f'Out of range values: Actual range [{mn}, {mx}] outside of the admitted range [0, 1].\nWill be rescaled and clipped so that less than 1% falls outside of [0, 1].',
                         indent_level=1, color=Bcolors.WARNING, verbose=self.verbose==3)
@@ -775,7 +925,7 @@ class ImageProcessor:
         buffer_collection.drange = (0, 255)
         # buffer_collection dtype is np.float64 and drange is close but out of [0, 1] before rescaling of any sort
         # TODO: NEEDS TO BE CHECKED
-        if self.options.rescaling and self._is_last_operation:
+        if self.options.rescaling not in [0, None] and self._is_last_operation:
             buffer_collection = rescale_images255(buffer_collection, rescaling_option=self.options.rescaling)
             # If legacy mode is turned on, rescale_images255 will output uint8
             if not np.issubdtype(buffer_collection.dtype, np.floating):

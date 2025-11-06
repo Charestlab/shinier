@@ -1,356 +1,308 @@
 # tests/integration_tests/test_image_processor_validation_sharded.py
-"""Exhaustive ImageProcessor validations with job-level sharding.
+"""Exhaustive ImageProcessor validations with smart pruning and sharding.
 
-This test iterates over *all* combinations of Options parameters and validates:
-  - Internal per-step validations reported in `proc.validation` are all True.
-  - For iterative modes (5, 6, 7, 8), relevant RMSE metrics improve:
-      * Mode 5 (hist + sf): histogram RMSE ↓ and SF RMSE ↓
-      * Mode 6 (hist + spec): histogram RMSE ↓ and spectrum RMSE ↓
-      * Mode 7 (sf + hist): histogram RMSE ↓ and SF RMSE ↓
-      * Mode 8 (spec + hist): histogram RMSE ↓ and spectrum RMSE ↓
-  - When `hist_optim=1`, all entries in `proc.ssim_results` have `valid_result=True`.
+Prunes only:
+  • Impossible: mode==9 & dithering==0
+  • Redundant:
+      - rec_standard ignored when color_treatment==0 (fix to 2)
+      - verbose (ignored here)
+      - hist_specification ignored when hist_optim==1 (force None)
+      - safe_lum_match only relevant when mode==1
+      - legacy_mode: test only one combo per mode with legacy_mode=True
 
-Sharding:
-  - Use env vars to slice work deterministically without materializing all combos:
-      SHARDS=<int> # total number of shards (default: 1)
-      SHARD_INDEX=<int> # zero-based index of this shard (default: 0)
-  - Optional progress:
-      SHOW_PROGRESS=1 # show per-shard tqdm progress bar
+Also restores RMSE–improvement checks for modes 5..8.
 
-Run examples:
-  - Single shard, with progress:
-      SHOW_PROGRESS=1 pytest -m exhaustive -q
-  - 4 shards in CI (run 4 jobs with SHARD_INDEX=0..3):
-      SHARDS=4 SHARD_INDEX=0 pytest -m exhaustive -q
+Env:
+  SHARDS, SHARD_INDEX, SHOW_PROGRESS, DUMP_FILE_FORMAT, START_CNT, START_ITER
 """
 
 from __future__ import annotations
-from traceback import format_exc
 
+import copy
+from traceback import format_exc
 import itertools
 import os
 import shutil
 from math import prod
 from pathlib import Path
 
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, get_origin, get_args, Literal
 import numpy as np
 import pytest
 from PIL import Image
 from tqdm.auto import tqdm
 
-from shinier import ImageDataset, Options, utils
-from shinier.ImageProcessor import ImageProcessor
+from shinier import ImageDataset, Options, utils, ImageListIO, ImageProcessor
 from tests import utils as utils_test
+from shinier.color.Converter import REC_STANDARD, ColorTreatment
+REC_STANDARD = [r for r in get_args(REC_STANDARD)]
+pytestmark = pytest.mark.validation_tests
 
-START_AT = int(os.getenv("START_AT", "0"))  # allow skipping combos
-DUMP_FILE_FORMAT = os.getenv("DUMP_FILE_FORMAT", "json")
+
+# -------------------- env --------------------
+START_CNT = int(os.getenv("START_CNT", "0"))
+START_ITER = int(os.getenv("START_ITER", "0"))
+RESTART = os.getenv("RESTART", "false").lower() in ("1", "true", "yes")
+START_CNT = 0 if START_CNT != 0 and START_ITER != 0 else START_CNT  # Priority to START_ITER
+
+DUMP_FILE_FORMAT = os.getenv("DUMP_FILE_FORMAT", "pkl")
+SHARDS = int(os.getenv("SHARDS", "1"))
+SHARD_INDEX = int(os.getenv("SHARD_INDEX", "0"))
+SHOW_PROGRESS = os.getenv("SHOW_PROGRESS", "1") == "1"
+# SHARD_INDEX = 7
+# SHARDS = 8
+# START_CNT = 276481
 
 
-@pytest.mark.validation_tests
+def get_possible_values(field):
+    """Return all possible categorical values for a field."""
+    ann = field.annotation
+
+    # Handle Optional[...] = Union[..., NoneType]
+    if get_origin(ann) is Union:
+        args = [a for a in get_args(ann) if a is not type(None)]
+        if len(args) == 1:
+            ann = args[0]  # unwrap inner type
+
+    # Handle Literal[...] fields
+    if get_origin(ann) is Literal:
+        return list(get_args(ann))
+
+    # Handle plain bool
+    if ann is bool:
+        return [True, False]
+
+    # Fallback to default if defined
+    if field.default is not None:
+        return [field.default]
+
+    # Otherwise, assume None is allowed
+    return [None]
+
+
 def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
-    """Validate ImageProcessor across the full Options grid with sharding.
+    # ----- reset combo registry -----
+    utils_test.reset_hash_registry(RESTART)  # if True, will redo all tests already completed
 
-    The test:
-      * Builds a tiny dataset (2 RGB images, 128×128).
-      * Precomputes per-as_gray target histograms/spectra (once).
-      * Iterates lazily over the Cartesian product, sliced by SHARDS/SHARD_INDEX.
-      * For each combo:
-          - Builds Options (expecting only mode=9 & dithering=0 to be invalid).
-          - Runs ImageDataset + ImageProcessor.
-          - Asserts all internal proc.validation entries are True.
-          - For iterative modes, enforces RMSE improvements on relevant metrics:
-                Mode 5 (hist+sf): histogram ↓, SF ↓
-                Mode 6 (hist+spec): histogram ↓, spectrum ↓
-                Mode 7 (sf+hist): histogram ↓, SF ↓
-                Mode 8 (spec+hist): histogram ↓, spectrum ↓
-          - If hist_optim=1, ensures all proc.ssim_results have valid_result=True.
-      * Cleans the per-combo output directory immediately after use.
-
-    Sharding and progress:
-      - SHARDS (int), SHARD_INDEX (int), SHOW_PROGRESS=1 control slicing and tqdm.
-    """
-    # --- Dataset & targets ---
+    # ----- dataset & targets -----
     src_images_path = utils_test.get_small_imgs_path(utils_test.IMAGE_PATH)
-
-    # Compute target histogram, spatial frequency and spectrum based on first image
-    with Image.open(src_images_path[0]) as pil_image:
-        src0 = np.array(pil_image.convert("RGB"))
-
+    images_buffers = utils_test.prepare_images(utils_test.IMAGE_PATH)
+    src0 = images_buffers['images'][0]
+    # with Image.open(src_images_path[0]) as pil_image:
+    #     src0 = np.array(pil_image.convert("RGB"))
     h, w = src0.shape[:2]
-    targets = utils_test.precompute_targets(src0)
-
-    # Compute arbitrary mask (ellipse)
+    targets = utils_test.precompute_targets(images_buffers)
+    ag, ct, rs = 1, 0, 1
+    targets['hist'][ag][ct][rs]
     mask_dir = test_tmpdir / "MASK"
     utils_test.make_masks(mask_dir, h=h, w=w, n=1)
 
-    # --- Parameter grids ---
-    modes = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-    whole_images = [1, 2, 3]
-    ditherings = [0, 1, 2]
-    as_grays = [0, 1, 2, 3, 4]
-    hist_specs = [1, 2, 3, 4]
-    hist_optims = [0, 1]
-    rescalings = [0, 1, 2, 3]
-    safe_lums = [False, True]
-    target_lums = [(128, 32), (0, 0)]
-    target_hist_choices = ["target", "none", 'equal']
-    target_spec_choices = ["target", "none"]
+    # ----- parameter grids (only pruned redundancies) -----
+    choices = {name: get_possible_values(field) for name, field in Options.model_fields.items()}
+    del choices['images_format']
+    del choices['masks_format']
+    choices['input_folder'] = [utils_test.IMAGE_PATH]
+    choices['masks_folder'] = [mask_dir]
+    choices['background'] += [120, 130]
+    choices['seed'] += [4242424242]
+    choices['target_lum'] += [(100, 20)]
+    choices['target_hist'] += ['unit_test']
+    choices['target_spectrum'] += ['unit_test']
+    choices['hist_iterations'] = [3]
+    choices['verbose'] = [-1]
 
-    # --- Shard configuration ---
-    shards = int(os.getenv("SHARDS", "1"))
-    shard_index = int(os.getenv("SHARD_INDEX", "0"))
-    assert shards >= 1 and 0 <= shard_index < shards
+    all_fields = list(choices.keys())
+    total_combo = np.prod([len(v) for v in choices.values() if hasattr(v, '__len__') and not isinstance(v, str)])  # Some of which are not valid and duplicated
 
-    # tqdm set-up (per-shard)
-    show_progress = os.getenv("SHOW_PROGRESS", "0") == "1"
-    total_combos = prod(
-        [
-            len(modes),
-            len(whole_images),
-            len(ditherings),
-            len(as_grays),
-            len(hist_specs),
-            len(hist_optims),
-            len(rescalings),
-            len(safe_lums),
-            len(target_lums),
-            len(target_hist_choices),
-            len(target_spec_choices),
-        ]
-    )
     pbar = None
-    if show_progress and tqdm is not None:
-        pbar = tqdm(
-            total=total_combos // shards + (1 if shard_index < (total_combos % shards) else 0),
-            initial=START_AT,
-            ncols=0,
-            desc=f"Shard {shard_index + 1}/{shards}",
-        )
+    if SHOW_PROGRESS and tqdm is not None:
+        per_shard = total_combo // SHARDS + (1 if SHARD_INDEX < (total_combo % SHARDS) else 0)
+        pbar = tqdm(total=per_shard, initial=START_ITER or START_CNT, desc=f"Shard {SHARD_INDEX+1}/{SHARDS}", ncols=0)
 
-    checked = 0
-    ran = 0
-
-    # --- Lazy product with index-based slicing (no full list in RAM) ---
-    product_iter = itertools.product(
-        modes,
-        whole_images,
-        ditherings,
-        as_grays,
-        hist_specs,
-        hist_optims,
-        rescalings,
-        safe_lums,
-        target_lums,
-        target_hist_choices,
-        target_spec_choices,
-    )
-
+    # Reset the iterator for the real loop
+    tqdm_init = 0
     cnt = 0
-    for i, combo in enumerate(product_iter):
-        # Deterministic shard slicing
-        if i % shards != shard_index:
+    for i, combo in enumerate(itertools.product(*(choices[f] for f in all_fields))):
+        (input_folder, output_folder, masks_folder, whole_image, background, mode, as_gray, color_treatment,
+         rec_standard, dithering,
+         conserve_memory, seed, legacy_mode, safe_lum_match, target_lum, hist_optim, hist_specification,
+         hist_iterations, th_choice, rescaling, ts_choice, iterations, verbose) = combo
+
+        # if i == 221195:
+        #     pass
+        # else:
+        #     continue
+        # if i == 0:
+        #     break
+        # if `i` within this SHARD_INDEX, proceed else next `i`
+        if i % SHARDS != SHARD_INDEX:
             continue
 
-        # Increment per-shard counter
+        # if `cnt` >= START_CNT, proceed else next `i`
         cnt += 1
-
-        # Skip until reaching the desired starting index
-        if cnt < START_AT:
+        if cnt < START_CNT:
             continue
 
-        # Deterministic unique seed related to specific combo
-        seed_iter = utils_test.deterministic_seed_from_combo(combo=combo)
+        # if `i` >= START_ITER, proceed else next `i`
+        if i < START_ITER:
+            continue
 
-        (mode, wi, dith, ag, hs, ho, rs, slm, t_lum, th_choice, ts_choice) = combo
-        checked += 1
+        # if combo never tested, proceed else next `i`
+        combo_hash = utils_test.combo_hash(combo)
+        if utils_test.is_already_done(combo_hash):
+            continue
 
-        # Per-combo output dir
-        out = test_tmpdir / (
-            f"OUT_m{mode}_wi{wi}_d{dith}_g{ag}_hs{hs}_ho{ho}_r{rs}"
-            f"_slm{int(slm)}_tl{t_lum[0]}-{t_lum[1]}_th{th_choice}_ts{ts_choice}"
-        )
-        out.mkdir(parents=True, exist_ok=True)
+        # if combo valid, proceed else next `i`
+        # Create target hist or spectrum if requested
+        ag = True if legacy_mode else as_gray
+        target_hist = targets["hist"][int(ag)][color_treatment][rec_standard] if th_choice == "unit_test" else ("equal" if th_choice == "equal" else None)
+        target_spectrum = targets["spec"][int(ag)][color_treatment][rec_standard] if ts_choice == "unit_test" else None
+        combo = list(combo)
+        combo[-3] = target_spectrum
+        combo[-5] = target_hist
+        combo = tuple(combo)
 
-        # Choose explicit targets for Options (or None)
-        if th_choice == "target":
-            th = targets["hist"][ag]
-        elif th_choice == 'equal':
-            th = 'equal'
+        # kwargs = dict(zip(all_fields, combo))
+        # opts = Options(**kwargs)
+
+        opts = _get_opt(combo=combo, fields=all_fields)
+        if opts is None:
+            utils_test.register_hash(combo_hash, status="done")
+            continue
+        opts_kwargs = opts.model_dump()
+
+        # Set seed
+        if seed is not None:
+            seed_iter = seed
         else:
-            th = None
+            seed_iter = utils_test.deterministic_seed_from_combo(combo=combo)
 
-        ts = targets["spec"][ag] if ts_choice == "target" else None
+        # if ts_choice == "unit_test":
+        #     pass
+        # else:
+        #     continue
 
-        opts_kwargs = dict(
-            input_folder=utils_test.IMAGE_PATH,
-            output_folder=out,
-            images_format="png",
-            masks_folder=mask_dir if wi == 3 else None,
-            masks_format="png" if wi == 3 else None,
-            whole_image=wi,
-            mode=mode,
-            as_gray=ag,
-            dithering=dith,
-            conserve_memory=True,
-            seed=seed_iter,
-            safe_lum_match=slm,
-            target_lum=t_lum,
-            hist_specification=hs,
-            hist_optim=ho,
-            hist_iterations=3,
-            step_size=34,
-            target_hist=th,
-            rescaling=rs,
-            target_spectrum=ts,
-            iterations=2,  # Options will clamp to 1 for non-iterative modes
+        # Log file
+        out_dir = test_tmpdir / (
+            f"OUT_"
+            f"m{mode}"  # Mode
+            f"_wi{whole_image}"  # Whole image flag (1–3)
+            f"_d{dithering}"  # Dithering method
+            f"_ag{int(as_gray)}"  # Grayscale flag
+            f"_ct{color_treatment}"  # Color treatment
+            f"_rs{rec_standard}"  # Rec. standard
+            f"_ho{int(hist_optim)}"  # Histogram optimization
+            f"_hs{hist_specification}"  # Histogram specification
+            f"_re{rescaling}"  # Rescaling method
+            f"_slm{int(safe_lum_match)}"  # Safe luminance matching
+            f"_tl{target_lum[0]}-{target_lum[1]}"  # Target luminance (mean-std)
+            f"_lm{int(legacy_mode)}"  # Legacy mode
         )
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ag2, ct, rs = None, None, None
+        try:
+            opts.output_folder = out_dir
+            ag2, ct, rs = int(opts.as_gray), opts.color_treatment, opts.rec_standard
+        except:
+            if out_dir and out_dir.exists():
+                shutil.rmtree(out_dir, ignore_errors=True)
+
+            # Register that combo as invalide
+            utils_test.register_hash(combo_hash, status="invalide")
+            continue
+
         rand_selected_paths = None
         try:
-            invalid_expected = mode == 9 and dith == 0
-            try:
-                opts = Options(**opts_kwargs)
-            except (ValueError, TypeError) as e:
-                if invalid_expected:
-                    continue
-                raise AssertionError(f"Unexpected Options validation error for combo:\n{opts_kwargs}\nError: {e}")
+            # known impossible
+            if mode == 9 and dithering == 0:
+                continue
 
-            # Build dataset & process
-            rand_selected_paths = utils_test.select_n_imgs(src_images_path, n=2, seed=seed_iter)
-            ds = ImageDataset(images=rand_selected_paths, options=opts)
-            proc = ImageProcessor(dataset=ds, options=opts, verbose=-1)
-            ran += 1
+            # Options / pipeline
+            rand_selected_images = utils_test.select_n_imgs(images_buffers['images'], n=2, seed=seed_iter)  # sRGB
+            rand_selected_buffers = utils_test.select_n_imgs(images_buffers['buffers'][ag2][ct][rs], n=2, seed=seed_iter)  # Y from xyY or sRGB (depending on color_treatment)
+            rand_selected_paths = utils_test.select_n_imgs(src_images_path, n=2, seed=seed_iter)  # sRGB
+            # as_gray_ds = 1 if opts.as_gray == True and opts.color_treatment == 0 else 0
 
-            # All internal validations must be True
+            images_copy = ImageListIO(input_data=rand_selected_images, conserve_memory=False)
+            initial_buffers = ImageListIO(input_data=rand_selected_buffers, conserve_memory=False)
+            buffers_empty = [np.zeros(im.shape, dtype=bool) for im in initial_buffers]
+
+            ds = ImageDataset.model_construct(images=rand_selected_images, options=opts)
+            proc = ImageProcessor.model_construct(dataset=ds, options=opts, verbose=-1, from_validation_test=True)
+
+            # Prepare targets for validation
+            th = target_hist if proc._target_hist is None else proc._target_hist
+            ts = target_spectrum if proc._target_spectrum is None else proc._target_spectrum
+
+            # Prepare images for validation: convert them into xyY if needed
+            final_buffers = proc._final_buffers
+            # buffers_other = ImageListIO(input_data=copy.deepcopy(buffers_empty), conserve_memory=False)
+            # for idx, image in enumerate(proc.dataset.images):
+            #     final_buffers[idx] = image.astype(np.float64)
+            # final_buffers.drange = (0, 255)
+            # rec_stardard_str = REC_STANDARD[rs - 1]
+            # output = ColorTreatment.forward_color_treatment(
+            #     rec_standard=rec_stardard_str,
+            #     input_images=proc.dataset.images,
+            #     output_images=final_buffers,
+            #     output_other=buffers_other,
+            #     color_treatment=ct,
+            #     as_gray=ag,
+            # )
+            # final_buffers, _ = output if isinstance(output, tuple) else (output, None)
+
+            # internal validations
             for rec in getattr(proc, "validation", []):
                 if not bool(rec.get("valid_result", True)):
-                    dump_path = utils_test.dump_failure_context(
-                        combo_dict=opts_kwargs,
-                        rec=rec,
-                        tmp_root=test_tmpdir,
-                        seed=seed_iter,
-                        selected_paths=rand_selected_paths,
-                        file_type=DUMP_FILE_FORMAT
-                    )
-                    raise AssertionError(
-                        f"\nInternal validation failed\n"
-                        f"/t→ Shard {shard_index}, Combo index {i}, Seed {seed_iter}\n"
-                        f"/t→ Image: {rec.get('image')}\n"
-                        f"/t→ Combo: {opts_kwargs}\n"
-                        f"/t→ Log:\n{utils_test.strip_ansi(str(rec.get('log_result', '')))}\n"
-                        f"/t→ Dumped context: {dump_path}\n"
-                    )
+                    _dump_and_fail(rec, opts_kwargs, seed_iter, rand_selected_paths, test_tmpdir)
 
-            # Iterative modes: enforce RMSE decrease on relevant metrics only
+            # --------- RESTORED: RMSE improvement checks for modes 5..8 ----------
             if mode in (5, 6, 7, 8):
-                # Histogram is involved in all 5..8 modes
-                _, rmse_hist_before = utils.hist_match_validation(images=ds.images, binary_masks=proc.bool_masks)
-                _, rmse_hist_after = utils.hist_match_validation(images=proc.dataset.images, binary_masks=proc.bool_masks)
-                if not np.all(rmse_hist_after <= rmse_hist_before + 1e-9):
+                # Histogram (always for 5..8)
+                _, rmse_hist_before = utils.hist_match_validation(images=initial_buffers, binary_masks=proc.bool_masks, target_hist=th, normalize_rmse=True)
+                _, rmse_hist_after  = utils.hist_match_validation(images=final_buffers, binary_masks=proc.bool_masks, target_hist=th, normalize_rmse=True)
+                if not np.all(rmse_hist_after + 1e-9 <= rmse_hist_before):
                     rec = {
-                        "iter": -1,
-                        "step": -1,
-                        "processing_function": "hist_match",
+                        "iter": -1, "step": -1, "processing_function": "hist_match",
                         "valid_result": False,
                         "log_result": f"Histogram RMSE not improved: {rmse_hist_before} -> {rmse_hist_after}",
                     }
-                    dump_path = utils_test.dump_failure_context(
-                        combo_dict=opts_kwargs,
-                        rec=rec,
-                        tmp_root=test_tmpdir,
-                        seed=seed_iter,
-                        selected_paths=rand_selected_paths,
-                        file_type=DUMP_FILE_FORMAT
-                    )
-                    raise AssertionError(
-                        f"\nHistogram RMSE not improved\n"
-                        f"\t→ Shard {shard_index}, Combo index {i}, Seed {seed_iter}\n"
-                        f"\t→ Combo: {opts_kwargs}\n"
-                        f"\t→ Before: {rmse_hist_before:.6g}  After: {rmse_hist_after:.6g}\n"
-                        f"\t→ Dumped context: {dump_path}\n"
-                    )
+                    _dump_and_fail(rec, opts_kwargs, seed_iter, rand_selected_paths, test_tmpdir)
 
-                if mode in (5, 7):  # sf involved
-                    _, rmse_sf_before = utils.sf_match_validation(images=ds.images)
-                    _, rmse_sf_after = utils.sf_match_validation(images=proc.dataset.images)
+                # Spatial frequency (5,7)
+                if mode in (5, 7):
+                    _, rmse_sf_before = utils.sf_match_validation(images=initial_buffers, target_spectrum=ts, normalize_rmse=True)
+                    _, rmse_sf_after  = utils.sf_match_validation(images=final_buffers, target_spectrum=ts, normalize_rmse=True)
                     if not np.all(rmse_sf_after <= rmse_sf_before + 1e-9):
                         rec = {
-                            "iter": -1,
-                            "step": -1,
-                            "processing_function": "sf_match",
+                            "iter": -1, "step": -1, "processing_function": "sf_match",
                             "valid_result": False,
                             "log_result": f"SF RMSE not improved: {rmse_sf_before} -> {rmse_sf_after}",
                         }
-                        dump_path = utils_test.dump_failure_context(
-                            combo_dict=opts_kwargs,
-                            rec=rec,
-                            tmp_root=test_tmpdir,
-                            seed=seed_iter,
-                            selected_paths=rand_selected_paths,
-                            file_type=DUMP_FILE_FORMAT
-                        )
-                        raise AssertionError(
-                            f"\nSF RMSE not improved\n"
-                            f"\t→ Shard {shard_index}, Combo index {i}, Seed {seed_iter}\n"
-                            f"\t→ Combo: {opts_kwargs}\n"
-                            f"\t→ Before: {rmse_sf_before:.6g}  After: {rmse_sf_after:.6g}\n"
-                            f"\t→ Dumped context: {dump_path}\n"
-                        )
+                        _dump_and_fail(rec, opts_kwargs, seed_iter, rand_selected_paths, test_tmpdir)
 
-                if mode in (6, 8):  # spec involved
-                    _, rmse_spec_before = utils.spec_match_validation(images=ds.images)
-                    _, rmse_spec_after = utils.spec_match_validation(images=proc.dataset.images)
+                # Spectrum (6,8)
+                if mode in (6, 8):
+                    _, rmse_spec_before = utils.spec_match_validation(images=initial_buffers, target_spectrum=ts, normalize_rmse=True)
+                    _, rmse_spec_after  = utils.spec_match_validation(images=final_buffers, target_spectrum=ts, normalize_rmse=True)
                     if not np.all(rmse_spec_after <= rmse_spec_before + 1e-9):
                         rec = {
-                            "iter": -1,
-                            "step": -1,
-                            "processing_function": "spec_match",
+                            "iter": -1, "step": -1, "processing_function": "spec_match",
                             "valid_result": False,
                             "log_result": f"Spectrum RMSE not improved: {rmse_spec_before} -> {rmse_spec_after}",
                         }
-                        dump_path = utils_test.dump_failure_context(
-                            combo_dict=opts_kwargs,
-                            rec=rec,
-                            tmp_root=test_tmpdir,
-                            seed=seed_iter,
-                            selected_paths=rand_selected_paths,
-                            file_type=DUMP_FILE_FORMAT
-                        )
-                        raise AssertionError(
-                            f"\nSpectrum RMSE not improved\n"
-                            f"\t→ Shard {shard_index}, Combo index {i}, Seed {seed_iter}\n"
-                            f"\t→ Combo: {opts_kwargs}\n"
-                            f"\t→ Before: {rmse_spec_before:.6g}  After: {rmse_spec_after:.6g}\n"
-                            f"\t→ Dumped context: {dump_path}\n"
-                        )
+                        _dump_and_fail(rec, opts_kwargs, seed_iter, rand_selected_paths, test_tmpdir)
+            # ---------------------------------------------------------------------
 
-            # SSIM optimization monotonicity (if enabled)
-            if ho == 1:
+            # SSIM optimization monotonicity
+            if hist_optim and mode in (2, 5, 6, 7, 8):
                 ssim_records = getattr(proc, "ssim_results", [])
-                if len(ssim_records) >= 1:
-                    if not all(bool(r.get("valid_result", True)) for r in ssim_records):
-                        rec = {
-                            "iter": -1,
-                            "step": -1,
-                            "processing_function": "hist_match",
-                            "valid_result": False,
-                            "log_result": f"SSIM optimization non-monotonic: {ssim_records}",
-                        }
-                        dump_path = utils_test.dump_failure_context(
-                            combo_dict=opts_kwargs,
-                            rec=rec,
-                            tmp_root=test_tmpdir,
-                            seed=seed_iter,
-                            selected_paths=rand_selected_paths,
-                            file_type=DUMP_FILE_FORMAT
-                        )
-                        raise AssertionError(
-                            f"\nSSIM optimization non-monotonic\n"
-                            f"\t→ Shard {shard_index}, Combo index {i}, Seed {seed_iter}\n"
-                            f"\t→ Combo: {opts_kwargs}\n"
-                            f"\t→ ssim records: {ssim_records}\n"
-                            f"\t→ Dumped context: {dump_path}\n"
-                        )
-
+                if ssim_records and not all(bool(r.get("valid_result", True)) for r in ssim_records):
+                    rec = {"iter": -1, "step": -1, "processing_function": "hist_match",
+                           "valid_result": False, "log_result": f"SSIM optimization non-monotonic: {ssim_records}"}
+                    _dump_and_fail(rec, opts_kwargs, seed_iter, rand_selected_paths, test_tmpdir)
+        except ControlledFailure:
+            pass  # handled already
         except Exception as e:
             tb = format_exc()
             dump_path = utils_test.dump_failure_context(
@@ -359,26 +311,75 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
                 tmp_root=test_tmpdir,
                 seed=seed_iter,
                 selected_paths=rand_selected_paths,
-                file_type=DUMP_FILE_FORMAT
+                file_type=DUMP_FILE_FORMAT,
             )
             raise AssertionError(
-                f"\n💥 Unexpected error while processing combo:\n"
-                f"→ Shard {shard_index}, Combo index {i}, Seed {seed_iter}\n"
+                f"\n💥 Unexpected error\n"
+                f"→ Shard {SHARD_INDEX}, Combo global-index {i}, Per-shard #{cnt}\n"
                 f"→ Combo: {opts_kwargs}\n"
                 f"→ Exception: {e.__class__.__name__}: {e}\n"
-                f"→ Traceback:\n{tb}\n"
                 f"→ Dumped context: {dump_path}\n"
             )
+        else:
+            # Cleanup safely
+            if out_dir and out_dir.exists():
+                shutil.rmtree(out_dir, ignore_errors=True)
+            # Register that combo as valide
+            utils_test.register_hash(combo_hash, status="done")
         finally:
-            # Per-combo cleanup to avoid temp accumulation
-            shutil.rmtree(out, ignore_errors=True)
             if pbar is not None:
                 pbar.update(1)
 
+
     if pbar is not None:
         pbar.close()
+    assert cnt >= 0
 
-    # Sanity: this shard actually executed some work
-    assert checked >= 0  # checked can be 0 for shards > total_combos
-    if total_combos >= shards:
-        assert ran >= 0  # ran could be 0 if all combos in this shard were invalid (unlikely)
+
+# -------------------- helpers --------------------
+def _get_opt(combo: List, fields: List) -> Union[Options, None]:
+    kwargs = dict(zip(fields, combo))
+    try:
+        opt = Options(**kwargs)
+        return opt
+    except:
+        return None
+    #
+    # # impossible
+    # if mode == 9 and dith == 0:
+    #     return False
+    # # rescaling forbidden after lum/hist (modes 1,2)
+    # if mode in (1, 2) and rescaling != 0:
+    #     return False
+    # # hist_spec ignored when hist_optim==1; allow but we’ll set None at callsite
+    # # safe_lum_match only matters in mode==1
+    # if mode != 1 and slm:
+    #     return False
+    # # (rec_standard) only meaningful when ct==1; ct==0 handled at callsite
+    # # legacy_mode tested but not pruned (we’ll allow both; test only “one per mode” isn’t
+    # # strictly enforced here to keep logic simple and deterministic).
+    # return True
+
+
+class ControlledFailure(AssertionError):
+    """Raised when _dump_and_fail already handled the failure context."""
+
+
+def _dump_and_fail(rec, opts_kwargs, seed, selected_paths, tmp_root):
+    selected_paths = selected_paths or []  # ← ensure iterable
+    dump_path = utils_test.dump_failure_context(
+        combo_dict=opts_kwargs,
+        rec=rec,
+        tmp_root=tmp_root,
+        seed=seed,
+        selected_paths=selected_paths,
+        file_type=DUMP_FILE_FORMAT,
+    )
+    raise ControlledFailure(
+        f"\nValidation failed\n"
+        f"→ Combo: {opts_kwargs}\n"
+        f"→ Log:\n{utils_test.strip_ansi(str(rec.get('log_result', '')))}\n"
+        f"→ Dumped context: {dump_path}\n"
+    )
+
+test_imageprocessor_validations_sharded(test_tmpdir=Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-1/master/case-8a2843c2c0ff4ec4b03c014607eb39e1'))

@@ -1,198 +1,235 @@
+"""
+Comprehensive validation tests for shinier.Options.
+
+Covers:
+    1. Generic schema-driven validation for all fields (valid/invalid)
+    2. Specific cross-field consistency and behavioral logic
+    3. Edge cases and boundary conditions
+"""
+
+import pytest
 import numpy as np
 from pathlib import Path
-from shinier import Options
-import pytest
+from pydantic import ValidationError
+from shinier.Options import Options
 
 pytestmark = pytest.mark.unit_tests
 
 
+# =============================================================================
+# FIXTURES
+# =============================================================================
 @pytest.fixture
-def tmp_io_dirs(tmp_path):
-    inp = tmp_path / "INPUT"
-    out = tmp_path / "OUTPUT"
-    inp.mkdir()
-    out.mkdir()
-    return inp, out
+def tmp_dirs(tmp_path):
+    """Create temporary folders that always exist for valid path tests."""
+    in_dir = tmp_path / "INPUT"
+    out_dir = tmp_path / "OUTPUT"
+    mask_dir = tmp_path / "MASKS"
+    for d in (in_dir, out_dir, mask_dir):
+        d.mkdir()
+    return in_dir, out_dir, mask_dir
 
 
-def make(inp, out, **kwargs):
-    """Helper to construct Options with required input/output dirs."""
-    return Options(input_folder=inp, output_folder=out, **kwargs)
+# =============================================================================
+# GENERIC FIELD VALIDATION (Schema-Driven)
+# =============================================================================
+def generate_valid_kwargs(tmp_dirs):
+    """Return valid defaults merged with temporary directories."""
+    in_dir, out_dir, mask_dir = tmp_dirs
+    valid = {
+        name: field.default
+        for name, field in Options.model_fields.items()
+        if field.default is not None
+    }
+    valid.update(dict(input_folder=in_dir, output_folder=out_dir, masks_folder=mask_dir))
+    return valid
 
 
-def test_legacy_mode_skips_validation_and_sets_conserve_memory_false(tmp_path):
-    # No folders needed because legacy_mode skips validation
-    opt = Options(legacy_mode=True)
-    assert opt.conserve_memory is False
+def generate_invalid_value(field):
+    """Heuristically produce an invalid value for a given field."""
+    t = field.annotation
+
+    # Literal types (e.g. Literal[0, 1, 2])
+    if getattr(t, "__origin__", None) is not None and "Literal" in str(t.__origin__):
+        valid = t.__args__
+        if isinstance(valid[0], int):
+            return max(valid) + 999
+        if isinstance(valid[0], str):
+            return "INVALID_LITERAL"
+        return object()
+
+    # Constrained numeric types
+    if "conint" in str(t):
+        return -999
+    if "confloat" in str(t):
+        return -9.99
+
+    # Simple primitives
+    if t in (int, float):
+        return "not_a_number"
+    if t is bool:
+        return "maybe"
+
+    # Paths
+    if "Path" in str(t):
+        return Path("/nonexistent/folder")
+
+    # Arrays
+    if "ndarray" in str(t):
+        return np.ones((8, 8), dtype=int)  # invalid dtype (should be float)
+
+    # Fallback
+    return object()
 
 
-def test_nonexistent_input_or_output_raises(tmp_path):
-    missing = tmp_path / "MISSING"
-    with pytest.raises(ValueError):
-        Options(input_folder=missing, output_folder=missing)
+def generate_invalid_kwargs(field_name):
+    """Generate dict containing an invalid entry for a given field."""
+    f = Options.model_fields[field_name]
+    return {field_name: generate_invalid_value(f)}
 
 
-def test_happy_path_minimal(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    opt = Options(input_folder=inp, output_folder=out)
-    # Basic coercions / defaults
-    assert isinstance(opt.input_folder, Path)
-    assert isinstance(opt.output_folder, Path)
-    assert opt.images_format in {"png", "tif", "tiff", "jpg", "jpeg"}
+@pytest.mark.parametrize("field_name", list(Options.model_fields))
+def test_field_validation(field_name, tmp_dirs):
+    """Schema-based validation for every field in the model."""
+    valid = generate_valid_kwargs(tmp_dirs)
+    # -- should pass with all defaults --
+    _ = Options(**valid)
+
+    # -- mutate with invalid value and expect error --
+    invalid = generate_invalid_kwargs(field_name)
+    valid.update(invalid)
+    with pytest.raises((ValueError, TypeError, ValidationError)):
+        Options(**valid)
+
+
+# =============================================================================
+# SPECIFIC BEHAVIORAL & CROSS-FIELD TESTS
+# =============================================================================
+def test_default_initialization(tmp_dirs):
+    """Ensure defaults instantiate correctly."""
+    in_dir, out_dir, _ = tmp_dirs
+    opt = Options(input_folder=in_dir, output_folder=out_dir)
     assert opt.mode == 8
-    assert opt.as_gray == 0
-    assert opt.dithering == 1
-    assert opt.conserve_memory is True
+    assert opt.rescaling == 2
+    assert opt.background == 300
+    assert opt.hist_specification == 4
+    assert isinstance(opt.as_gray, bool)
 
 
-@pytest.mark.parametrize("fmt", ["png", "tif", "tiff", "jpg", "jpeg"])
-def test_valid_image_formats(tmp_io_dirs, fmt):
-    inp, out = tmp_io_dirs
-    opt = Options(input_folder=inp, output_folder=out, images_format=fmt)
-    assert opt.images_format == fmt
-
-
-def test_invalid_images_format_raises(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    with pytest.raises(ValueError, match="images format must be either"):
-        make(inp, out, images_format="bmp")
-
-
-def test_masks_require_valid_format_when_using_masks(tmp_io_dirs, tmp_path):
-    inp, out = tmp_io_dirs
-    mask_dir = tmp_path / "MASK"
-    mask_dir.mkdir()
-    # OK when using masks with proper format
-    ok = make(inp, out, whole_image=3, masks_folder=mask_dir, masks_format="png")
-    assert ok.masks_folder == mask_dir
-    # Invalid format
-    with pytest.raises(ValueError, match="masks format must be either"):
-        make(inp, out, whole_image=3, masks_folder=mask_dir, masks_format="gif")
-
-
-def test_missing_masks_folder_raises_when_using_masks(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    with pytest.raises(TypeError):
-        make(inp, out, whole_image=3)  # no masks_folder passed
-
-
-@pytest.mark.parametrize("val", [0, 4, -1, 99])
-def test_whole_image_invalid_values(tmp_io_dirs, val):
-    inp, out = tmp_io_dirs
-    with pytest.raises(ValueError, match="whole_image must be 1, 2 or 3"):
-        make(inp, out, whole_image=val)
-
-
-@pytest.mark.parametrize("val", [1, 9])
-def test_valid_modes(tmp_io_dirs, val):
-    inp, out = tmp_io_dirs
-    opt = make(inp, out, mode=val)
-    assert opt.mode == val
-
-
-def test_invalid_mode_raises(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    with pytest.raises(ValueError, match="Invalid mode selected"):
-        make(inp, out, mode=10)
-
-
-@pytest.mark.parametrize("val", [0, 1, 2])
-def test_as_gray_valid(tmp_io_dirs, val):
-    inp, out = tmp_io_dirs
-    opt = make(inp, out, as_gray=val)
-    assert opt.as_gray == val
-
-
-def test_as_gray_invalid(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    with pytest.raises(TypeError, match="as_gray must be an int equal to 0, 1, 2, 3 or 4."):
-        make(inp, out, as_gray=5)
-
-
-@pytest.mark.parametrize("val", [0, 1, 2])
-def test_dithering_valid(tmp_io_dirs, val):
-    inp, out = tmp_io_dirs
-    opt = make(inp, out, dithering=val)
-    assert opt.dithering == val
-
-
-def test_dithering_invalid(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    with pytest.raises(ValueError, match="dithering must be an int equal to 0, 1 or 2"):
-        make(inp, out, dithering=4)
-
-
-def test_seed_invalid_type(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    with pytest.raises(TypeError, match="seed must be an integer value or None"):
-        make(inp, out, seed="abc")
-
-
-def test_target_lum_validation(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    with pytest.raises(ValueError, match="target_lum should be an iterable of two numbers"):
-        make(inp, out, target_lum=(1,))
-    # Valid edge values
-    ok = make(inp, out, target_lum=(0, 0))
-    assert ok.target_lum == (0, 0)
-
-
-def test_hist_specification_and_optim(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    with pytest.raises(ValueError, match="hist_specification must be 1, 2, 3 or 4"):
-        make(inp, out, hist_specification=5)
-    with pytest.raises(ValueError, match="Optim must be 0 or 1"):
-        make(inp, out, hist_optim=3)
-
-
-def test_hist_iterations_and_step_size(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    with pytest.raises(ValueError, match="hist_iterations must be at least 1"):
-        make(inp, out, hist_iterations=0)
-    with pytest.raises(ValueError, match="Step size must be at least 1"):
-        make(inp, out, step_size=0)
-
-
-def test_rescaling_values(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    for val in (0, 1, 2, 3):
-        assert make(inp, out, rescaling=val).rescaling == val
-    with pytest.raises(ValueError, match="Rescaling must be 0, 1, 2 or 3"):
-        make(inp, out, rescaling=9)
-
-
-def test_iterations_minimum(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    with pytest.raises(ValueError, match="Iterations must be at least 1"):
-        make(inp, out, iterations=0)
-
-
-def test_target_hist_grayscale_shape_and_type(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    # as_gray != 0 -> 1D hist of length 256 or 65536 with integer dtype
-    ok = make(inp, out, as_gray=1, target_hist=np.ones((256,)))
-    assert ok.as_gray == 1
-    assert ok.target_hist.shape == (256,)
-
+def test_invalid_paths_raise(tmp_path):
+    """Non-existent folders must raise ValueError."""
+    bogus = tmp_path / "nonexistent"
     with pytest.raises(ValueError):
-        make(inp, out, as_gray=1, target_hist=np.ones((128,)))  # wrong length
+        Options(input_folder=bogus, output_folder=bogus)
 
 
-def test_target_hist_color_shape_and_type(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    # as_gray == 0 -> 2D hist (256,3) with integer dtype
-    ok = make(inp, out, as_gray=0, target_hist=np.ones((256, 3)))
-    assert ok.target_hist.shape == (256, 3)
-
-    with pytest.raises(ValueError, match="must be 2D"):
-        make(inp, out, as_gray=0, target_hist=np.ones((256,)))
+@pytest.mark.parametrize("val", [-1, 400, 999])
+def test_background_out_of_range(val, tmp_dirs):
+    """Background intensity must be [0–255] or 300."""
+    in_dir, out_dir, _ = tmp_dirs
+    with pytest.raises((ValidationError, ValueError)):
+        Options(input_folder=in_dir, output_folder=out_dir, background=val)
 
 
-def test_target_hist_color_shape_and_string(tmp_io_dirs):
-    inp, out = tmp_io_dirs
-    # as_gray == 0 -> 2D hist (256,3) with integer dtype
-    ok = make(inp, out, as_gray=0, target_hist='equal')
-    assert ok.target_hist == 'equal'
+def test_background_valid_values(tmp_dirs):
+    """0, 255, and 300 are valid backgrounds."""
+    in_dir, out_dir, _ = tmp_dirs
+    for val in (0, 255, 300):
+        opt = Options(input_folder=in_dir, output_folder=out_dir, background=val)
+        assert opt.background == val
 
-    with pytest.raises(TypeError, match="string = 'equal'"):
-        make(inp, out, as_gray=0, target_hist='none')
+
+def test_target_hist_valid_and_invalid_shapes(tmp_dirs):
+    """Validate histogram array shape and dtype constraints."""
+    in_dir, out_dir, _ = tmp_dirs
+    valid_1d = np.zeros((256,))
+    valid_3ch = np.zeros((256, 3))
+    _ = Options(input_folder=in_dir, output_folder=out_dir, target_hist=valid_1d)
+    _ = Options(input_folder=in_dir, output_folder=out_dir, target_hist=valid_3ch)
+
+    bad_shape = np.zeros((128,))
+    with pytest.raises(ValueError):
+        Options(input_folder=in_dir, output_folder=out_dir, target_hist=bad_shape)
+
+    bad_type = "notarray"
+    with pytest.raises((TypeError, ValidationError)):
+        Options(input_folder=in_dir, output_folder=out_dir, target_hist=bad_type)
+
+
+def test_target_spectrum_validation(tmp_dirs):
+    """Target spectrum must be float ndarray."""
+    in_dir, out_dir, _ = tmp_dirs
+    good = np.ones((16, 16), dtype=float)
+    bad_type = np.ones((16, 16), dtype=int)
+    _ = Options(input_folder=in_dir, output_folder=out_dir, target_spectrum=good)
+    with pytest.raises(TypeError):
+        Options(input_folder=in_dir, output_folder=out_dir, target_spectrum=bad_type)
+
+
+def test_hist_optim_overwrites_hist_spec(tmp_dirs):
+    """hist_optim=True should nullify hist_specification."""
+    in_dir, out_dir, _ = tmp_dirs
+    opt = Options(input_folder=in_dir, output_folder=out_dir, hist_optim=True)
+    assert opt.hist_specification is None
+
+
+def test_rescaling_forbidden_modes_overwrite(tmp_dirs):
+    """Rescaling forced to 0 for luminance/histogram modes."""
+    in_dir, out_dir, _ = tmp_dirs
+    for mode in (1, 2):
+        opt = Options(input_folder=in_dir, output_folder=out_dir, mode=mode, rescaling=2)
+        assert opt.rescaling == 0
+
+
+def test_mode9_dithering_zero_raises(tmp_dirs):
+    """Mode 9 cannot have dithering=0."""
+    in_dir, out_dir, _ = tmp_dirs
+    with pytest.raises(ValueError):
+        Options(input_folder=in_dir, output_folder=out_dir, mode=9, dithering=0)
+
+
+def test_iterations_clamped_for_noncomposite_modes(tmp_dirs):
+    """iterations >1 only valid for composite modes (5–8)."""
+    in_dir, out_dir, _ = tmp_dirs
+    opt = Options(input_folder=in_dir, output_folder=out_dir, mode=3, iterations=5)
+    assert opt.iterations == 1
+
+
+def test_whole_image_requires_mask_folder(tmp_dirs):
+    """whole_image=3 requires masks_folder and masks_format."""
+    in_dir, out_dir, mask_dir = tmp_dirs
+    # valid
+    _ = Options(input_folder=in_dir, output_folder=out_dir, whole_image=3, masks_folder=mask_dir)
+    # missing folder → fail
+    with pytest.raises(ValueError):
+        Options(input_folder=in_dir, output_folder=out_dir, whole_image=3, masks_folder=None)
+
+
+def test_legacy_mode_overrides(tmp_dirs):
+    """legacy_mode should force multiple field overwrites."""
+    in_dir, out_dir, _ = tmp_dirs
+    opt = Options(input_folder=in_dir, output_folder=out_dir, legacy_mode=True)
+    assert not opt.conserve_memory
+    assert opt.as_gray
+    assert opt.dithering == 0
+    assert opt.hist_specification == 1
+    assert not opt.safe_lum_match
+
+
+def test_export_schema(tmp_dirs, tmp_path):
+    """Ensure schema export works."""
+    in_dir, out_dir, _ = tmp_dirs
+    opt = Options(input_folder=in_dir, output_folder=out_dir)
+    schema_path = tmp_path / "schema.json"
+    p = opt.export_schema(schema_path)
+    assert p.exists()
+    txt = p.read_text()
+    assert "title" in txt and "properties" in txt
+
+
+def test_repr_output(tmp_dirs):
+    """__repr__ should contain all key-value pairs."""
+    in_dir, out_dir, _ = tmp_dirs
+    opt = Options(input_folder=in_dir, output_folder=out_dir)
+    r = repr(opt)
+    assert "mode:" in r and "input_folder" in r

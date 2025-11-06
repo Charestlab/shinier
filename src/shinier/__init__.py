@@ -1,5 +1,5 @@
 """
-Shinier: Scientific Histogram Normalization and Image Equalization in R/G/B.
+Shinier: Scientific Histogram Intensity Normalization and Image Equalization in R/G/B.
 
 This package provides advanced image-processing utilities for luminance,
 histogram, and spatial frequency normalization, adapted from the original
@@ -17,23 +17,19 @@ References:
 # Metadata
 __author__ = "Nicolas Dupuis-Roy"
 __version__ = "0.1.0"
-__email__ = "n.dupuis.roy@gmail.com"
+__email__ = "nicolas.dupuis.roy@umontreal.ca"
 
 # For direct importation
 from importlib import util
+from pathlib import Path
 _HAS_CYTHON = util.find_spec("shinier._cconvolve") is not None
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 if _HAS_CYTHON:
     from ._cconvolve import convolve2d_direct, convolve2d_separable
 else:
     convolve2d_direct = None
     convolve2d_separable = None
-
-from .Options import Options
-from .ImageDataset import ImageDataset
-from .ImageListIO import ImageListIO
-from .ImageProcessor import ImageProcessor
-
 
 __all__ = [
     "Options",
@@ -43,4 +39,14 @@ __all__ = [
     "convolve2d_direct",
     "convolve2d_separable",
     "_HAS_CYTHON",
+    "color",
+    "SHINIER_CLI",
+    "REPO_ROOT"
 ]
+
+from .Options import Options
+from .ImageDataset import ImageDataset
+from .ImageListIO import ImageListIO
+from .ImageProcessor import ImageProcessor
+from .SHINIER import SHINIER_CLI
+from . import color
