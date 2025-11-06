@@ -859,7 +859,7 @@ class ImageProcessor(InformativeBaseModel):
         # If target_spectrum is None, target magnitude is the average of all spectra
         if self._target_spectrum is None:
             target_spectrum = self.options.target_spectrum
-            if target_spectrum is None:
+            if target_spectrum is None or isinstance(target_spectrum, str):
                 target_spectrum = np.zeros(self.dataset.magnitudes[0].shape)
                 for idx, mag in enumerate(self.dataset.magnitudes):
                     target_spectrum += mag
@@ -924,7 +924,6 @@ class ImageProcessor(InformativeBaseModel):
 
         buffer_collection.drange = (0, 255)
         # buffer_collection dtype is np.float64 and drange is close but out of [0, 1] before rescaling of any sort
-        # TODO: NEEDS TO BE CHECKED
         if self.options.rescaling not in [0, None] and self._is_last_operation:
             buffer_collection = rescale_images255(buffer_collection, rescaling_option=self.options.rescaling)
             # If legacy mode is turned on, rescale_images255 will output uint8
