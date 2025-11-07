@@ -14,9 +14,6 @@ from typing import Any, Optional, Tuple, Union, NewType, List, Iterable, Callabl
 from PIL import Image
 from itertools import chain
 from pydantic import BeforeValidator
-
-from tests.manual_test import magnitudes
-
 try:
     import matplotlib.pyplot as plt
 except ImportError:
