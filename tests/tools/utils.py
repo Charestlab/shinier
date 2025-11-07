@@ -393,7 +393,6 @@ def make_masks(dirpath: Path, h: int = 64, w: int = 64, n: int = 1) -> None:
 
 
 def prepare_images(path_img: Path) -> None:
-
     out = {"buffers": {0: {0: {}, 1: {0: {}, 1: {}}}, 1: {0: {}, 1: {}}}}
     out['buffers_other'] = copy.deepcopy(out['buffers'])
     out['images'] = None
@@ -422,7 +421,7 @@ def prepare_images(path_img: Path) -> None:
                     input_images=buffers,
                     output_images=buffers,
                     output_other=buffers_other,
-                    color_treatment=ct,
+                    linear_luminance=bool(ct),
                     as_gray=ag,
                 )
                 _buffers, _buffers_other = output if isinstance(output, tuple) else (output, None)

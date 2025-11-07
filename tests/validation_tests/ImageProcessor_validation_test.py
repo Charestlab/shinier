@@ -4,7 +4,7 @@
 Prunes only:
   • Impossible: mode==9 & dithering==0
   • Redundant:
-      - rec_standard ignored when color_treatment==0 (fix to 2)
+      - rec_standard ignored when linear_luminance is True (fix to 2)
       - verbose (ignored here)
       - hist_specification ignored when hist_optim==1 (force None)
       - safe_lum_match only relevant when mode==1
@@ -49,9 +49,9 @@ DUMP_FILE_FORMAT = os.getenv("DUMP_FILE_FORMAT", "pkl")
 SHARDS = int(os.getenv("SHARDS", "1"))
 SHARD_INDEX = int(os.getenv("SHARD_INDEX", "0"))
 SHOW_PROGRESS = os.getenv("SHOW_PROGRESS", "1") == "1"
-# SHARD_INDEX = 7
+# SHARD_INDEX = 4
 # SHARDS = 8
-# START_CNT = 276481
+# START_CNT = 2260
 
 
 def get_possible_values(field):
@@ -99,8 +99,6 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
 
     # ----- parameter grids (only pruned redundancies) -----
     choices = {name: get_possible_values(field) for name, field in Options.model_fields.items()}
-    del choices['images_format']
-    del choices['masks_format']
     choices['input_folder'] = [utils_test.IMAGE_PATH]
     choices['masks_folder'] = [mask_dir]
     choices['background'] += [120, 130]
@@ -202,7 +200,7 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
         ag2, ct, rs = None, None, None
         try:
             opts.output_folder = out_dir
-            ag2, ct, rs = int(opts.as_gray), opts.color_treatment, opts.rec_standard
+            ag2, ct, rs = int(opts.as_gray), int(opts.linear_luminance), opts.rec_standard
         except:
             if out_dir and out_dir.exists():
                 shutil.rmtree(out_dir, ignore_errors=True)
@@ -219,9 +217,9 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
 
             # Options / pipeline
             rand_selected_images = utils_test.select_n_imgs(images_buffers['images'], n=2, seed=seed_iter)  # sRGB
-            rand_selected_buffers = utils_test.select_n_imgs(images_buffers['buffers'][ag2][ct][rs], n=2, seed=seed_iter)  # Y from xyY or sRGB (depending on color_treatment)
+            rand_selected_buffers = utils_test.select_n_imgs(images_buffers['buffers'][ag2][ct][rs], n=2, seed=seed_iter)  # Y from xyY or sRGB (depending on linear_luminance)
             rand_selected_paths = utils_test.select_n_imgs(src_images_path, n=2, seed=seed_iter)  # sRGB
-            # as_gray_ds = 1 if opts.as_gray == True and opts.color_treatment == 0 else 0
+            # as_gray_ds = 1 if opts.as_gray == True and opts.linear_luminance is True else 0
 
             images_copy = ImageListIO(input_data=rand_selected_images, conserve_memory=False)
             initial_buffers = ImageListIO(input_data=rand_selected_buffers, conserve_memory=False)
@@ -236,20 +234,6 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
 
             # Prepare images for validation: convert them into xyY if needed
             final_buffers = proc._final_buffers
-            # buffers_other = ImageListIO(input_data=copy.deepcopy(buffers_empty), conserve_memory=False)
-            # for idx, image in enumerate(proc.dataset.images):
-            #     final_buffers[idx] = image.astype(np.float64)
-            # final_buffers.drange = (0, 255)
-            # rec_stardard_str = REC_STANDARD[rs - 1]
-            # output = ColorTreatment.forward_color_treatment(
-            #     rec_standard=rec_stardard_str,
-            #     input_images=proc.dataset.images,
-            #     output_images=final_buffers,
-            #     output_other=buffers_other,
-            #     color_treatment=ct,
-            #     as_gray=ag,
-            # )
-            # final_buffers, _ = output if isinstance(output, tuple) else (output, None)
 
             # internal validations
             for rec in getattr(proc, "validation", []):
@@ -344,21 +328,6 @@ def _get_opt(combo: List, fields: List) -> Union[Options, None]:
         return opt
     except:
         return None
-    #
-    # # impossible
-    # if mode == 9 and dith == 0:
-    #     return False
-    # # rescaling forbidden after lum/hist (modes 1,2)
-    # if mode in (1, 2) and rescaling != 0:
-    #     return False
-    # # hist_spec ignored when hist_optim==1; allow but we’ll set None at callsite
-    # # safe_lum_match only matters in mode==1
-    # if mode != 1 and slm:
-    #     return False
-    # # (rec_standard) only meaningful when ct==1; ct==0 handled at callsite
-    # # legacy_mode tested but not pruned (we’ll allow both; test only “one per mode” isn’t
-    # # strictly enforced here to keep logic simple and deterministic).
-    # return True
 
 
 class ControlledFailure(AssertionError):
@@ -381,5 +350,3 @@ def _dump_and_fail(rec, opts_kwargs, seed, selected_paths, tmp_root):
         f"→ Log:\n{utils_test.strip_ansi(str(rec.get('log_result', '')))}\n"
         f"→ Dumped context: {dump_path}\n"
     )
-
-test_imageprocessor_validations_sharded(test_tmpdir=Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-1/master/case-8a2843c2c0ff4ec4b03c014607eb39e1'))
