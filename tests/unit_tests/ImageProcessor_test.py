@@ -27,7 +27,7 @@ def _prepare_temp_dataset(test_tmpdir: Path) -> ImageDataset:
     for img in src_images[:3]:
         (inp / img.name).symlink_to(img.resolve())
 
-    opt = Options(input_folder=inp, output_folder=out, images_format="png")
+    opt = Options(input_folder=inp, output_folder=out)
     return ImageDataset(options=opt)
 
 def _make_rgb(h: int = 64, w: int = 64, seed: int = 0) -> np.ndarray:

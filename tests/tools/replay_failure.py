@@ -96,7 +96,6 @@ def main(file_path: Path, src_path: Optional[str] = None) -> None:
     # combo['masks_folder'] = mask_path_name
     # combo['whole_image'] = 3
     # combo['mode'] = 5
-    # combo['masks_format'] = 'png'
     combo['verbose'] = 2
 
     # --- Build Options ---

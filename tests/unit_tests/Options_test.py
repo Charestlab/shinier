@@ -196,7 +196,7 @@ def test_iterations_clamped_for_noncomposite_modes(tmp_dirs):
 
 
 def test_whole_image_requires_mask_folder(tmp_dirs):
-    """whole_image=3 requires masks_folder and masks_format."""
+    """whole_image=3 requires masks_folder."""
     in_dir, out_dir, mask_dir = tmp_dirs
     # valid
     _ = Options(input_folder=in_dir, output_folder=out_dir, whole_image=3, masks_folder=mask_dir)

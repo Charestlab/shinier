@@ -175,7 +175,6 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
         Options: Configured SHINIER options object.
     """
     print_shinier_header(is_tty=IS_TTY, version="v0.1.0")
-    # kwargs: Dict[str, Any] = {}
     opts = Options()
 
     # --------- General I/O ---------
@@ -234,7 +233,6 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
     # --------- Legacy Mode ---------
     if prof == 2:
         opts.legacy_mode = True
-        opts.model_post_init(None)  # This overrides default values with legacy values for conserve_memory, as_gray, linear_luminance, dithering, hist_specification and safe_lum_match
 
     # --------- Custom Profile ---------
     if prof == 3:
@@ -333,7 +331,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
     ])
     opts.verbose = prog_info - 2
     dataset = ImageDataset(images=images, masks=masks, options=opts) if (images or masks) else ImageDataset(options=opts)
-    results = ImageProcessor(dataset=dataset, verbose=prog_info, from_cli=True)
+    results = ImageProcessor(dataset=dataset, verbose=opts.verbose, from_cli=True)
 
     console_log("╔══════════════════════════════════════════════════════╗")
     console_log("║                      OPTIONS                         ║")

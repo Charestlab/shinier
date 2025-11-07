@@ -315,12 +315,10 @@ Centralized configuration class for all processing parameters.
 class Options:
     def __init__(
         # Folders and formats
-        images_format: str = 'png',
         input_folder: Union[str, Path] = Path('./../INPUT'),
         output_folder: Union[str, Path] = Path('./../OUTPUT'),
         
         # Masks and figure-ground separation
-        masks_format: str = 'png',
         masks_folder: Optional[Union[str, Path]] = None,
         whole_image: Literal[1, 2, 3] = 1,
         background: Union[int, float] = 300,

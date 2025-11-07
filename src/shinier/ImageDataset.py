@@ -87,7 +87,7 @@ class ImageDataset(InformativeBaseModel):
             images.model_post_init(None)
         else:
             images = ImageListIO(
-                input_data=self.images if self.images else Path(self.options.input_folder) / f"*.{self.options.images_format}",
+                input_data=self.images if self.images else Path(self.options.input_folder) / "*",
                 conserve_memory=self.options.conserve_memory,
                 as_gray=as_gray,  # Now done in ImageProcessor (previous code: self.options.as_gray)
                 save_dir=self.options.output_folder
@@ -97,7 +97,7 @@ class ImageDataset(InformativeBaseModel):
         object.__setattr__(self, "images_name", [p.name for p in images.src_paths if p is not None])
 
         # ------------------------- Load masks if required -------------------------
-        if self.options.whole_image == 3 and self.options.masks_folder and self.options.masks_format:
+        if self.options.whole_image == 3 and self.options.masks_folder:
             if isinstance(self.masks, ImageListIO):
                 # Make new shallow copy and force run initialization script (model_post_init)
                 # to account for updated values (e.g. as_gray)
@@ -107,7 +107,7 @@ class ImageDataset(InformativeBaseModel):
                 masks.model_post_init(None)
             else:
                 masks = ImageListIO(
-                    input_data=self.masks if self.masks else Path(self.options.masks_folder) / f"*.{self.options.masks_format}",
+                    input_data=self.masks if self.masks else Path(self.options.masks_folder) / f"*",
                     conserve_memory=self.options.conserve_memory,
                     as_gray=as_gray,  # Now done in ImageProcessor (previous code: self.options.as_gray)
                     save_dir=self.options.masks_folder,
@@ -175,7 +175,7 @@ class ImageDataset(InformativeBaseModel):
         if self.n_images is None or self.n_images <= 1:
             raise ValueError(f"Invalid dataset: {self.n_images} images found. At least two are required.")
 
-        if self.options.whole_image == 3 and self.options.masks_folder and self.options.masks_format:
+        if self.options.whole_image == 3 and self.options.masks_folder:
             if self.n_masks not in (1, self.n_images):
                 raise ValueError("Number of masks must be 1 or match number of images.")
 

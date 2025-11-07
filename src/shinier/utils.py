@@ -22,10 +22,10 @@ import re
 
 # Local package imports
 from .base import ImageListType
-from shinier.color.Converter import rgb2gray, gray2rgb
 from . import _HAS_CYTHON
 if TYPE_CHECKING:
     from .ImageListIO import ImageListIO
+    from shinier.color.Converter import rgb2gray, gray2rgb
 
 if _HAS_CYTHON:
     from . import _cconvolve

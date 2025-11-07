@@ -52,16 +52,14 @@ inp = "/Users/ndr/GIT_REPO/GITHUB/shine/shinier/INPUT/"
 # oup = "/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-1/master/case-4d59c1014b72"
 oup = "/Users/ndr/GIT_REPO/GITHUB/shine/shinier/MASK/"
 masks_folder = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/MASK_64X64')
-combo = {'images_format': 'png', 'input_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_64X64'), 'output_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/OUTPUT'), 'masks_format': 'png', 'masks_folder': masks_folder, 'whole_image': 1, 'background': 300, 'mode': 3, 'as_gray': True, 'linear_luminance': 0, 'rec_standard': 1, 'dithering': 0, 'conserve_memory': False, 'seed': None, 'legacy_mode': True, 'safe_lum_match': False, 'target_lum': (0, 0.0), 'hist_optim': True, 'hist_specification': 1, 'hist_iterations': 3, 'target_hist': None, 'rescaling': 0, 'target_spectrum': 'unit_test', 'iterations': 1, 'verbose': -1}
-combo = {'images_format': 'png', 'input_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_64X64'), 'output_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/OUTPUT'), 'masks_format': 'png', 'masks_folder': masks_folder, 'whole_image': 1, 'background': 300, 'mode': 2, 'as_gray': True, 'linear_luminance': 0, 'rec_standard': 1, 'dithering': 0, 'conserve_memory': False, 'seed': None, 'legacy_mode': True, 'safe_lum_match': False, 'target_lum': (0, 0.0), 'hist_optim': True, 'hist_specification': 1, 'hist_iterations': 3,'target_hist': None, 'rescaling': 0, 'target_spectrum': None, 'iterations': 1, 'verbose': 3}
+combo = {'input_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_64X64'), 'output_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/OUTPUT'), 'masks_folder': masks_folder, 'whole_image': 1, 'background': 300, 'mode': 3, 'as_gray': True, 'linear_luminance': 0, 'rec_standard': 1, 'dithering': 0, 'conserve_memory': False, 'seed': None, 'legacy_mode': True, 'safe_lum_match': False, 'target_lum': (0, 0.0), 'hist_optim': True, 'hist_specification': 1, 'hist_iterations': 3, 'target_hist': None, 'rescaling': 0, 'target_spectrum': 'unit_test', 'iterations': 1, 'verbose': -1}
+combo = {'input_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_64X64'), 'output_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/OUTPUT'), 'masks_folder': masks_folder, 'whole_image': 1, 'background': 300, 'mode': 2, 'as_gray': True, 'linear_luminance': 0, 'rec_standard': 1, 'dithering': 0, 'conserve_memory': False, 'seed': None, 'legacy_mode': True, 'safe_lum_match': False, 'target_lum': (0, 0.0), 'hist_optim': True, 'hist_specification': 1, 'hist_iterations': 3,'target_hist': None, 'rescaling': 0, 'target_spectrum': None, 'iterations': 1, 'verbose': 3}
 bm = ImageListIO(input_data=masks_folder)
 my_options = Options(**combo)
 # my_options = Options(
 #     input_folder=inp,
-#     images_format='png',
 #     output_folder=oup,
 #     masks_folder=None,
-#     masks_format='png',
 #     whole_image=1,
 #     background=300,
 #     mode=2,
@@ -103,8 +101,6 @@ corr2c, rmse2c = utils.spec_match_validation(images=results.dataset.images)
 new_images = results.get_results()
 plt.imshow(new_images[0])
 my_options = Options(
-    images_format="png",
-    masks_format="png",
     input_folder='./../INPUT/',
     output_folder='./../OUTPUT',
     masks_folder='./../MASK/',
