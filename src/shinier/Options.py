@@ -14,8 +14,8 @@ from pydantic import (
 from pydantic.json_schema import model_json_schema, GenerateJsonSchema, JsonSchemaValue
 from shinier.utils import console_log, Bcolors
 from shinier.base import InformativeBaseModel
-
-ACCEPTED_IMAGE_FORMATS = Literal["png", "tif", "tiff", "jpg", "jpeg"]
+from shinier import REPO_ROOT
+ACCEPTED_IMAGE_FORMATS = Literal["png", "tif", "tiff", "jpg", "jpeg", "npy"]
 
 
 class Options(InformativeBaseModel):
@@ -24,14 +24,11 @@ class Options(InformativeBaseModel):
 
     Args:
     ----------------------------------------------INPUT/OUTPUT images folders-------------------------------------------------
-        images_format (str): png, tif, jpg (default = png)
-
         input_folder (Union[str, Path]): relative or absolute path of the image folder (default = ./INPUT)
 
         output_folder (Union[str, Path]): relative or absolute path where processed images will be saved (default = ./OUTPUT)
 
     -------------------------------------------MASKS and FIGURE-GROUND separation----------------------------------------------
-        masks_format (str): png, tif, jpg (default = png)
         masks_folder (Union[str, Path]): relative or absolute path of mask (default = ./MASKS)
 
         whole_image (Literal[1-3]): Binary ROI masks: Analysis run on selected pixels (default = 1)
@@ -58,16 +55,16 @@ class Options(InformativeBaseModel):
         as_gray (bool): Convertion into grayscale images (default = 0).
             False = No conversion applied.
             True = Convert into grayscale images.
-                - Using `rec_standard` if `color_treatment` == 1
-                - Using simple mean(RGB) if `color_treatment` == 0
+                - Using `rec_standard` if `linear_luminance` is False
+                - Using simple mean(RGB) if `linear_luminance` is True
 
-        color_treatment (Literal[0, 1]): Determines how color information is handled during image processing (default = 1).
-            0 = "no conversion" mode:
+        linear_luminance (bool): Are pixel values linearly related to luminance? (default = False).
+            True: "no conversion" mode
                 - Assumes input images are linear RGB or grayscale.
                 - All transformations are applied independently to each channel.
                 - No color-space conversion is performed.
 
-            1 = "conversion to xyY" [recommended and default]
+            False: "conversion to xyY" [recommended and default]
                 - Assumes input images are gamma-encoded (e.g., sRGB).
                 - Images are converted to the CIE xyY color space:
                       sRGB → linRGB → XYZ → xyY
@@ -184,12 +181,10 @@ class Options(InformativeBaseModel):
     )
 
     # --- I/O ---
-    images_format: ACCEPTED_IMAGE_FORMATS = Field(default="png")
-    input_folder: Path = Field(default=Path("./../INPUT"))
-    output_folder: Path = Field(default=Path("./../OUTPUT"))
+    input_folder: Optional[Path] = Field(default=REPO_ROOT / "INPUT")
+    output_folder: Path = Field(default=REPO_ROOT / "OUTPUT")
 
     # --- Masks ---
-    masks_format: Optional[ACCEPTED_IMAGE_FORMATS] = Field(default="png")
     masks_folder: Optional[Path] = Field(default=None)
     whole_image: Literal[1, 2, 3] = 1
     background: Union[conint(ge=0, le=255), Literal[300]] = 300
@@ -197,7 +192,7 @@ class Options(InformativeBaseModel):
     # --- Mode / Color ---
     mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8
     as_gray: bool = False
-    color_treatment: Literal[0, 1] = 1
+    linear_luminance: bool = False
     rec_standard: Literal[1, 2, 3] = 2
 
     # --- Dithering / Memory ---
@@ -278,16 +273,16 @@ class Options(InformativeBaseModel):
         if self.mode == 9 and self.dithering == 0:
             raise ValueError("Mode 9 requires dithering 1 or 2 (not 0).")
 
-        # target_hist should match expected images size under as_gray and color_treatment
+        # target_hist should match expected images size under as_gray and linear_luminance
         if self.target_hist is not None:
-            if (self.color_treatment == 1 or self.as_gray is True) and self.target_hist.size != 256:
-                raise ValueError(f"target_hist must be (256, ) or (256, 1) when color_treatment == 1 or as_gray is True. Current target_hist shape = {self.target_hist.shape}")
+            if (not self.linear_luminance or self.as_gray is True) and self.target_hist.size != 256:
+                raise ValueError(f"target_hist must be (256, ) or (256, 1) when linear_luminance is False or as_gray is True. Current target_hist shape = {self.target_hist.shape}")
 
-        # target_spectrum should match expected images size under as_gray and color_treatment
+        # target_spectrum should match expected images size under as_gray and linear_luminance
         if self.target_spectrum is not None:
-            if self.color_treatment == 1 or self.as_gray is True:
+            if not self.linear_luminance or self.as_gray is True:
                 if self.target_spectrum.squeeze().ndim != 2:
-                    raise ValueError(f"target_spectrum must be (W, H, ) or (W, H, 1) when color_treatment == 1 or as_gray is True. Current target_spectrum shape = {self.target_spectrum.shape}")
+                    raise ValueError(f"target_spectrum must be (W, H, ) or (W, H, 1) when linear_luminance is False or as_gray is True. Current target_spectrum shape = {self.target_spectrum.shape}")
 
         # hist_specification ignored if hist_optim = True
         if self.hist_optim:
@@ -298,8 +293,6 @@ class Options(InformativeBaseModel):
         if self.whole_image == 3:
             if self.masks_folder is None:
                 raise ValueError("whole_image=3 requires a valid masks_folder.")
-            if self.masks_format is None:
-                raise ValueError("whole_image=3 requires a valid masks_format.")
 
         # iterations > 1 only valid for composite modes (5–8) -> overwrite and warn
         if self.iterations > 1 and self.mode not in (5, 6, 7, 8):
@@ -310,7 +303,7 @@ class Options(InformativeBaseModel):
         if self.legacy_mode:
             object.__setattr__(self, "conserve_memory", False)
             object.__setattr__(self, "as_gray", True)
-            object.__setattr__(self, "color_treatment", 0)
+            object.__setattr__(self, "linear_luminance", 0)
             object.__setattr__(self, "rec_standard", 1)
             object.__setattr__(self, "dithering", 0)
             object.__setattr__(self, "hist_specification", 1)

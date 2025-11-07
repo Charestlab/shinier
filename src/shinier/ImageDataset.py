@@ -77,7 +77,7 @@ class ImageDataset(InformativeBaseModel):
         """Perform dataset construction and validation after field initialization."""
 
         # Determine grayscale behavior
-        as_gray: Literal[0, 1, 2, 3, 4] = 1 if self.options.as_gray and self.options.color_treatment == 0 else 0
+        as_gray: Literal[0, 1, 2, 3, 4] = 1 if self.options.as_gray and self.options.linear_luminance else 0
 
         # ------------------------- Load images -------------------------
         if isinstance(self.images, ImageListIO):
@@ -119,7 +119,7 @@ class ImageDataset(InformativeBaseModel):
         # ------------------------- Allocate buffers -------------------------
         # Create placeholders for magnitudes and phases if options.mode in [3, 4, 5, 6, 7, 8]
         self.magnitudes, self.phases, self.buffer = None, None, None
-        buffer_size = self.images[0].shape[:2] if self.options.color_treatment == 1 or self.options.as_gray == 1 else self.images[0].shape
+        buffer_size = self.images[0].shape[:2] if not self.options.linear_luminance or self.options.as_gray == 1 else self.images[0].shape
 
         # Create placeholders for buffer
         input_data = [np.zeros(buffer_size, dtype=bool) for idx in range(len(self.images))]
@@ -132,8 +132,8 @@ class ImageDataset(InformativeBaseModel):
         )
         object.__setattr__(self, "buffer", buffer)
 
-        # Create placeholders for buffer_ab if as_gray==0 and color_treatment==1
-        if self.options.color_treatment == 1:
+        # Create placeholders for buffer_ab if as_gray==0 and linear_luminance is False
+        if not self.options.linear_luminance:
             buffer_other = ImageListIO(
                 input_data=input_data,
                 conserve_memory=True,  # <--- FORCE

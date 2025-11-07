@@ -305,13 +305,13 @@ class ImageProcessor(InformativeBaseModel):
         self.dataset.buffer = self.uint8_to_float255(self.dataset.images, self.dataset.buffer)
 
         # Apply relevant color treatment
-        buffer_other = self.dataset.buffer_other if self.options.color_treatment else None
+        buffer_other = self.dataset.buffer_other if not self.options.linear_luminance else None
         self.dataset.buffer, buffer_other = ColorTreatment.forward_color_treatment(
             rec_standard=self._rec_standard,
             input_images=self.dataset.buffer,
             output_images=self.dataset.buffer,
             output_other=buffer_other,
-            color_treatment=self.options.color_treatment,
+            linear_luminance=self.options.linear_luminance,
             as_gray=self.options.as_gray,
             conversion_type='sRGB_to_xyY')
         if buffer_other is not None:
@@ -372,7 +372,7 @@ class ImageProcessor(InformativeBaseModel):
                         cnt += 1
 
         # Apply relevant inverse color treatment
-        buffer_other = self.dataset.buffer_other if self.options.color_treatment else None
+        buffer_other = self.dataset.buffer_other if not self.options.linear_luminance else None
         if self.from_validation_test:
             self._final_buffers = self.dataset.buffer.copy_with_image_list()
 
@@ -381,7 +381,7 @@ class ImageProcessor(InformativeBaseModel):
             input_images=self.dataset.buffer,
             input_other=buffer_other,
             output_images=self.dataset.buffer,
-            color_treatment=self.options.color_treatment,
+            linear_luminance=self.options.linear_luminance,
             as_gray=self.options.as_gray,
             conversion_type='xyY_to_sRGB')
 

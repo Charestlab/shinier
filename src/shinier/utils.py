@@ -1,7 +1,4 @@
-# TODO: refactor class and function names; refactor docstrings to google style; get rid of cv2
 # TODO: Before V1 commit: Remove all revision comments (e.g. see round in MatlabOperators)
-# TODO: Before V1 commit: Remove debug points
-# TODO: Optimization: Check image type and use np.fft.rfft2 for faster computations.
 
 # External package imports
 from __future__ import annotations
@@ -10,7 +7,9 @@ from pathlib import Path
 import numpy as np
 from datetime import datetime
 from numpy.lib.stride_tricks import sliding_window_view
-from typing import Any, Optional, Tuple, Union, NewType, List, Iterable, Callable, Literal, Dict, Annotated, TYPE_CHECKING
+from typing import (
+    Any, Optional, Tuple, Union, NewType, List, Iterable,
+    Callable, Literal, Dict, Annotated, TYPE_CHECKING, get_args, get_origin)
 from PIL import Image
 from itertools import chain
 from pydantic import BeforeValidator
@@ -207,6 +206,82 @@ class MatlabOperators:
             return np.dot(image.astype(np.float64), RGB2GRAY_WEIGHTS['601'])
         else:
             return image
+
+
+def get_field_values_from_pydantic_model(field):
+    """Return all possible categorical values for a Pydantic field."""
+    ann = field.annotation
+
+    def extract_values(ann_type):
+        """Recursively extract possible values from Literal/Union types."""
+        origin = get_origin(ann_type)
+
+        # Case 1: Literal[...] → return its args
+        if origin is Literal:
+            return list(get_args(ann_type))
+
+        # Case 2: Union[...] → flatten all constituent possibilities
+        if origin is Union:
+            vals = []
+            for arg in get_args(ann_type):
+                if arg is type(None):
+                    vals.append(None)  # explicitly include None
+                else:
+                    vals.extend(extract_values(arg))
+            return vals
+
+        # Case 3: bool field
+        if ann_type is bool:
+            return [True, False]
+
+        # Case 4: Path → not categorical, but serialize default if defined
+        if ann_type is Path:
+            return [str(field.default)] if field.default is not None else [None]
+
+        # Case 5: Non-categorical base types
+        return []
+
+    vals = extract_values(ann)
+    default = field.default_factory() if getattr(field, "default_factory", None) is not None else field.default
+
+    # Fallbacks: defaults or None if nothing categorical
+    if not vals:
+        vals = [default if default is not None else None]
+
+    # Add default if not already present and meaningful
+    if default is not None and default not in vals:
+        vals.append(default)
+
+
+    # Fallbacks: defaults or None if nothing categorical
+    if not vals:
+        if field.default is not None:
+            return [field.default]
+        return [None]
+
+    # Add default if not already present and meaningful
+    if field.default is not None and field.default not in vals:
+        vals.append(field.default)
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_vals = [v for v in vals if not (v in seen or seen.add(v))]
+    return unique_vals
+
+
+def generate_pydantic_key_value_dict(model_cls):
+    """Return dict of field → possible values for a Pydantic model."""
+    possible_values = {}
+    default_values = {}
+    for name, field in model_cls.model_fields.items():
+        try:
+            possible_values[name] = get_field_values_from_pydantic_model(field)
+            default = field.default_factory() if getattr(field, "default_factory", None) is not None else field.default
+            default_values[name] = str(default) if isinstance(default, Path) else default
+        except Exception as e:
+            possible_values[name] = [f"Error: {e!r}"]
+            default_values[name] = None
+    return possible_values, default_values
 
 
 def imhist_plot(

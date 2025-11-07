@@ -1,25 +1,26 @@
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Callable, Tuple
+from typing import Optional, Dict, Any, List, Callable, Tuple, get_args
 import sys
 import numpy as np
 from datetime import datetime
 import re
 import warnings
 
+from shinier.Options import ACCEPTED_IMAGE_FORMATS
 from shinier import ImageDataset, Options, ImageProcessor, REPO_ROOT
 from shinier.utils import (
     Bcolors, console_log, load_np_array, colorize,
-    print_shinier_header
+    print_shinier_header, generate_pydantic_key_value_dict
 )
 
 # Compute repo root as parent of /src/shinier/
 IS_TTY = sys.stdin.isatty()
+ACCEPTED_FORMATS = list(get_args(ACCEPTED_IMAGE_FORMATS))
+
 
 #########################################
 #            GENERIC PROMPT             #
 #########################################
-
-
 def prompt(
     label: str,
     default: Optional[Any] = None,
@@ -163,8 +164,7 @@ def prompt(
 #########################################
 #            SHINIER CLI CORE           #
 #########################################
-
-def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray] = None) -> Options:
+def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray] = None) -> ImageProcessor:
     """Interactive CLI to configure and run SHINIER processing.
 
     Args:
@@ -174,51 +174,48 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
     Returns:
         Options: Configured SHINIER options object.
     """
-    print_shinier_header(is_tty=IS_TTY, version= "v0.1.0")
-    kwargs: Dict[str, Any] = {}
+    print_shinier_header(is_tty=IS_TTY, version="v0.1.0")
+    # kwargs: Dict[str, Any] = {}
+    opts = Options()
 
     # --------- General I/O ---------
     if images is None:
-        in_dir = prompt("Input folder (directory path)?", default=str(REPO_ROOT / "INPUT"),
-                        kind="str", validator=_validator_dir_exists)
-        kwargs["input_folder"] = Path(in_dir).expanduser().resolve()
+        in_dir = prompt(f"Input folder (directory path)? Accepted formats: {ACCEPTED_FORMATS}", default=str(opts.input_folder), kind="str")
+        opts.input_folder = Path(in_dir).expanduser().resolve()
+        image_paths = get_image_list(opts.input_folder)
+        color = Bcolors.OKGREEN if len(image_paths) > 0 else Bcolors.FAIL
+        console_log(msg=f'-> {len(image_paths)} image(s) found in {opts.input_folder}', indent_level=0, color=color)
     else:
-        kwargs["input_folder"] = None
+        opts.input_folder = None
 
-    formats = ["png", "tif", "jpg"]
-    fmt_choice = prompt("Images format?", default=1, kind="choice", choices=formats)
-    kwargs["images_format"] = formats[fmt_choice - 1]
-
-    out_dir = prompt("Output folder (directory path)?", default=str(REPO_ROOT / "OUTPUT"),
-                     kind="str", validator=_validator_dir_exists)
-    kwargs["output_folder"] = Path(out_dir).expanduser().resolve()
+    out_dir = prompt("Output folder (directory path)?", default=str(opts.output_folder), kind="str")
+    opts.output_folder = Path(out_dir).expanduser().resolve()
 
     # --------- Profile ---------
     prof = prompt("Options profile?", default=1, kind="choice", choices=["Default options", "Legacy options (will duplicate the Matlab SHINE TOOLBOX results)", "Customized options"])
-    if prof == 1:
-        kwargs["whole_image"] = 1
 
     # --------- Mask ---------
     if prof != 1:
         whole = prompt("Binary ROI masks: Analysis run on selected pixels (e.g. pixels >= 127)", default=1, kind="choice", choices=[
             "No ROI mask: Whole images will be analyzed",
-            "ROI masks: Analysis run on pixels != a background pixel value you will provide",
+            "ROI masks: Analysis run on pixels != a pixel value you will provide",
             "ROI masks: Analysis run on pixels != most frequent pixel value in the image",
             "ROI masks: Masks loaded from the `MASK` folder and analysis run on pixels >= 127"
         ])
-        kwargs["whole_image"] = whole
+
         if whole == 4:
             if masks is None:
-                mdir = prompt("Masks folder? Will use ", default=str(REPO_ROOT / "MASK"), kind="str", validator=_validator_dir_exists)
-                kwargs["masks_folder"] = Path(mdir).expanduser().resolve()
-                mfmt_choice = prompt("Masks format?", default=1, kind="choice", choices=formats)
-                kwargs["masks_format"] = formats[mfmt_choice - 1]
+                mdir = prompt(f"Masks folder (directory path)? Accepted formats: {ACCEPTED_FORMATS}. Will use ", default=str(REPO_ROOT / "MASK"), kind="str")
+                opts.masks_folder = Path(mdir).expanduser().resolve()
+                mask_paths = get_image_list(opts.masks_folder)
+                color = Bcolors.OKGREEN if len(mask_paths) > 0 else Bcolors.FAIL
+                console_log(msg=f'-> {len(mask_paths)} image(s) found in {opts.input_folder}', indent_level=0, color=color)
             else:
-                kwargs["masks_folder"] = None
-                kwargs["masks_format"] = None
+                opts.masks_folder = None
+        opts.whole_image = [1, 2, 2, 3][whole-1]
 
         if whole in (2, 3):
-            kwargs["background"] = 300 if whole == 3 else prompt("ROI masks: Analysis will be run on pixels != [input a value between 0–255]", default=127, kind="int", min_v=0, max_v=255)
+            opts.background = opts.background if whole == 3 else prompt("ROI masks: Analysis will be run on pixels != [input a value between 0–255]", default=127, kind="int", min_v=0, max_v=255)
 
     # --------- Processing Mode ---------
     mode = prompt("Processing mode", default=8, kind="choice", choices=[
@@ -232,66 +229,74 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
         "Spectrum + Histogram",
         "Dithering only"
     ])
-    kwargs["mode"] = mode
+    opts.mode = mode
 
     # --------- Legacy Mode ---------
     if prof == 2:
-        kwargs["legacy_mode"] = True
+        opts.legacy_mode = True
+        opts.model_post_init(None)  # This overrides default values with legacy values for conserve_memory, as_gray, linear_luminance, dithering, hist_specification and safe_lum_match
 
     # --------- Custom Profile ---------
     if prof == 3:
-        as_gray = prompt("Load as grayscale?", default=1, kind="choice", choices=[
-            "No conversion applied",
-            "Equal weighted sum of R, G and B pixels is applied. (Y' = 1/3 R' + 1/3 B' + 1/3 G')",
-            "Rec.ITU-R 601 is used (legacy mode; see Matlab).    (Y' = 0.299 R' + 0.587 G' + 0.114 B') (Standard-Definition monitors)",
-            "Rec.ITU-R 709 is used.                              (Y' = 0.2126 R' + 0.7152 G' + 0.0722 B') (High-Definition monitors)",
-            "Rec.ITU-R 2020 is used.                             (Y' = 0.2627 R' + 0.6780 G' + 0.0593 B') (Ultra-High-Definition monitors)"
+        as_gray = prompt("Load images as grayscale?", default="Yes", kind="bool")
+        opts.as_gray = as_gray == 1
+        linear_luminance = prompt("Are pixel values linearly related to luminance?", default=2, kind='choice', choices=[
+            f"{Bcolors.CHOICE_VALUE}Yes [legacy mode]{Bcolors.ENDC}\n\t- No color-space conversion.\n\t- Assuming input images are linear to luminance.\n\t- All transformations will be applied independently to each channel which may produce out-of-gamut values",
+            f"{Bcolors.DEFAULT_TEXT}No [default]{Bcolors.ENDC}:\n\t- Assumes input images are regular sRGB images, i.e. gamma-encoded.\n\t- Images will first be converted into CIE xyY color-space\n\t- All transformations will be applied on the luminance channel (Y) of the CIE xyY color space.\n\t- Images are then reconverted into sRGB using transformed luminance channel (Y) and original chromatic channels (x, y),\n\t- This mode should preserves color gamuts",
         ])
-        kwargs["as_gray"] = as_gray - 1
-        kwargs["conserve_memory"] = prompt("Conserve memory (temp dir, 1 image in RAM)?", default='y', kind="bool")
+        opts.linear_luminance = linear_luminance == 1
+        if not opts.linear_luminance:
+            rec_standard = prompt("Specifies the Rec. color standard used for RGB ↔ XYZ conversion (default = 2)", default=2, kind='choice', choices=[
+                f"Rec.601 (SDTV) [{Bcolors.CHOICE_VALUE}legacy mode]{Bcolors.ENDC}",
+                "Rec.709 (HDTV)",
+                "Rec.2020 (UHDTV, wide-gamut HDR)"
+            ])
+            opts.rec_standard = rec_standard
+
+        opts.conserve_memory = prompt("Conserve memory (creates a temporary directory and keep only one image in RAM)?", default='y', kind="bool")
 
         # Dithering
         dith_choices = ["No dithering", "Noisy-bit dithering", "Floyd–Steinberg dithering"]
         if mode != 9:
             dith = prompt("Apply dithering before final uint8 cast?", default=2,
                           kind="choice", choices=dith_choices)
-            kwargs["dithering"] = dith - 1
+            opts.dithering = dith - 1
         else:
             dith = prompt("Which dithering is going to be applied?", default=1,
                           kind="choice", choices=dith_choices[1:])
-            kwargs["dithering"] = dith
+            opts.dithering = dith
 
         # Seed
         now = datetime.now()
-        kwargs["seed"] = prompt("Provide seed for pseudo-random number generator or use time-stamped default", default=int(now.timestamp()), kind="int")
+        opts.seed = prompt("Provide seed for pseudo-random number generator or use time-stamped default", default=int(now.timestamp()), kind="int")
 
         # ---- Mode-Specific Options ----
         if mode == 1:
-            kwargs["safe_lum_match"] = prompt("Safe luminance matching (will ensure pixel values fall within [0, 255])?", default='n', kind="bool")
-            kwargs["target_lum"] = prompt("Target luminance list (mean, std)", default="0, 0", kind="tuple")
-            rgb_weights = prompt("RGB coefficients for luminance", default=3, kind="choice", choices=[
-                "Equal weights",
-                "Rec.ITU-R 601 (SD monitor)",
-                "Rec.ITU-R 709 (HD monitor)",
-                "Rec.ITU-R 2020 (UHD monitor)"
-            ])
-            kwargs["rgb_weights"] = rgb_weights
+            opts.safe_lum_match = prompt("Safe luminance matching (will ensure pixel values fall within [0, 255])?", default='n', kind="bool")
+            opts.target_lum = prompt("Target luminance list (mean, std)", default="0, 0", kind="tuple")
+            # rgb_weights = prompt("RGB coefficients for luminance", default=3, kind="choice", choices=[
+            #     "Equal weights",
+            #     "Rec.ITU-R 601 (SD monitor)",
+            #     "Rec.ITU-R 709 (HD monitor)",
+            #     "Rec.ITU-R 2020 (UHD monitor)"
+            # ])
+            # kwargs["rgb_weights"] = rgb_weights
 
         if mode in (2, 5, 6, 7, 8):
             ho = prompt("Histogram specification with SSIM optimization (see Avanaki, 2009)?", default='y', kind="bool")
-            kwargs["hist_optim"] = ho != 2
+            opts.hist_optim = ho != 2
             if ho == 2:
-                kwargs["hist_iterations"] = prompt("How many SSIM iterations?", default=5, kind="int", min_v=1, max_v=1_000_000)
-                kwargs["step_size"] = prompt("What is the SSIM step size?", default=34, kind="int", min_v=1, max_v=1_000_000)
-            kwargs["hist_specification"] = None
-            if not kwargs["hist_optim"]:
+                opts.hist_iterations = prompt("How many SSIM iterations?", default=5, kind="int", min_v=1, max_v=1_000_000)
+                opts.step_size = prompt("What is the SSIM step size?", default=34, kind="int", min_v=1, max_v=1_000_000)
+            opts.hist_specification = None
+            if not opts.hist_optim:
                 hs = prompt("Which histogram specification?", default=4, kind="choice", choices=[
                     "Exact with noise (legacy)",
                     "Coltuc with moving-average filters",
                     "Coltuc with gaussian filters",
                     "Coltuc with gaussian filters and noise if residual isoluminant pixels"
                 ])
-                kwargs["hist_specification"] = hs - 1
+                opts.hist_specification = hs - 1
 
             thp1 = prompt("What should be the target histogram?", default=1, kind="choice", choices=[
                 'Average histogram of input images',
@@ -300,32 +305,25 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             ])
             th = [None, 'equal'][thp1-1] if thp1 in [1, 2] else 'custom'
             if th == 'custom':
-                thp2 = prompt("Path to target histogram (.npy)?", kind="str")
+                thp2 = prompt("Path to target histogram (.npy/.txt/.csv)?", kind="str")
                 th = load_np_array(thp2)
             if th is not None:
-                kwargs["target_hist"] = th
+                opts.target_hist = th
 
         if mode in (3, 4, 5, 6, 7, 8):
             rsel = prompt("What type of rescaling after sf/spec?", default=2, kind="choice",
                           choices=["none", "min/max of all images", "avg min/max"])
-            kwargs["rescaling"] = rsel - 1
+            opts.rescaling = rsel - 1
             if prompt("Use a specific target spectrum?", default='n', kind="bool"):
                 tsp = prompt("Path to target spectrum (.npy/.txt/.csv)?", kind="str")
                 ts = load_np_array(tsp)
                 if ts is not None:
-                    kwargs["target_spectrum"] = ts
+                    opts.target_spectrum = ts
 
         if mode in (5, 6, 7, 8):
-            kwargs["iterations"] = prompt("How many composite iterations (hist/spec coupling)?", default=2, kind="int", min_v=1, max_v=1_000_000)
+            opts.iterations = prompt("How many composite iterations (hist/spec coupling)?", default=2, kind="int", min_v=1, max_v=1_000_000)
 
     # ---- Start SHINIER ----
-    try:
-        opts = Options(**kwargs)
-
-    except Exception as e:
-        raise ValueError(f"Invalid configuration: {e}\n")
-
-    dataset = ImageDataset(images=images, masks=masks, options=opts) if (images or masks) else ImageDataset(options=opts)
     prog_info = prompt('Select verbosity level', kind="choice", default=2, choices=[
             "None (quiet mode)",
             "Progress bar with ETA",
@@ -333,25 +331,37 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             "Detailed step-by-step info (no progress bar)",
             "Debug mode for developers (no progress bar)"
     ])
-    prog_info = prog_info - 2
-    ImageProcessor(dataset=dataset, verbose=prog_info, from_cli=True)
+    opts.verbose = prog_info - 2
+    dataset = ImageDataset(images=images, masks=masks, options=opts) if (images or masks) else ImageDataset(options=opts)
+    results = ImageProcessor(dataset=dataset, verbose=prog_info, from_cli=True)
 
     console_log("╔══════════════════════════════════════════════════════╗")
     console_log("║                      OPTIONS                         ║")
     console_log("╚══════════════════════════════════════════════════════╝")
-    # console_log("\n=== Options ===", color=Bcolors.SECTION)
-    for key, value in kwargs.items():
+    for key, value in dict(opts).items():
         console_log(f"{key:<20}: {value}", indent_level=1, color=Bcolors.OKBLUE)
 
+    return results
 
-#########################################
-#            UTILITIES                  #
-#########################################
 
-def _validator_dir_exists(v: str) -> Tuple[bool, str]:
-    """Validate that a directory exists."""
-    p = Path(v).expanduser().resolve()
-    return p.is_dir(), f"Directory not found: {p}"
+def get_image_list(src_path: Path):
+
+    def is_image(file: Path):
+        return file.is_file() and len(file.suffix) > 1 and file.suffix.lower()[1:] in ACCEPTED_FORMATS
+
+    # Convert to Path if input_data is a string
+    input_path = Path(src_path) if isinstance(src_path, str) else src_path
+
+    # Handle cases with wildcards
+    if "*" in str(input_path):  # Check if it's a glob pattern
+        directory = input_path.parent
+        pattern = input_path.name
+        all_files = sorted(directory.glob(pattern))
+    else:
+        all_files = [input_path] if input_path.is_file() else sorted(input_path.glob("*"))
+
+    # Filter to include only recognized image files
+    return sorted([p for p in all_files if is_image(p)])
 
 
 if __name__ == "__main__":

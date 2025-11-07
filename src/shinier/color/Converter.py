@@ -12,7 +12,7 @@ Validation tests: /tests/validation_tests/Converter_validation_tests.py
     - Results replicate the colour-science package (https://pypi.org/project/colour-science/)
     across all tested colour standards (Rec.601, Rec.709, Rec.2020).
 
-    - Slight deviation observed for Rec.601 arise from our use of a piecewise
+    - Slight deviation observed for Rec.601 arises from our use of a piecewise
     sRGB/Rec.709-style transfer function (γ ≈ 2.2) instead of the historical
     pure power-law (γ = 2.8) applied in older analog-era Rec.601 specifications.
     This choice ensures consistency with MATLAB’s rgb2gray and modern digital
@@ -22,7 +22,7 @@ Validation tests: /tests/validation_tests/Converter_validation_tests.py
 from __future__ import annotations
 
 import numpy as np
-from typing import Literal
+from typing import Literal, Union, Optional
 from pathlib import Path
 from pydantic import Field, ConfigDict, model_validator
 from PIL import Image
@@ -91,7 +91,6 @@ class ColorConverter(InformativeBaseModel):
         object.__setattr__(self, "M_RGB2XYZ", cfg["M_RGB2XYZ"].copy())
         object.__setattr__(self, "M_XYZ2RGB", np.linalg.inv(cfg["M_RGB2XYZ"]))
         return self
-
 
     # ------------------------------------------------------------------
     # sRGB ↔ linRGB
@@ -199,7 +198,7 @@ class ColorTreatment(ColorConverter):
             rec_standard: REC_STANDARD,
             input_images: ImageListType,
             output_images: ImageListType,
-            color_treatment: Literal[0, 1],
+            linear_luminance: bool,
             as_gray: Literal[0, 1],
             output_other: Optional[ImageListType] = None,
             conversion_type: Literal['sRGB_to_xyY', 'sRGB_to_lab'] = 'sRGB_to_xyY') -> Tuple[ImageListType, Optional[ImageListType]]:
@@ -217,8 +216,8 @@ class ColorTreatment(ColorConverter):
             output_images (ImageListType): Temporary buffer to store the processed image data, must match the
                 structure of `images`.
             output_other (Optional[ImageListType]): Secondary buffer to store optional components (if applicable).
-            color_treatment (Literal[0, 1]): Defines whether the color treatment is applied.
-                A value of 0 disables color treatment, while 1 enables it.
+            linear_luminance (bool): Defines whether the color treatment is applied.
+                If False, color treatment is enabled.
             as_gray (Literal[0, 1]): Determines whether to output images in grayscale format
                 (1 for grayscale, 0 for retaining color components).
             conversion_type (Literal['sRGB_to_xyY', 'sRGB_to_lab']): Specifies the type of color space
@@ -230,20 +229,20 @@ class ColorTreatment(ColorConverter):
             luminance channel and the other containing auxiliary channels.
 
         Raises:
-            ValueError: If `color_treatment` is 1 and `output_other` is not provided.
+            ValueError: If `linear_luminance` is False and `output_other` is not provided.
         """
-        if color_treatment == 1 and as_gray == 0 and output_other is None:
-            raise ValueError("output_other cannot be None when color_treatment == 1 and as_gray is false")
+        if not linear_luminance and as_gray == 0 and output_other is None:
+            raise ValueError("output_other cannot be None when linear_luminance == 1 and as_gray is false")
 
         converter = ColorConverter(standard=rec_standard)
 
         # Promote grayscale (H, W) → (H, W, 3)
         if input_images.n_dims != 3:
             for idx, image in enumerate(input_images):
-                output_images[idx] = np.repeat(image[..., np.newaxis], 3, axis=-1)
+                output_images[idx] = np.repeat(image[..., None], 3, axis=-1)
 
         # --- CASE 1: No color treatment ----------------------------------------
-        if color_treatment == 0:
+        if linear_luminance:
             # Linear-per-channel mode (no perceptual conversion)
             if as_gray == 1:
                 # Convert to grayscale using simple mean
@@ -256,7 +255,7 @@ class ColorTreatment(ColorConverter):
             return output_images, None
 
         # --- CASE 2: Color treatment branch -------------------------------------
-        elif color_treatment == 1:
+        elif not linear_luminance:
             for idx, image in enumerate(output_images):
                 if conversion_type == "sRGB_to_xyY":
                     # Convert from sRGB → xyY (internally handles gamma decoding)
@@ -284,15 +283,14 @@ class ColorTreatment(ColorConverter):
 
             return output_images, output_other
         else:
-            raise ValueError(f"Unknown color treatment `{color_treatment}`")
-
+            raise ValueError(f"Unknown linear luminance `{linear_luminance}`")
 
     @staticmethod
     def backward_color_treatment(
             rec_standard: REC_STANDARD,
             input_images: ImageListType,
             output_images: ImageListType,
-            color_treatment: Literal[0, 1],
+            linear_luminance: bool,
             as_gray: Literal[0, 1],
             input_other: Optional[ImageListType] = None,
             conversion_type: Literal['xyY_to_sRGB', 'lab_to_sRGB'] = 'xyY_to_sRGB') -> ImageListType:
@@ -314,10 +312,13 @@ class ColorTreatment(ColorConverter):
             input_images (ImageListType): A list or array of images that have undergone prior
                 color treatment and need restoration.
 
-            input_other (Optional[ImageListType]): Additional arrays containing auxiliary
-                data required for certain reconversions. Mandatory if `color_treatment=1`.
+            output_images (ImageListType): Temporary buffer to store the processed image data, must match the
+                structure of `images`.
 
-            color_treatment (Literal[0, 1]): Indicator of whether color treatment was
+            input_other (Optional[ImageListType]): Additional arrays containing auxiliary
+                data required for certain reconversions. Mandatory if `linear_luminance=1`.
+
+            linear_luminance (bool): Indicator of whether color treatment was
                 applied; 0 means no treatment, 1 means treatment was applied.
 
             as_gray (Literal[0, 1]): Determines whether output should be a grayscale
@@ -328,7 +329,7 @@ class ColorTreatment(ColorConverter):
                 or 'lab_to_sRGB' to transform Lab to sRGB. Defaults to 'xyY_to_sRGB'.
 
         Raises:
-            ValueError: If `color_treatment` is 1 and `input_other` is None.
+            ValueError: If `linear_luminance` is False and `input_other` is None.
 
         Returns:
             ImageListType: The processed set of images converted back to their original
@@ -337,13 +338,13 @@ class ColorTreatment(ColorConverter):
         converter = ColorConverter(standard=rec_standard)
 
         # --- CASE 1: No color treatment ----------------------------------------
-        if color_treatment == 0:
+        if linear_luminance:
             # Nothing to undo; images already linear or grayscale
             return input_images
 
         # --- CASE 2: Color treatment branch -----------------------------------
-        if color_treatment == 1 and as_gray == 0 and (input_other is None or input_other.n_channels != 2):
-            raise ValueError("input_other should be (H, W, 2) matrices when color_treatment == 1 and as_gray is False")
+        if not linear_luminance and as_gray == 0 and (input_other is None or input_other.n_channels != 2):
+            raise ValueError("input_other should be (H, W, 2) matrices when linear_luminance == 1 and as_gray is False")
 
         for idx, Y in enumerate(input_images):
 
@@ -373,7 +374,6 @@ class ColorTreatment(ColorConverter):
                 output_images[idx] = np.dstack([Yg, Yg, Yg]) * 255
 
         return output_images
-
 
 
 def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: RGB_STANDARD = 'equal') -> np.ndarray:
