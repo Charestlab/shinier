@@ -15,9 +15,9 @@ This new version introduces major improvements:
 - 🎨 **Color Processing** — New modes for color image control with modern color-space standards (Rec.601 / Rec.709 / Rec.2020).
 - 🖼️ **Dithering Support** — Reduces quantization artifacts and enhances output image quality.
 - ⚡ **Optimized Performance** — Efficient memory management and faster processing for large image sets.
-- 🕰 **Legacy Mode** — Ensures full backward compatibility with MATLAB’s original SHINE toolbox.  
 - 🔢 **High-Precision Arithmetic** — Computations in floating-point precision rather than 8-bit integer space, minimizing rounding errors in multi-stage processing.  
 - 📦 **Object-Oriented Design** — Modular, extensible architecture with clean API and CLI interfaces.  
+- 🕰 **Legacy Mode** — Ensures full backward compatibility with MATLAB’s original SHINE toolbox.
 
 
 ## 🚀 Quick Start
@@ -51,7 +51,21 @@ pip install -e .
 ```
 
 
+### 🧩 Demo Example
 
+```python
+from shinier import Options, ImageDataset, ImageProcessor
+from matplotlib import pyplot as plt
+
+opt = Options(mode=1)  # Luminance matching
+dataset = ImageDataset(options=opt)
+plt.imshow(output_images[0])
+
+results = ImageProcessor(dataset=dataset, options=opt, verbose=1)
+output_images = results.get_results()
+plt.imshow(output_images[0])
+
+```
 
 ## 📋 Table of Contents
 

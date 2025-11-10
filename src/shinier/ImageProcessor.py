@@ -14,8 +14,8 @@ except ImportError:
     plt = None
 
 # Local imports
-from shinier.base import InformativeBaseModel, ImageListType
-from shinier import ImageDataset, Options
+from shinier.base import InformativeBaseModel
+from shinier import ImageDataset, Options, ImageListIO
 from shinier.utils import (
     beta_bounds_from_ssim, separate, imhist, im3D, cart2pol, pol2cart, soft_clip,
     rescale_images255, get_images_spectra, ssim_sens, spectrum_plot, imhist_plot, sf_plot, avg_hist,
@@ -97,9 +97,10 @@ class ImageProcessor(InformativeBaseModel):
     _sum_bool_masks: List = PrivateAttr(default_factory=list)
     _complete: bool = PrivateAttr(default=False)
     _rec_standard: str = PrivateAttr(default="rec709")
+    _target_lum: Optional[List[Tuple[float, float]]] = PrivateAttr(default=None)
     _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
     _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
-    _final_buffers: Optional[ImageListType] = PrivateAttr(default=None)
+    _final_buffers: Optional[ImageListIO] = PrivateAttr(default=None)
 
     def post_init(self, __context: Any) -> None:
         """Run initialization logic after Pydantic validation and only once at instantiation."""
@@ -392,7 +393,7 @@ class ImageProcessor(InformativeBaseModel):
             dithering=self.options.dithering)
         self._complete = True
 
-    def dithering(self, input_collection: ImageListType, output_collection: ImageListType, dithering: Literal[0, 1, 2]):
+    def dithering(self, input_collection: ImageListIO, output_collection: ImageListIO, dithering: Literal[0, 1, 2]):
         """
         Applies a dithering effect to a collection of images based on the specified dithering mode.
 
@@ -505,7 +506,9 @@ class ImageProcessor(InformativeBaseModel):
             if np.any(predicted_min < -1e-3) or np.any(predicted_max > (255 + 1e-3)):
                 raise Exception(f'Out-of-range values detected: mins = {list(predicted_min)}, maxs = {list(predicted_max)}')
 
+        self._target_lum = []
         for idx, im in enumerate(buffer_collection):
+            self._target_lum.append((target_mean, target_std))
             im2 = im3D(im.copy())
             M, SD, min, max = compute_stats(im=im2, binary_mask=self.bool_masks[idx])
 
