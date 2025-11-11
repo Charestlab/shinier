@@ -2,6 +2,8 @@
 
 # External package imports
 from __future__ import annotations
+
+import re
 import warnings
 from pathlib import Path
 import numpy as np
@@ -15,11 +17,10 @@ from itertools import chain
 from pydantic import BeforeValidator
 try:
     import matplotlib.pyplot as plt
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
 except ImportError:
     plt = None
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import re
-
+from shinier.color import RGB2GRAY_WEIGHTS
 # Local package imports
 from .base import ImageListType
 from . import _HAS_CYTHON
@@ -1845,7 +1846,7 @@ def beta_bounds_from_ssim(gradients: np.ndarray, ssim: List[float], binary_mask:
     return out
 
 
-def ssim_sens(image1: np.ndarray, image2: np.ndarray, data_range: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray]:
+def ssim_sens(image1: np.ndarray, image2: np.ndarray, use_sample_covariance: bool, data_range: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute the Structural Similarity Index (SSIM) and its gradient.
 
