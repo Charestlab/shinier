@@ -5,6 +5,7 @@ except ImportError:
     plt = None
 
 from shinier.utils import imhist_plot
+from shinier import REPO_ROOT
 
 from pathlib import Path
 import os
@@ -12,8 +13,7 @@ import numpy as np
 from PIL import Image
 
 # Define the input folder
-input_folder = "/Users/ndr/GIT_REPO/GITHUB/shine/shinier/INPUT/"
-
+input_folder = os.path.join(REPO_ROOT,"INPUT")
 # Collect all .png files from the folder
 png_files = [f for f in os.listdir(input_folder) if f.lower().endswith(".png")]
 
@@ -48,12 +48,15 @@ target_spectrum /= len(magnitudes)
 
 # Luminance matching
 # inp = "/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-1/master/case-4d59c1014b72/INPUT"
-inp = "/Users/ndr/GIT_REPO/GITHUB/shine/shinier/INPUT/"
+inp = os.path.join(REPO_ROOT,"INPUT")
 # oup = "/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-1/master/case-4d59c1014b72"
-oup = "/Users/ndr/GIT_REPO/GITHUB/shine/shinier/MASK/"
-masks_folder = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/MASK_64X64')
-combo = {'input_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_64X64'), 'output_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/OUTPUT'), 'masks_folder': masks_folder, 'whole_image': 1, 'background': 300, 'mode': 3, 'as_gray': True, 'linear_luminance': 0, 'rec_standard': 1, 'dithering': 0, 'conserve_memory': False, 'seed': None, 'legacy_mode': True, 'safe_lum_match': False, 'target_lum': (0, 0.0), 'hist_optim': True, 'hist_specification': 1, 'hist_iterations': 3, 'target_hist': None, 'rescaling': 0, 'target_spectrum': 'unit_test', 'iterations': 1, 'verbose': -1}
-combo = {'input_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_64X64'), 'output_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/OUTPUT'), 'masks_folder': masks_folder, 'whole_image': 1, 'background': 300, 'mode': 2, 'as_gray': True, 'linear_luminance': 0, 'rec_standard': 1, 'dithering': 0, 'conserve_memory': False, 'seed': None, 'legacy_mode': True, 'safe_lum_match': False, 'target_lum': (0, 0.0), 'hist_optim': True, 'hist_specification': 1, 'hist_iterations': 3,'target_hist': None, 'rescaling': 0, 'target_spectrum': None, 'iterations': 1, 'verbose': 3}
+oup = os.path.join(REPO_ROOT,"MASKS")
+masks_folder = os.path.join(REPO_ROOT,"tests", "IMAGES", "MASK_64X64")
+sample_folder = os.path.join(REPO_ROOT,"tests", "IMAGES", "SAMPLE_64X64")
+output_folder = os.path.join(REPO_ROOT,"OUTPUT")
+
+combo = {'input_folder': sample_folder, 'output_folder': output_folder, 'masks_folder': masks_folder, 'whole_image': 1, 'background': 300, 'mode': 3, 'as_gray': True, 'linear_luminance': 0, 'rec_standard': 1, 'dithering': 0, 'conserve_memory': False, 'seed': None, 'legacy_mode': True, 'safe_lum_match': False, 'target_lum': (0, 0.0), 'hist_optim': True, 'hist_specification': 1, 'hist_iterations': 3, 'target_hist': None, 'rescaling': 0, 'target_spectrum': 'unit_test', 'iterations': 1, 'verbose': -1}
+combo = {'input_folder': sample_folder, 'output_folder': output_folder, 'masks_folder': masks_folder, 'whole_image': 1, 'background': 300, 'mode': 2, 'as_gray': True, 'linear_luminance': 0, 'rec_standard': 1, 'dithering': 0, 'conserve_memory': False, 'seed': None, 'legacy_mode': True, 'safe_lum_match': False, 'target_lum': (0, 0.0), 'hist_optim': True, 'hist_specification': 1, 'hist_iterations': 3,'target_hist': None, 'rescaling': 0, 'target_spectrum': None, 'iterations': 1, 'verbose': 3}
 bm = ImageListIO(input_data=masks_folder)
 my_options = Options(**combo)
 # my_options = Options(

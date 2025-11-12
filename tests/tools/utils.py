@@ -7,7 +7,7 @@ import re
 import uuid
 from pathlib import Path
 import sqlite3
-from typing import Any, Dict, Iterable, List, Tuple, Union, Literal, get_args
+from typing import Any, Dict, Iterable, List, Tuple, Union, Literal, Optional, get_args
 import pickle
 import copy
 import numpy as np
