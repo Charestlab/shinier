@@ -20,7 +20,6 @@ try:
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 except ImportError:
     plt = None
-from shinier.color import RGB2GRAY_WEIGHTS
 # Local package imports
 from .base import ImageListType
 from . import _HAS_CYTHON
@@ -204,7 +203,7 @@ class MatlabOperators:
     def rgb2gray(image):
         """Replicates MATLAB's rgb2gray function (ITU-R rec601)."""
         if image.ndim == 3:
-            return np.dot(image.astype(np.float64), RGB2GRAY_WEIGHTS['601'])
+            return rgb2gray(image = image, conversion_type = '601')
         else:
             return image
 
