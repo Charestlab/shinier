@@ -145,7 +145,7 @@ def test_target_hist_valid_and_invalid_shapes(tmp_dirs):
     valid_1d = np.zeros((256,))
     valid_3ch = np.zeros((256, 3))
     _ = Options(input_folder=in_dir, output_folder=out_dir, target_hist=valid_1d)
-    _ = Options(input_folder=in_dir, output_folder=out_dir, target_hist=valid_3ch)
+    _ = Options(input_folder=in_dir, output_folder=out_dir, target_hist=valid_3ch, linear_luminance=True)
 
     bad_shape = np.zeros((128,))
     with pytest.raises(ValueError):
@@ -221,9 +221,9 @@ def test_export_schema(tmp_dirs, tmp_path):
     in_dir, out_dir, _ = tmp_dirs
     opt = Options(input_folder=in_dir, output_folder=out_dir)
     schema_path = tmp_path / "schema.json"
-    p = opt.export_schema(schema_path)
-    assert p.exists()
-    txt = p.read_text()
+    opt.export_schema(schema_path)
+    assert schema_path.exists()
+    txt = schema_path.read_text()
     assert "title" in txt and "properties" in txt
 
 

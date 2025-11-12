@@ -153,8 +153,10 @@ def test_validate_raises_if_single_image(test_tmpdir: Path):
     Image.fromarray(_make_rgb()).save(inp / "one.png")
 
     opt = Options(input_folder=inp, output_folder=out, whole_image=1, mode=1)
-    with pytest.raises(ValueError):
+    with pytest.raises(RuntimeError) as exc_info:
         ImageDataset(images=None, options=opt)
+    cause = exc_info.value.__cause__
+    assert isinstance(cause, ValueError)
 
 
 def test_masks_count_must_be_1_or_equal_to_images(imgs_dir, masks_dir, test_tmpdir: Path):
@@ -170,8 +172,11 @@ def test_masks_count_must_be_1_or_equal_to_images(imgs_dir, masks_dir, test_tmpd
         input_folder=inp, output_folder=out,
         whole_image=3, masks_folder=masks_dir, mode=1
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(RuntimeError) as exc_info:
         ImageDataset(images=None, options=opt)
+
+    cause = exc_info.value.__cause__
+    assert isinstance(cause, ValueError)
 
 
 def test_masks_shape_must_match_images(imgs_dir, masks_dir, test_tmpdir: Path):
@@ -185,8 +190,11 @@ def test_masks_shape_must_match_images(imgs_dir, masks_dir, test_tmpdir: Path):
         input_folder=inp, output_folder=out,
         whole_image=3, masks_folder=masks_dir, mode=1,
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(RuntimeError) as exc_info:
         ImageDataset(images=None, options=opt)
+
+    cause = exc_info.value.__cause__
+    assert isinstance(cause, ValueError)
 
 
 def test_mode_ge3_creates_magnitude_phase_placeholders(imgs_dir, test_tmpdir: Path):
