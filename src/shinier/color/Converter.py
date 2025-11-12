@@ -21,8 +21,9 @@ Validation tests: /tests/validation_tests/Converter_validation_tests.py
 
 from __future__ import annotations
 
+import re
 import numpy as np
-from typing import Literal, Union, Optional
+from typing import Literal, Union, Optional, Tuple
 from pathlib import Path
 from pydantic import Field, ConfigDict, model_validator
 from PIL import Image
@@ -115,11 +116,14 @@ class ColorConverter(InformativeBaseModel):
     # linRGB ↔ XYZ
     # ------------------------------------------------------------------
     def linRGB_to_xyz(self, linRGB: np.ndarray) -> np.ndarray:
-        return linRGB @ self.M_RGB2XYZ.T
+        out = np.empty_like(linRGB)
+        np.matmul(linRGB.reshape(-1, 3), self.M_RGB2XYZ.T, out=out.reshape(-1, 3)) # linRGB @ self.M_RGB2XYZ.T
+        return out
 
     def xyz_to_linRGB(self, xyz: np.ndarray) -> np.ndarray:
-        linRGB = xyz @ self.M_XYZ2RGB.T
-        return np.clip(linRGB, 0, 1)
+        out = np.empty_like(xyz)
+        np.matmul(xyz.reshape(-1, 3), self.M_XYZ2RGB.T, out=out.reshape(-1, 3)) # xyz @ self.M_XYZ2RGB.T
+        return np.clip(out, 0, 1, out=out)
 
     # ------------------------------------------------------------------
     # XYZ ↔ xyY

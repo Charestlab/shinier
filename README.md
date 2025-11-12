@@ -101,7 +101,7 @@ While SHINIER provides MATLAB-compatible rounding for **legacy compatibility**, 
 4. **Numerical Stability**: Better performance in floating-point arithmetic
 
 **References:**
-- [**IEEE 754-2019**](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8766229&tag=1): "IEEE Standard for Floating-Point Arithmetic"
+- [**IEEE 754-2019**](https://ieeexplore.ieee.org/document/8766229): "IEEE Standard for Floating-Point Arithmetic"
 - [**Goldberg, D. (1991)**](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html): "What Every Computer Scientist Should Know About Floating-Point Arithmetic"
 - [**Kahan, W. (1996)**](https://people.eecs.berkeley.edu/~wkahan/ieee754status/IEEE754.PDF): "IEEE Standard 754 for Binary Floating-Point Arithmetic"
 
