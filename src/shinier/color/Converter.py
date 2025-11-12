@@ -380,7 +380,7 @@ class ColorTreatment(ColorConverter):
         return output_images
 
 
-def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: RGB_STANDARD = 'equal') -> np.ndarray:
+def rgb2gray(image: Union[np.ndarray, Image.Image], convertion_type: RGB_STANDARD = 'equal') -> np.ndarray:
     """
     Convert an R'G'B' image to grayscale (luma, Y′) using ITU luma coefficients.
 
@@ -388,7 +388,7 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: RGB_STANDAR
         image (np.ndarray or Image.Image):
             RGB image array with last dimension = 3. Assumed to be gamma-encoded R′G′B′ (i.e., not linear light), which
             matches typical sRGB/Rec.709-style images loaded from files (e.g. png or jpg images).
-        conversion_type : {"equal", "rec601", "rec709", "rec2020"}, default "rec709"
+        convertion_type : {"equal", "rec601", "rec709", "rec2020"}, default "rec709"
             Choice of luma standard:
               - "equal" → Y′ = 0.333 R′ + 0.333 G′ + 0.333 B′
               - "rec601" → Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′
@@ -409,12 +409,12 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: RGB_STANDAR
         image = np.array(image)
     elif not isinstance(image, np.ndarray):
         raise ValueError(f"Invalid image type {type(image)}. Supported values are Image.Image and np.ndarray")
-    ct = ['equal'] if conversion_type.lower() == 'equal' else re.findall(r'\d+', conversion_type)
-    if np.sum([c not in conversion_type for c in ['709', '601', '2020', 'equal']])==1 or len(ct) == 0:
-        raise ValueError('Conversion type must be either 709, 601, 2020, equal')
+
+    if convertion_type not in RGB2GRAY_WEIGHTS.keys():
+        raise ValueError('Conversion type must be either rec709, rec601, rec2020 or equal')
 
     if image.ndim > 2:
-        return np.dot(image[..., :3].astype(np.float64), RGB2GRAY_WEIGHTS[ct[0]])
+        return np.dot(image[..., :3].astype(np.float64), RGB2GRAY_WEIGHTS[convertion_type])
     elif image.ndim == 2:
         return image
     else:

@@ -100,6 +100,7 @@ class ImageProcessor(InformativeBaseModel):
     _target_lum: Optional[List[Tuple[float, float]]] = PrivateAttr(default=None)
     _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
     _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
+    _target_sf: Optional[np.ndarray] = PrivateAttr(default=None)
     _final_buffers: Optional[ImageListIO] = PrivateAttr(default=None)
 
     def post_init(self, __context: Any) -> None:
@@ -374,8 +375,8 @@ class ImageProcessor(InformativeBaseModel):
 
         # Apply relevant inverse color treatment
         buffer_other = self.dataset.buffer_other if not self.options.linear_luminance else None
-        if self.from_validation_test:
-            self._final_buffers = self.dataset.buffer.copy_with_image_list()
+        # if self.from_validation_test:
+        self._final_buffers = self.dataset.buffer.copy_with_image_list()
 
         self.dataset.buffer = ColorTreatment.backward_color_treatment(
             rec_standard=self._rec_standard,
@@ -762,6 +763,13 @@ class ImageProcessor(InformativeBaseModel):
         ann_counts = np.bincount(r1)
         ann_counts[ann_counts == 0] = 1  # protect against divide-by-zero
 
+        # Compute target rotational average
+        if self._target_sf is None:
+            self._target_sf = []
+            for ch in range(n_channels):
+                self._target_sf.append(rot_avg(self._target_spectrum[:, :, ch], radius=r1))
+            self._target_sf = np.stack(self._target_sf).T
+
         # Match spatial frequency on rotational average of the magnitude spectrum
         for idx, image in enumerate(buffer_collection):
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
@@ -774,8 +782,8 @@ class ImageProcessor(InformativeBaseModel):
                 fft_image = magnitude[:, :, self._processed_channel]
 
                 # Rotational averages (target vs source) as MEANS over annuli
-                target_ra = rot_avg(self._target_spectrum[:, :, self._processed_channel], radius=r1)
-                source_ra = rot_avg(fft_image, radius=r1)
+                target_ra = self._target_sf[:, self._processed_channel].squeeze()
+                source_ra = rot_avg(fft_image, radius=r1).squeeze()
 
                 # Per-radius scale coefficients; avoid divide-by-zero on empty/zero annuli
                 coef = target_ra / np.maximum(source_ra, 1e-12)

@@ -1,4 +1,6 @@
 # TODO: Before V1 commit: Remove all revision comments (e.g. see round in MatlabOperators)
+# TODO: legacy_mode for SSIM optimization
+# TODO: should target_hist, target_spectrum and target_sf be fixed for composite modes
 
 # External package imports
 from __future__ import annotations
@@ -14,18 +16,19 @@ from typing import (
     Callable, Literal, Dict, Annotated, TYPE_CHECKING, get_args, get_origin)
 from PIL import Image
 from itertools import chain
-from pydantic import BeforeValidator
+
 try:
+    from matplotlib.gridspec import GridSpec
     import matplotlib.pyplot as plt
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 except ImportError:
     plt = None
+
 # Local package imports
-from .base import ImageListType
 from . import _HAS_CYTHON
 if TYPE_CHECKING:
     from .ImageListIO import ImageListIO
-    from shinier.color.Converter import rgb2gray, gray2rgb
+    from shinier.color.Converter import rgb2gray
 
 if _HAS_CYTHON:
     from . import _cconvolve
