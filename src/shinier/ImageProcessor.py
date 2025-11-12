@@ -101,7 +101,8 @@ class ImageProcessor(InformativeBaseModel):
     _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
     _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
     _target_sf: Optional[np.ndarray] = PrivateAttr(default=None)
-    _final_buffers: Optional[ImageListIO] = PrivateAttr(default=None)
+    _final_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
+    _initial_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
 
     def post_init(self, __context: Any) -> None:
         """Run initialization logic after Pydantic validation and only once at instantiation."""
@@ -316,6 +317,10 @@ class ImageProcessor(InformativeBaseModel):
             linear_luminance=self.options.linear_luminance,
             as_gray=self.options.as_gray,
             conversion_type='sRGB_to_xyY')
+
+        # Initialize new instance and copy
+        self._initial_buffer = self.dataset.buffer.new_copy(to_list=False)
+
         if buffer_other is not None:
             self.dataset.buffer_other = buffer_other
 
@@ -376,7 +381,7 @@ class ImageProcessor(InformativeBaseModel):
         # Apply relevant inverse color treatment
         buffer_other = self.dataset.buffer_other if not self.options.linear_luminance else None
         # if self.from_validation_test:
-        self._final_buffers = self.dataset.buffer.copy_with_image_list()
+        self._final_buffer = self.dataset.buffer.new_copy(to_list=False)
 
         self.dataset.buffer = ColorTreatment.backward_color_treatment(
             rec_standard=self._rec_standard,
@@ -467,7 +472,7 @@ class ImageProcessor(InformativeBaseModel):
             #     SD = MatlabOperators.mean2(im[binary_mask]) if self.options.legacy_mode else np.mean(im[binary_mask])
             # else:
             #     convertion_type = RGB2GRAY_WEIGHTS['int2key'][self.options.rgb_weights]
-            #     ch_weights = RGB2GRAY_WEIGHTS[convertion_type]
+            #     ch_weights = RGB2GRAY_WEIGHTS[conversion_type]
             #     ch_means = np.array([np.mean(im[:, :, c][binary_mask[:, :, c]]) for c in range(3)])
             #     ch_stds = np.array([np.std(im[:, :, c][binary_mask[:, :, c]]) for c in range(3)])
             #     M = np.sum(ch_means * ch_weights)
@@ -592,6 +597,7 @@ class ImageProcessor(InformativeBaseModel):
         # Match the histogram
         self._processed_channel = None
         for idx, image in enumerate(buffer_collection):
+            original_image = self._initial_buffer[idx]
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
             console_log(msg=f"\nImage {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
 
@@ -621,7 +627,7 @@ class ImageProcessor(InformativeBaseModel):
 
                 # Compute Structural Similarity and gradient map (sens), along with max and min
                 if self._sub_iter < n_iter - 1:
-                    sens, ssim = ssim_sens(image, Y, data_range=n_bins-1, use_sample_covariance=False, binary_mask=self.bool_masks[idx])
+                    sens, ssim = ssim_sens(original_image, Y, data_range=n_bins-1, use_sample_covariance=False, binary_mask=self.bool_masks[idx])
 
                 if self._sub_iter == n_iter - 1:
                     break

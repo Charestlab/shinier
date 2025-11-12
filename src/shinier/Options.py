@@ -52,7 +52,7 @@ class Options(InformativeBaseModel):
             8 = spec_match & hist_match (default)
             9 = only dithering
 
-        as_gray (bool): Convertion into grayscale images (default = 0).
+        as_gray (bool): Conversion into grayscale images (default = 0).
             False = No conversion applied.
             True = Convert into grayscale images.
                 - Using `rec_standard` if `linear_luminance` is False

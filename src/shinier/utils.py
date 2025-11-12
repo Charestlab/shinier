@@ -206,7 +206,7 @@ class MatlabOperators:
     def rgb2gray(image):
         """Replicates MATLAB's rgb2gray function (ITU-R rec601)."""
         if image.ndim == 3:
-            return rgb2gray(image = image, conversion_type = '601')
+            return rgb2gray(image=image, conversion_type='rec601')
         else:
             return image
 
@@ -1848,7 +1848,7 @@ def beta_bounds_from_ssim(gradients: np.ndarray, ssim: List[float], binary_mask:
     return out
 
 
-def ssim_sens(image1: np.ndarray, image2: np.ndarray, use_sample_covariance: bool, data_range: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray]:
+def ssim_sens(image1: np.ndarray, image2: np.ndarray, data_range: Optional[float] = None, use_sample_covariance: bool = False, binary_mask: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute the Structural Similarity Index (SSIM) and its gradient.
 
@@ -2167,7 +2167,7 @@ def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], t
     return corr, rms
 
 
-def sf_match_validation(images: np.ndarray, target_spectrum: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+def sf_match_validation(images: np.ndarray, target_sf: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """
     Validates spectral match between a set of input images by comparing their
     rotational averages of magnitude spectra against a computed target spectrum.
@@ -2177,7 +2177,7 @@ def sf_match_validation(images: np.ndarray, target_spectrum: Optional[np.ndarray
     Args:
         images (np.ndarray): Array of images for which the spectral validation
             is performed. Each image is assumed to have three channels (e.g., RGB).
-        target_spectrum (Optional[np.ndarray]). A target spectrum to compare against.
+        target_sf (Optional[np.ndarray]). A target rotational average to compare against.
         normalize_rmse (Optional[bool]): Whether to normalize the RMSE
 
     Returns:
@@ -2620,6 +2620,7 @@ def im3D(image: np.ndarray):
         image (np.ndarray) with 3D: grayscale (H, W) -> (H, W, 1); RGB (H, W, 3) stay the same.
 
     """
+    image = np.asarray(image)
     return np.stack((image,), axis=-1) if image.ndim != 3 else image
 
 

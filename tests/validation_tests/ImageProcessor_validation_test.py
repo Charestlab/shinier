@@ -233,7 +233,7 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
             ts = target_spectrum if proc._target_spectrum is None else proc._target_spectrum
 
             # Prepare images for validation: convert them into xyY if needed
-            final_buffers = proc._final_buffers
+            final_buffers = proc._final_buffer
 
             # internal validations
             for rec in getattr(proc, "validation", []):

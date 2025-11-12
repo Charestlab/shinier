@@ -121,7 +121,7 @@ class ImageDataset(InformativeBaseModel):
         self.magnitudes, self.phases, self.buffer = None, None, None
         buffer_size = self.images[0].shape[:2] if not self.options.linear_luminance or self.options.as_gray == 1 else self.images[0].shape
 
-        # Create placeholders for buffer
+        # Create placeholders for buffers
         input_data = [np.zeros(buffer_size, dtype=bool) for idx in range(len(self.images))]
         buffer = ImageListIO(
             input_data=input_data,

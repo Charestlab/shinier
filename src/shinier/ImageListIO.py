@@ -252,9 +252,24 @@ class ImageListIO(InformativeBaseModel):
 
         return new
 
-    def copy_with_image_list(self):
+    def new_copy(self, to_list: bool = False) -> ImageListIO:
+        # Construct a new instance with or without list of images.
+        # This will run normal model validation and initialization.
+        input_data = self.to_list() if to_list else self.input_data
+
+        # Initialize new instance with original input_data
+        new_instance = self.__class__(input_data=input_data, conserve_memory=self.conserve_memory, as_gray=self.as_gray)
+
+        # Update new instance's image data
+        if not to_list:
+            for idx, im in enumerate(self):
+                new_instance[idx] = im
+        return new_instance
+
+    def copy_with_image_list(self) -> ImageListIO:
         # Construct a new instance. This will run normal model validation and initialization.
-        return self.__class__(input_data=self.to_list(), conserve_memory=False)
+        # return self.__class__(input_data=self.to_list(), conserve_memory=False)
+        return self.new_copy(to_list=True)
 
     def to_list(self):
         """Produce a list of numpy arrays, one for each image in the collection."""
