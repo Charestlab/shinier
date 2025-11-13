@@ -27,6 +27,7 @@ except ImportError:
 # Local package imports
 from . import _HAS_CYTHON
 if TYPE_CHECKING:
+    from .ImageProcessor import ImageProcessor
     from .ImageListIO import ImageListIO
     from shinier.color.Converter import rgb2gray
 
@@ -83,7 +84,7 @@ def print_shinier_header(is_tty: bool = True, version: str = "v1.0.0"):
     console_log("")
     console_log(banner)
     console_log("")
-    console_log(f"SHINIER — Image Normalization & Equalization Toolkit  ({colorize(version, color=Bcolors.OKGREEN)})")
+    console_log(f"SHINIER — Scientific Histogram Intensity Normalization and Image Equalization in RGB ({colorize(version, color=Bcolors.OKGREEN)})")
     console_log(f"Session started: {date_str}")
     console_log("─" * 60)
     console_log("")
@@ -255,7 +256,6 @@ def get_field_values_from_pydantic_model(field):
     if default is not None and default not in vals:
         vals.append(default)
 
-
     # Fallbacks: defaults or None if nothing categorical
     if not vals:
         if field.default is not None:
@@ -292,152 +292,190 @@ def imhist_plot(
     bins: int = 256,
     figsize=(8, 6),
     dpi=100,
-    normalize: bool = False,
     title: Optional[str] = None,
+    target_hist: Optional[np.ndarray] = None,
+    binary_mask: Optional[np.ndarray] = None,
+    descriptives: bool = False,
+    ax: Optional[plt.Axes] = None,
 ):
-    """
-    Display an image on top and a compact horizontal histogram underneath.
-    A grayscale gradient bar (0..255) is placed *flush* under the histogram x-axis.
+    """Displays an image with its histogram and optional descriptive statistics.
+
+    The image is shown on top, with a compact horizontal histogram below.
+    A grayscale gradient bar (0–255) is placed directly under the histogram.
+    When `descriptives=True`, the histogram includes:
+      * A vertical line indicating the mean (μ)
+      * A translucent band spanning [μ − σ, μ + σ]
+    For RGB images, μ and σ are computed and displayed per channel.
 
     Args:
-        img: np.ndarray, shape (H, W) or (H, W, C). Supports uint8, float in [0,1] or [0,255].
-        bins: number of histogram bins (default 256).
-        figsize, dpi: matplotlib figure size and dpi.
-        normalize: if True, plot histograms as densities (area=1). Otherwise raw counts.
-        title: optional string title.
+        img (np.ndarray): Input image. Accepts (H, W) grayscale or (H, W, 3) RGB arrays.
+            Alpha channels are ignored if present. Floating-point arrays are converted
+            to uint8 for display (assuming [0, 1] range if max ≤ 1).
+        bins (int, optional): Number of histogram bins in [0, 255]. Defaults to 256.
+        figsize (tuple, optional): Matplotlib figure size. Defaults to (8, 6).
+        dpi (int, optional): Matplotlib figure DPI. Defaults to 100.
+        normalize (bool, optional): If True, plots density (area = 1). If False, plots
+            counts. Defaults to False.
+        title (str | None, optional): Optional title for the image. Defaults to None.
+        hist_target (np.ndarray | None, optional): If provided, overlays a
+            target histogram. Defaults to None.
+        binary_mask (np.ndarray | None, optional): Optional mask corresponding
+            to image for computing histogram. Defaults to None.
+        descriptives (bool, optional): If True, overlays mean (μ) and ±1σ on the
+            histogram (per-channel for RGB). Defaults to False.
 
     Returns:
-        (fig, (ax_img, ax_bar, ax_hist))
+        tuple:
+            fig (matplotlib.figure.Figure): The created matplotlib figure.
+            (ax_img, ax_bar, ax_hist): Tuple of matplotlib.axes.Axes for the image,
+            gradient bar, and histogram, respectively.
     """
-    # ---- normalize image to uint8, ignore alpha if present ----
+
     if plt is None:
         raise RuntimeError(
             "Matplotlib is not installed. "
             "Install with: pip install shinier[viz]"
         )
 
-    arr = np.asarray(img)
-    if arr.ndim == 3 and arr.shape[2] >= 4:
-        arr = arr[..., :3]  # drop alpha
+    # --- normalize input image to uint8; drop alpha if present ---
+    arr = im3D(img)
+    is_rgb = arr.shape[2] == 3
+    arr = arr[..., :min(3, arr.shape[2])]
+    if target_hist is not None and target_hist.shape[1] != arr.shape[2]:
+        raise ValueError("target_hist 2nd dimension should match image's third dimension.")
 
-    if np.issubdtype(arr.dtype, np.floating):
-        a, b = float(np.nanmin(arr)), float(np.nanmax(arr))
-        if b <= 1.0:  # assume [0,1]
-            arr = np.clip(arr, 0, 1) * 255.0
-        arr = np.clip(np.rint(arr), 0, 255).astype(np.uint8)
-    elif not np.issubdtype(arr.dtype, np.integer):
-        arr = np.clip(arr.astype(np.float64), 0, 255)
-        arr = np.rint(arr).astype(np.uint8)
-
-    # handle grayscale vs RGB for display
-    is_rgb = (arr.ndim == 3 and arr.shape[2] == 3)
-    if arr.ndim == 2:
-        arr_rgb_for_show = np.stack([arr]*3, axis=-1)   # show as gray-to-RGB
-    else:
-        arr_rgb_for_show = arr
-
-    # ---- histograms ----
+    # --- histograms for displayed image ---
+    hist_normalized = imhist(image=arr, mask=binary_mask, n_bins=256, normalized=True)
+    Hmax = hist_normalized.max()
     edges = np.linspace(0, 256, bins + 1, dtype=np.float64)
     centers = (edges[:-1] + edges[1:]) / 2.0
-    if is_rgb:
-        Hr, _ = np.histogram(arr[..., 0].ravel(), bins=edges, density=normalize)
-        Hg, _ = np.histogram(arr[..., 1].ravel(), bins=edges, density=normalize)
-        Hb, _ = np.histogram(arr[..., 2].ravel(), bins=edges, density=normalize)
-        Hmax = max(Hr.max(), Hg.max(), Hb.max()) if not normalize else 1.0
+
+    # --- figure & axes ---
+    fontname = 'Arial'
+    if ax is None:
+        fig = plt.figure(figsize=figsize, dpi=dpi, constrained_layout=True)
+        gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3.5, 1.4], hspace=0.12)
+        ax_img = fig.add_subplot(gs[0])
+        ax_hist = fig.add_subplot(gs[1])
+
+        ax_img.imshow(arr, interpolation='nearest')
+        ax_img.axis('off')
+        if title:
+            ax_img.set_title(title, fontsize=11, fontname=fontname)
+
+        # Align histogram width to image width
+        fig.canvas.draw()
+        img_pos = ax_img.get_position()
     else:
-        Hy, _ = np.histogram(arr.ravel(), bins=edges, density=normalize)
-        Hmax = Hy.max() if not normalize else 1.0
+        ax_hist = ax
 
-    # ---- figure & axes (make histogram width match image width) ----
-    fig = plt.figure(figsize=figsize, dpi=dpi, constrained_layout=False)
-    gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3.5, 1.4], hspace=0.12)
-
-    ax_img  = fig.add_subplot(gs[0])
-    ax_hist = fig.add_subplot(gs[1])
-
-    # Image on top
-    ax_img.imshow(arr_rgb_for_show, interpolation='nearest')
-    ax_img.axis('off')
-    if title:
-        ax_img.set_title(title, fontsize=11)
-
-    # Ensure histogram axes have EXACT same left/right as image axes
-    fig.canvas.draw()  # compute positions
-    img_pos  = ax_img.get_position()
     hist_pos = ax_hist.get_position()
-    ax_hist.set_position([img_pos.x0, hist_pos.y0, img_pos.width, hist_pos.height])
+    if ax is None:
+        ax_hist.set_position([img_pos.x0, hist_pos.y0, img_pos.width, hist_pos.height])
 
-    # Plot histogram(s)
-    if is_rgb:
-        ax_hist.plot(centers, Hr, lw=1.5, color='red',   label='R')
-        ax_hist.plot(centers, Hg, lw=1.5, color='green', label='G')
-        ax_hist.plot(centers, Hb, lw=1.5, color='blue',  label='B')
-        ax_hist.legend(frameon=False, fontsize=9, loc='upper right')
-    else:
-        ax_hist.plot(centers, Hy, lw=1.5, color='black', label='Y')
-        ax_hist.legend(frameon=False, fontsize=9, loc='upper right')
+    # --- plot histogram(s) of displayed image ---
+    colors = ['red', 'green', 'blue'] if is_rgb else ['black']
+    labels = ['R', 'G', 'B'] if is_rgb else ['Image']
+    for ch in range(arr.shape[2]):
+        ax_hist.plot(centers, hist_normalized[:, ch], color=colors[ch], lw=1, label=labels[ch])
+        # ----------------- optional TARGET histogram overlay -----------------
+        if target_hist is not None:
+            # expects your helper to return target histogram aligned with `centers`
+            # target_hist, initial_hist = _hist_match_target(target_images, target_masks, normalized=normalize)
+            ax_hist.plot(centers, target_hist[:, ch], ls='--', lw=1, color=colors[ch], label=f'Target {labels[ch]}')
 
     ax_hist.set_xlim(0, 255)
     ax_hist.set_ylim(0, Hmax * 1.05 if Hmax > 0 else 1)
     ax_hist.set_yticks([])
-    ax_hist.set_xticks([])  # no numbers; we'll show a gradient bar instead
+    ax_hist.set_xticks([])  # no ticks on the histogram axis
+    ax_hist.set_ylabel("Frequency", fontname=fontname, labelpad=8)
     for spine in ("top", "right"):
         ax_hist.spines[spine].set_visible(False)
 
-    # ---- grayscale gradient bar FLUSH under histogram x-axis ----
+    # --- grayscale gradient bar directly under the histogram axis ---
     divider = make_axes_locatable(ax_hist)
-    divider = make_axes_locatable(ax_hist)
-    ax_bar = divider.append_axes("bottom", size="5%", pad=0.0)  # was "6mm"
+    ax_bar = divider.append_axes("bottom", size="4%", pad=0.0)  # pad=0.0 to stick to the axis
     gradient = np.linspace(0, 1, 256, dtype=np.float64).reshape(1, -1)
     ax_bar.imshow(gradient, cmap='gray', aspect='auto', extent=[0, 255, 0, 1])
     ax_bar.set_xlim(ax_hist.get_xlim())
-    ax_bar.set_xticks([])   # no numbers
+    ax_bar.set_xticks([])
     ax_bar.set_yticks([])
     for spine in ax_bar.spines.values():
         spine.set_visible(False)
+    xlabel_text = "Pixel intensity"
+    ax_bar.set_xlabel(xlabel_text, fontname=fontname, labelpad=2)
 
-    return fig, (ax_img, ax_bar, ax_hist)
+    # ----------------- descriptives overlay (μ and ±1σ) -----------------
+    if descriptives:
+        with plt.rc_context({"font.family": fontname}):
+            y_top = ax_hist.get_ylim()[1]
+            alpha_band = 0.15
+            text_kwargs = dict(fontsize=9, ha='left', va='top')
 
+            if is_rgb:
+                # Per-channel stats
+                stats = [
+                    ("R", arr[..., 0].ravel(), "red"),
+                    ("G", arr[..., 1].ravel(), "green"),
+                    ("B", arr[..., 2].ravel(), "blue"),
+                ]
+                # stagger text vertically
+                y_texts = np.linspace(y_top * 0.98, y_top * 0.86, num=3)
+                for (label, data, c), y_txt in zip(stats, y_texts):
+                    mu = float(np.mean(data))
+                    sd = float(np.std(data, ddof=0))
+                    # band
+                    ax_hist.axvspan(mu - sd, mu + sd, color=c, alpha=alpha_band, lw=0)
+                    # mean line
+                    ax_hist.axvline(mu, color=c, lw=1.8)
+                    # text
+                    ax_hist.text(mu + 3, y_txt, f"{label}: μ={mu:.1f}, σ={sd:.1f}", color=c, **text_kwargs)
+            else:
+                data = arr.ravel()
+                mu = float(np.mean(data))
+                sd = float(np.std(data, ddof=0))
+                ax_hist.axvspan(mu - sd, mu + sd, color='black', alpha=alpha_band, lw=0)
+                ax_hist.axvline(mu, color='black', lw=1.8)
+                ax_hist.text(mu + 3, y_top * 0.95, f"μ={mu:.1f}, σ={sd:.1f}", color='black', **text_kwargs)
 
-def sf_plot(im: np.ndarray, qplot: bool = True) -> np.ndarray:
-    """
-    Rotational average of the Fourier energy spectrum.
+    # legend if anything was added (set font explicitly)
+    handles, labels = ax_hist.get_legend_handles_labels()
+    if handles:
+        leg = ax_hist.legend(frameon=False, fontsize=9, loc='upper right')
+        for text in leg.get_texts():
+            text.set_fontname(fontname)
 
-    Parameters
-    ----------
-    im : np.ndarray
-        Image array of shape (H, W) or (H, W, 3). Can be uint8 or float.
-        RGB is converted to luminance (ITU-R BT.601).
-    qplot : bool, default True
-        If True, plot loglog spectrum (cycles/image vs energy).
+    # Ensure layout is updated
+    if ax is None:
+        fig.tight_layout()
+        fig.show()
 
-    Returns
-    -------
-    avg : np.ndarray
-        1D array of rotationally averaged energy for integer radii
-        1..floor(min(H, W)/2), matching the MATLAB implementation.
-    """
-    if plt is None:
-        raise RuntimeError(
-            "Matplotlib is not installed. "
-            "Install with: pip install shinier[viz]"
-        )
+    # Enforce font for any ticks that might be enabled later
+    for label in ax_hist.get_xticklabels() + ax_hist.get_yticklabels():
+        label.set_fontname(fontname)
 
-    # --- to grayscale float64 ---
-    arr = np.asarray(im)
-    if arr.ndim == 3 and arr.shape[2] >= 3:
-        # MATLAB rgb2gray-like (double precision)
-        r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
-        if np.issubdtype(arr.dtype, np.integer):
-            r = r.astype(np.float64); g = g.astype(np.float64); b = b.astype(np.float64)
-        gray = rgb2gray(arr, conversion_type='rec601')
+    if ax is None:
+        return fig, (ax_img, ax_bar, ax_hist)
     else:
-        gray = arr.astype(np.float64, copy=False)
+        return ax_hist, ax_bar
 
-    xs, ys = gray.shape  # xs = rows (y), ys = cols (x)
 
-    # --- Fourier energy (fftshifted) ---
-    fftim = np.abs(np.fft.fftshift(np.fft.fft2(gray))) ** 2
+def sf_profile(image: np.ndarray, spectrum: Optional[np.ndarray] = None, is_power_spectrum: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Rotational average of the Fourier (energy) spectrum.
+
+    Args:
+        image: np.ndarray
+            Input image.
+        spectrum: np.ndarray, default = None
+            If not None, uses spectrum instead of computing new spectrum on input image.
+        is_power_spectrum: bool, default = True
+            If True, computes power spectrum else uses magnitude.
+
+    Returns: Tuples[np.ndarray, np.ndarray]
+        Rotational average of spectrum
+        radius
+    """
 
     # --- frequency grids replicating MATLAB logic ---
     def freq_axis(n: int) -> np.ndarray:
@@ -451,6 +489,16 @@ def sf_plot(im: np.ndarray, qplot: bool = True) -> np.ndarray:
             half = n // 2
             return np.arange(-(half + 0.5), half + 0.5, 1.0, dtype=np.float64)
 
+    # --- Fourier energy (fft-shifted) ---
+    image = im3D(image)
+    exp = 2 if is_power_spectrum else 1
+    if spectrum is None:
+        magnitude, _ = image_spectrum(image)
+        power_spectrum = magnitude ** exp
+    else:
+        power_spectrum = spectrum ** exp
+
+    xs, ys, channels = image.shape
     f2 = freq_axis(xs)  # rows
     f1 = freq_axis(ys)  # cols
     XX, YY = np.meshgrid(f1, f2)  # shape (xs, ys)
@@ -467,39 +515,99 @@ def sf_plot(im: np.ndarray, qplot: bool = True) -> np.ndarray:
 
     # --- accumarray equivalent: mean energy per radius ---
     flat_r = r.ravel()
-    flat_e = fftim.ravel()
-    sums = np.bincount(flat_r, weights=flat_e)
-    counts = np.bincount(flat_r)
-    counts[counts == 0] = 1  # guard against divide-by-zero
-    avg_full = sums / counts
+    rot_avg = []
+    radians = []
+    for ch in range(channels):
+        flat_e = power_spectrum.ravel()
+        sums = np.bincount(flat_r, weights=flat_e)
+        counts = np.bincount(flat_r)
+        counts[counts == 0] = 1  # guard against divide-by-zero
+        avg_full = sums / counts
 
-    # Match MATLAB: avg = avg(2:floor(min(xs,ys)/2)+1)
+        # Match MATLAB: avg = avg(2:floor(min(xs,ys)/2)+1)
+        R = int(np.floor(min(xs, ys) / 2.0))
+        radii = np.arange(1, R + 1)
+        avg = avg_full[1:R + 1]
+        rot_avg.append(avg)
+        radians.append(radii)
+    rot_avg = np.array(rot_avg).T
+    radians = np.array(radians).T
+    return rot_avg, radians
+
+
+def sf_plot(image: np.ndarray, sf_p: Optional[np.ndarray], target_sf: Optional[np.ndarray], ax: Optional[plt.axis] = None) -> Union[plt.Figure, plt.Axes]:
+    """
+    Rotational average of the Fourier energy spectrum.
+
+    Args:
+        image : np.ndarray
+            Image array of shape (H, W) or (H, W, 3). Can be uint8 or float.
+            RGB is converted to luminance (ITU-R BT.601).
+        sf_p : np.ndarray, default None
+            If not None, uses sf_p (spatial frequency profile) instead of generating a new spectrum.
+        target_sf : np.ndarray, default None
+            If not None, display target_sf against sf_p.
+        ax : plt.Axes, default None
+            If not None, uses the ax instead of generating a new figure.
+
+    Returns:
+        fig, ax : plt.Figure, plt.Axes
+    """
+    from shinier.color.Converter import rgb2gray
+    if plt is None:
+        raise RuntimeError(
+            "Matplotlib is not installed. "
+            "Install with: pip install shinier[viz]"
+        )
+    image = im3D(image)
+    xs, ys, channels = image.shape
     R = int(np.floor(min(xs, ys) / 2.0))
-    radii = np.arange(1, R + 1)
-    avg = avg_full[1:R + 1]
+    is_rgb = image.shape[2] == 3
+    if target_sf is not None and target_sf.shape[0] > xs/2:
+        target_sf = target_sf[1: R + 1]
 
-    if qplot:
-        plt.figure()
-        plt.loglog(radii, avg)
-        plt.xlabel('Spatial frequency (cycles/image)')
-        plt.ylabel('Energy')
-        plt.tight_layout()
+    rot_avg, radii = sf_profile(image)
+    rot_avg = rot_avg if sf_p is None else sf_p
 
-    return avg
+    if ax is None:
+        fig = plt.figure()
+    else:
+        fig = ax
+
+    colors = ['red', 'green', 'blue'] if is_rgb else ['black']
+    labels = ['R', 'G', 'B'] if is_rgb else ['Image']
+    for ch in range(channels):
+        fig.loglog(radii[:, ch], rot_avg[:, ch], color=colors[ch], label=labels[ch])
+        # ----------------- optional TARGET histogram overlay -----------------
+        if target_sf is not None:
+            fig.loglog(radii[:, ch], target_sf[:, ch], ls='--', lw=1, color=colors[ch], label=f'Target {labels[ch]}')
+
+    if ax is None:
+        fig.xlabel('Spatial frequency (cycles/image)')
+        fig.ylabel('Energy')
+        fig.tight_layout()
+    else:
+        fig.legend(frameon = False)
+        fig.set_xlabel('Spatial frequency (cycles/image)')
+        fig.set_ylabel('Energy')
+
+    return fig
 
 
-def spectrum_plot(spectrum: np.ndarray,
-                  cmap: str = "gray",
-                  log: bool = True,
-                  gamma: float = 1.0,
-                  with_colorbar: bool = True,
-                  colorbar_label: str = 'log(1 + |F|) (stretched)'):
+def spectrum_plot(
+        spectrum: np.ndarray,
+        cmap: str = "gray",
+        log: bool = True,
+        gamma: float = 1.0,
+        ax: Optional[plt.Axes] = None,
+        with_colorbar: bool = True,
+        colorbar_label: str = 'log(1 + |F|) (stretched)'):
 
     """Display a Fourier magnitude spectrum with optional log and gamma scaling."""
     if plt is None:
         raise RuntimeError(
             "Matplotlib is not installed. "
-            "Install with: pip install shinier[viz]"
+            "Install with: pip install shinier[dev]"
         )
 
     spec = np.abs(spectrum).astype(np.float64)
@@ -516,13 +624,14 @@ def spectrum_plot(spectrum: np.ndarray,
         spec = spec ** gamma
 
     # Axis in cycles/image (cpi) : d=1/N
-    xs, ys = spec.shape  # rows, cols
+    xs, ys = spec.shape[:2]  # rows, cols
     f_x = np.fft.fftshift(np.fft.fftfreq(ys, d=1 / ys))
     f_y = np.fft.fftshift(np.fft.fftfreq(xs, d=1 / xs))
 
-    fig, ax = plt.subplots()
-    ax.set_xscale("linear")
-    ax.set_yscale("linear")
+    if ax is None:
+        fig, ax = plt.subplots()
+        ax.set_xscale("linear")
+        ax.set_yscale("linear")
 
     implot = ax.imshow(
         spec, cmap=cmap,
@@ -530,11 +639,13 @@ def spectrum_plot(spectrum: np.ndarray,
     )
 
     if with_colorbar:
+        if ax is not None:
+            fig = ax.figure
         fig.colorbar(implot, ax=ax, label=colorbar_label)
 
     ax.set_xlabel("Spatial frequency (cycles/image)")
     ax.set_ylabel("Spatial frequency (cycles/image)")
-    fig.tight_layout()
+    # fig.tight_layout()
 
     return fig
 
@@ -1787,6 +1898,143 @@ def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, ve
     if verbose:
         print(msg)
     return strip_ansi(msg)
+
+
+def show_processing_overview(processor: ImageProcessor, img_idx: int = 0) -> plt.Figure:
+    """Display before/after images and diagnostics for all processing steps in one figure.
+
+    The figure layout adapts to the active SHINIER mode:
+        • Row 1: before/after images.
+        • Subsequent rows: one row per processing step (e.g., luminance, histogram, spectrum).
+          Each diagnostic row shows "before" (left) and "after" (right) panels side by side.
+
+    Args:
+        processor (ImageProcessor): The SHINIER ImageProcessor instance.
+        img_idx (int, optional): Index of the image to visualize. Defaults to 0.
+
+    Returns:
+        matplotlib.figure.Figure: Composite figure summarizing the image transformations.
+    """
+    fontname = 'Arial'
+
+    # --- Retrieve relevant info ---
+    steps = getattr(processor, "_processing_steps", [])
+    name_map = getattr(processor, "_fct_name2process_name", {})
+
+    mode = getattr(processor.options, "mode", None)
+    with Image.open(processor.dataset.images.src_paths[img_idx]) as im:
+        img_before = np.asarray(im)
+    is_rgb_before = img_before.ndim == 3 and img_before.shape[2] == 3
+    img_after = processor.dataset.images[img_idx]
+    is_rgb_after = img_after.ndim == 3 and img_after.shape[2] == 3
+    masks = getattr(processor, "bool_masks", [None])[img_idx]
+
+    # --- Figure layout ---
+    diag_steps = [s for s in steps if s != "dithering"]
+    n_rows = 1 + len(diag_steps) if len(diag_steps) > 0 else 1
+    fig = plt.figure(figsize=(11.5, 3.6 * n_rows))
+    gs = GridSpec(
+        n_rows, 2, figure=fig,
+        height_ratios=[2.0] + [1.5] * (n_rows - 1),
+        hspace=0.38, wspace=0.18
+    )
+    # --- Row 1: Before/After images ---
+    ax_before = fig.add_subplot(gs[0, 0])
+    ax_after = fig.add_subplot(gs[0, 1])
+    ax_before.imshow(img_before, cmap="gray" if not is_rgb_before else None)
+    ax_after.imshow(img_after, cmap="gray" if not is_rgb_after else None)
+    for ax, title in zip([ax_before, ax_after], ["Before", "After"]):
+        ax.set_title(title, fontsize=13, fontname=fontname)
+        ax.axis("off")
+
+    # --- Per-step diagnostics ---
+    for i, step in enumerate(steps, start=1):
+        readable = name_map.get(step, step)
+        axL = fig.add_subplot(gs[i, 0])
+        axR = fig.add_subplot(gs[i, 1])
+
+        # ---- Luminance matching ----
+        if step == "lum_match":
+            _ = imhist_plot(
+                img=processor._initial_buffer[img_idx],
+                binary_mask=masks if masks is not None else None,
+                descriptives=True,
+                title=f"Before – {readable}",
+                ax=axL
+            )
+            _ = imhist_plot(
+                img=processor._final_buffer[img_idx],
+                binary_mask=masks if masks is not None else None,
+                descriptives=True,
+                title=f"After – {readable}",
+                ax=axR
+            )
+
+            # Overlay mean/std text box for target comparison
+            t_mu, t_sd = getattr(processor, "_target_lum", (None, None))
+            if t_mu is not None and t_sd is not None:
+                text = f"Target μ={t_mu:.1f}, σ={t_sd:.1f}"
+                fig.text(0.72, 0.26 - 0.18 * (i - 1), text, fontsize=9, va="top")
+
+        # ---- Histogram matching ----
+        elif step == "hist_match":
+            target_hist = getattr(processor, "_target_hist", None)
+            _ = imhist_plot(
+                img=processor._initial_buffer[img_idx],
+                target_hist=target_hist if target_hist is not None else None,
+                binary_mask=masks if masks is not None else None,
+                descriptives=False,
+                title=f"Before – {readable}",
+                ax=axL
+            )
+            _ = imhist_plot(
+                img=processor._final_buffer[img_idx],
+                target_hist=target_hist if target_hist is not None else None,
+                binary_mask=masks if masks is not None else None,
+                descriptives=False,
+                title=f"After – {readable}",
+                ax=axR
+            )
+
+        # ---- Spatial frequency matching ----
+        elif step == "sf_match":
+            target_sf = processor._target_sf ** 2
+            avg_before, radii = sf_profile(processor._initial_buffer[img_idx])
+            avg_after, radii = sf_profile(processor._final_buffer[img_idx])
+            _ = sf_plot(processor._initial_buffer[img_idx], sf_p=avg_before, target_sf=target_sf, ax=axL)
+            _ = sf_plot(processor._final_buffer[img_idx], sf_p=avg_after, target_sf=target_sf, ax=axR)
+
+        # ---- Fourier spectrum matching ----
+        elif step == "spec_match":
+            target_spectrum = processor._target_spectrum
+            mag_before, _ = image_spectrum(processor._initial_buffer[img_idx])
+            mag_after, _ = image_spectrum(processor._final_buffer[img_idx])
+            _ = spectrum_plot(mag_before, ax=axL)
+            _ = spectrum_plot(mag_after, ax=axR)
+
+        # ---- Dithering ----
+        elif step == "dithering":
+            # Dithering only affects appearance (already visible in row 1)
+            axL.text(0.5, 0.5, "Dithering only", ha="center", va="center")
+            axR.axis("off")
+
+    (y0L, y1L) = axL.get_ylim()
+    (y0R, y1R) = axR.get_ylim()
+    ymin, ymax = min(y0L, y0R), max(y1L, y1R)
+
+    axL.set_ylim(ymin, ymax)
+    axR.set_ylim(ymin, ymax)
+
+    fig.suptitle(
+        f"SHINIER — Mode {mode}: {', '.join(name_map.get(s, s) for s in steps)}",
+        fontsize=15,
+        weight="bold",
+        fontname="Times New Roman",
+        y=0.99,
+    )
+    # fig.tight_layout()
+    fig.show()
+    return fig
 
 
 def beta_bounds_from_ssim(gradients: np.ndarray, ssim: List[float], binary_mask: Optional[np.ndarray] = None) -> Tuple[float, float]:

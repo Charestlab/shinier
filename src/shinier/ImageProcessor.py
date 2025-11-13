@@ -380,7 +380,6 @@ class ImageProcessor(InformativeBaseModel):
 
         # Apply relevant inverse color treatment
         buffer_other = self.dataset.buffer_other if not self.options.linear_luminance else None
-        # if self.from_validation_test:
         self._final_buffer = self.dataset.buffer.new_copy(to_list=False)
 
         self.dataset.buffer = ColorTreatment.backward_color_treatment(
@@ -512,9 +511,8 @@ class ImageProcessor(InformativeBaseModel):
             if np.any(predicted_min < -1e-3) or np.any(predicted_max > (255 + 1e-3)):
                 raise Exception(f'Out-of-range values detected: mins = {list(predicted_min)}, maxs = {list(predicted_max)}')
 
-        self._target_lum = []
+        self._target_lum = (target_mean, target_std)
         for idx, im in enumerate(buffer_collection):
-            self._target_lum.append((target_mean, target_std))
             im2 = im3D(im.copy())
             M, SD, min, max = compute_stats(im=im2, binary_mask=self.bool_masks[idx])
 

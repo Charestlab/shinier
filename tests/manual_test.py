@@ -52,39 +52,44 @@ inp = "/Users/ndr/GIT_REPO/GITHUB/shine/shinier/INPUT/"
 # oup = "/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-1/master/case-4d59c1014b72"
 oup = "/Users/ndr/GIT_REPO/GITHUB/shine/shinier/MASK/"
 masks_folder = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/MASK_64X64')
-combo = {'input_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_64X64'), 'output_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/OUTPUT'), 'masks_folder': masks_folder, 'whole_image': 1, 'background': 300, 'mode': 3, 'as_gray': True, 'linear_luminance': 0, 'rec_standard': 1, 'dithering': 0, 'conserve_memory': False, 'seed': None, 'legacy_mode': True, 'safe_lum_match': False, 'target_lum': (0, 0.0), 'hist_optim': True, 'hist_specification': 1, 'hist_iterations': 3, 'target_hist': None, 'rescaling': 0, 'target_spectrum': 'unit_test', 'iterations': 1, 'verbose': -1}
-combo = {'input_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_64X64'), 'output_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/OUTPUT'), 'masks_folder': masks_folder, 'whole_image': 1, 'background': 300, 'mode': 2, 'as_gray': True, 'linear_luminance': 0, 'rec_standard': 1, 'dithering': 0, 'conserve_memory': False, 'seed': None, 'legacy_mode': True, 'safe_lum_match': False, 'target_lum': (0, 0.0), 'hist_optim': True, 'hist_specification': 1, 'hist_iterations': 3,'target_hist': None, 'rescaling': 0, 'target_spectrum': None, 'iterations': 1, 'verbose': 3}
-bm = ImageListIO(input_data=masks_folder)
-my_options = Options(**combo)
-# my_options = Options(
-#     input_folder=inp,
-#     output_folder=oup,
-#     masks_folder=None,
-#     whole_image=1,
-#     background=300,
-#     mode=2,
-#     as_gray=False,
-#     linear_luminance=1,
-#     rec_standard=2,
-#     dithering=1,
-#     conserve_memory=True,
-#     seed=None,
-#     legacy_mode=False,
-#     safe_lum_match=False,
-#     target_lum=(0, 0),
-#     hist_optim=True,
-#     hist_specification=4,
-#     hist_iterations=10,
-#     target_hist=None,
-#     rescaling=0,
-#     target_spectrum=None,
-#     iterations=1,
-#     verbose=3,
-# )
+# combo = {'input_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_64X64'), 'output_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/OUTPUT'), 'masks_folder': masks_folder, 'whole_image': 1, 'background': 300, 'mode': 3, 'as_gray': True, 'linear_luminance': 0, 'rec_standard': 1, 'dithering': 0, 'conserve_memory': False, 'seed': None, 'legacy_mode': True, 'safe_lum_match': False, 'target_lum': (0, 0.0), 'hist_optim': True, 'hist_specification': 1, 'hist_iterations': 3, 'target_hist': None, 'rescaling': 0, 'target_spectrum': 'unit_test', 'iterations': 1, 'verbose': -1}
+# combo = {'input_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_64X64'), 'output_folder': Path('/Users/ndr/GIT_REPO/GITHUB/shine/OUTPUT'), 'masks_folder': masks_folder, 'whole_image': 1, 'background': 300, 'mode': 2, 'as_gray': True, 'linear_luminance': 0, 'rec_standard': 1, 'dithering': 0, 'conserve_memory': False, 'seed': None, 'legacy_mode': True, 'safe_lum_match': False, 'target_lum': (0, 0.0), 'hist_optim': True, 'hist_specification': 1, 'hist_iterations': 3,'target_hist': None, 'rescaling': 0, 'target_spectrum': None, 'iterations': 1, 'verbose': 3}
+# bm = ImageListIO(input_data=masks_folder)
+# my_options = Options(**combo)
+my_options = Options(
+    input_folder=inp,
+    output_folder=oup,
+    masks_folder=None,
+    whole_image=1,
+    background=300,
+    mode=5,
+    as_gray=True,
+    linear_luminance=1,
+    rec_standard=2,
+    dithering=1,
+    conserve_memory=True,
+    seed=None,
+    legacy_mode=False,
+    safe_lum_match=False,
+    target_lum=(0, 0),
+    hist_optim=False,
+    hist_specification=4,
+    hist_iterations=5,
+    target_hist=None,
+    rescaling=0,
+    target_spectrum=None,
+    iterations=5,
+    verbose=3,
+)
 my_dataset = ImageDataset(options=my_options)
 results = ImageProcessor(dataset=my_dataset, verbose=3)
 images = results.get_results()
-_, rmse_hist_after = utils.hist_match_validation(images=results.dataset.images, binary_masks=results.bool_masks)
+_, rmse_hist_before = utils.hist_match_validation(images=results._initial_buffer, binary_masks=results.bool_masks, target_hist=results._target_hist)
+_, rmse_hist_after = utils.hist_match_validation(images=results._final_buffer, binary_masks=results.bool_masks, target_hist=results._target_hist)
+
+_, rmse_sf_before = utils.sf_match_validation(images=results._initial_buffer, target_spectrum=results._target_spectrum)
+_, rmse_sf_after = utils.sf_match_validation(images=results._final_buffer, target_spectrum=results._target_spectrum)
+
 corr1a, rmse1a = utils.hist_match_validation(images=b)
 corr1b, rmse1b = utils.sf_match_validation(images=b)
 corr1c, rmse1c = utils.spec_match_validation(images=b)

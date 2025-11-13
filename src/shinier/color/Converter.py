@@ -21,13 +21,12 @@ Validation tests: /tests/validation_tests/Converter_validation_tests.py
 
 from __future__ import annotations
 
-import re
 import numpy as np
-from typing import Literal, Union, Optional, Tuple, TYPE_CHECKING
+from typing import Literal, Union, Optional, TYPE_CHECKING
 from pathlib import Path
 from pydantic import Field, ConfigDict, model_validator
 from PIL import Image
-
+import re
 from shinier.utils import im3D
 from shinier.base import InformativeBaseModel
 from shinier import REPO_ROOT
@@ -120,12 +119,12 @@ class ColorConverter(InformativeBaseModel):
     # ------------------------------------------------------------------
     def linRGB_to_xyz(self, linRGB: np.ndarray) -> np.ndarray:
         out = np.empty_like(linRGB)
-        np.matmul(linRGB.reshape(-1, 3), self.M_RGB2XYZ.T, out=out.reshape(-1, 3)) # linRGB @ self.M_RGB2XYZ.T
+        np.matmul(linRGB.reshape(-1, 3), self.M_RGB2XYZ.T, out=out.reshape(-1, 3))  # linRGB @ self.M_RGB2XYZ.T
         return out
 
     def xyz_to_linRGB(self, xyz: np.ndarray) -> np.ndarray:
         out = np.empty_like(xyz)
-        np.matmul(xyz.reshape(-1, 3), self.M_XYZ2RGB.T, out=out.reshape(-1, 3)) # xyz @ self.M_XYZ2RGB.T
+        np.matmul(xyz.reshape(-1, 3), self.M_XYZ2RGB.T, out=out.reshape(-1, 3))  # xyz @ self.M_XYZ2RGB.T
         return np.clip(out, 0, 1, out=out)
 
     # ------------------------------------------------------------------
@@ -295,12 +294,12 @@ class ColorTreatment(ColorConverter):
     @staticmethod
     def backward_color_treatment(
             rec_standard: REC_STANDARD,
-            input_images: ImageListType,
-            output_images: ImageListType,
+            input_images: ImageListIO,
+            output_images: ImageListIO,
             linear_luminance: bool,
             as_gray: Literal[0, 1],
-            input_other: Optional[ImageListType] = None,
-            conversion_type: Literal['xyY_to_sRGB', 'lab_to_sRGB'] = 'xyY_to_sRGB') -> ImageListType:
+            input_other: Optional[ImageListIO] = None,
+            conversion_type: Literal['xyY_to_sRGB', 'lab_to_sRGB'] = 'xyY_to_sRGB') -> ImageListIO:
         """
         Reverts color treatments applied previously to a set of images. This operation is
         performed based on the defined color treatment type and conversion method.

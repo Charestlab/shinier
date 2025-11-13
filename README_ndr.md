@@ -1,4 +1,4 @@
-# 🌟 Shinier: Spectrum, Histogram, Intensity Normalization and Image Equalization for R/G/B.
+# 🌟 Shinier: Scientific Histogram Intensity Normalization and Image Equalization in RGB
 
 <p align="center">
   <img src="./assets/SHINIER_logo.jpg" width="400" alt="SHINIER Logo">
