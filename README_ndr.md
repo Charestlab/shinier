@@ -51,8 +51,14 @@ pip install -e .
 ```
 
 
-### 🧩 Demo Example
+### 😀 **User friendly  Interface**
+Call the following bash command to quickly start using the interactive CLI.  
+```bash
+shinier --show_results --image_index=1
+```
 
+### 🧩 Demo Example with code
+Run the following python code to make sure the package is running properly.
 ```python
 from shinier import Options, ImageDataset, ImageProcessor, utils
 
@@ -62,12 +68,8 @@ results = ImageProcessor(dataset=dataset, options=opt, verbose=1)
 _ = utils.show_processing_overview(processor=results, img_idx=0)
 ```
 
-### 💻 **User friendly  Interface**
-```bash
-shinier --show_results --image_index=1
-```
 
-### 💻 **More information**
+## ⚙️ **More information**
 1. [Package Overview](documentation/documentation.md#overview)
 2. [Package Architecture](documentation/documentation.md#package-architecture)
 3. [MATLAB vs Python Differences](documentation/documentation.md#matlab-vs-python-differences)
