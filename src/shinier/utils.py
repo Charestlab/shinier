@@ -1915,6 +1915,12 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0) -> plt
     Returns:
         matplotlib.figure.Figure: Composite figure summarizing the image transformations.
     """
+    if plt is None:
+        raise RuntimeError(
+            "Matplotlib is not installed. "
+            "Install with: pip install shinier[viz]"
+        )
+    
     fontname = 'Arial'
 
     # --- Retrieve relevant info ---
@@ -2415,7 +2421,7 @@ def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], t
     return corr, rms
 
 
-def sf_match_validation(images: np.ndarray, target_sf: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+def sf_match_validation(images: np.ndarray, target_spectrum: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """
     Validates spectral match between a set of input images by comparing their
     rotational averages of magnitude spectra against a computed target spectrum.
