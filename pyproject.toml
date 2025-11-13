@@ -28,6 +28,9 @@ dev = [
     "sqlite >= 3.50.0",
 ]
 
+[project.scripts]
+shinier = "shinier.SHINIER:main"
+
 [tool.setuptools]
 include-package-data = true
 

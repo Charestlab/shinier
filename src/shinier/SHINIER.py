@@ -5,6 +5,7 @@ import numpy as np
 from datetime import datetime
 import re
 import warnings
+import os, matplotlib
 
 from shinier.Options import ACCEPTED_IMAGE_FORMATS
 from shinier import ImageDataset, Options, ImageProcessor, REPO_ROOT
@@ -362,5 +363,32 @@ def get_image_list(src_path: Path):
     return sorted([p for p in all_files if is_image(p)])
 
 
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="SHINIER")
+    parser.add_argument("--show_results", action="store_true",
+                        help="Display (or save) a summary figure showing before/after processing.")
+    parser.add_argument("--save_path", type=str, default=None,
+                        help="Save the overview figure instead of displaying it. Provide output path, e.g. figure.png")
+    parser.add_argument("--image_index", type=int, default=0,
+                        help="Image index for the overview figure (default: 0)")
+
+    args = parser.parse_args()
+
+    # Run the interactive core
+    processor = SHINIER_CLI()
+
+    # Overview mode
+    if args.show_results:
+        from shinier.utils import show_processing_overview
+        fig = show_processing_overview(processor, img_idx=args.image_index)
+
+        if args.save_path is not None:
+            fig.savefig(args.save_path, dpi=150)
+        else:
+            import matplotlib.pyplot as plt
+            plt.show()
+
+
 if __name__ == "__main__":
-    SHINIER_CLI()
+    main()

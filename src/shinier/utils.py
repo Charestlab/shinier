@@ -1900,7 +1900,7 @@ def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, ve
     return strip_ansi(msg)
 
 
-def show_processing_overview(processor: ImageProcessor, img_idx: int = 0) -> plt.Figure:
+def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, save_path: Optional[Union[str, Path]] = None) -> plt.Figure:
     """Display before/after images and diagnostics for all processing steps in one figure.
 
     The figure layout adapts to the active SHINIER mode:
@@ -1911,6 +1911,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0) -> plt
     Args:
         processor (ImageProcessor): The SHINIER ImageProcessor instance.
         img_idx (int, optional): Index of the image to visualize. Defaults to 0.
+        save_path (str | Path, optional): Path to save the figure. Defaults to None.
 
     Returns:
         matplotlib.figure.Figure: Composite figure summarizing the image transformations.
@@ -1921,6 +1922,10 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0) -> plt
             "Install with: pip install shinier[viz]"
         )
     
+    import os, matplotlib
+    if os.environ.get("DISPLAY", "") == "":
+        matplotlib.use("Agg")
+
     fontname = 'Arial'
 
     # --- Retrieve relevant info ---
@@ -2038,7 +2043,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0) -> plt
         fontname="Times New Roman",
         y=0.99,
     )
-    # fig.tight_layout()
+
     fig.show()
     return fig
 
