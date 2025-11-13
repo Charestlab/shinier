@@ -64,7 +64,7 @@ my_options = Options(
     background=300,
     mode=5,
     as_gray=True,
-    linear_luminance=1,
+    linear_luminance=0,
     rec_standard=2,
     dithering=1,
     conserve_memory=True,
@@ -83,6 +83,9 @@ my_options = Options(
 )
 my_dataset = ImageDataset(options=my_options)
 results = ImageProcessor(dataset=my_dataset, verbose=3)
+fig = utils.show_processing_overview(results, img_idx=0)
+
+
 images = results.get_results()
 _, rmse_hist_before = utils.hist_match_validation(images=results._initial_buffer, binary_masks=results.bool_masks, target_hist=results._target_hist)
 _, rmse_hist_after = utils.hist_match_validation(images=results._final_buffer, binary_masks=results.bool_masks, target_hist=results._target_hist)
