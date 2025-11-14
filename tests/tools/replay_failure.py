@@ -10,7 +10,7 @@ from PIL import Image
 import numpy as np
 
 from tests import utils  # your helper utilities
-from shinier import Options, ImageDataset, REPO_ROOT
+from shinier import Options, ImageDataset, DEV_ROOT
 from shinier import utils as util
 from shinier.ImageProcessor import ImageProcessor
 
@@ -24,7 +24,7 @@ def _default_base_tmp() -> Path:
     Returns:
         Path: Absolute path to the base temporary directory.
     """
-    default_base = REPO_ROOT / "tests" / "IMAGES" / "tmp"
+    default_base = DEV_ROOT / "tests" / "IMAGES" / "tmp"
     return Path(os.getenv("SHINIER_BASE_TMP", default_base)).resolve()
 
 
@@ -128,13 +128,13 @@ if __name__ == "__main__":
         file_path = Path(sys.argv[1])
         main(file_path)
     finally:
-        src_path = REPO_ROOT / 'tests/IMAGES/SAMPLE_64X64'
+        src_path = DEV_ROOT / 'tests/IMAGES/SAMPLE_64X64'
         # src_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_512X512')
         # src_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_1024X124')
 
         # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-8/master/case-42ec98b3eaf2/failure_05410ad6.pkl')
         # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-8/master/case-609dab2fd6e2/failure_5d1f75f4.pkl')
-        file_path = REPO_ROOT / 'tests/IMAGES/tmp/shard0-of-8/master/case-d73efbdf68da/failure_dcfd264c.pkl'
+        file_path = DEV_ROOT / 'tests/IMAGES/tmp/shard0-of-8/master/case-d73efbdf68da/failure_dcfd264c.pkl'
 
         # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-8/master/case-bb6ed7c15ec8/failure_b866525e.pkl')
         # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-8/master/case-98e0c29c9110/failure_df5942e4.json')

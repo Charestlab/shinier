@@ -126,8 +126,8 @@ class Options(InformativeBaseModel):
     )
 
     # --- I/O ---
-    input_folder: Optional[Path] = Field(default=REPO_ROOT / "INPUT")
-    output_folder: Path = Field(default=REPO_ROOT / "OUTPUT")
+    input_folder: Optional[Path] = Field(default=REPO_ROOT / "data/INPUT")
+    output_folder: Path = Field(default=REPO_ROOT / "data/OUTPUT")
 
     # --- Masks ---
     masks_folder: Optional[Path] = Field(default=None)

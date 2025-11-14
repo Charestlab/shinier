@@ -146,3 +146,9 @@ See [LICENSE](documentation/license.md) for more information.
 - No compiler available: install a C/C++ toolchain or proceed with the NumPy fallback (slower).
 - Import errors after upgrade: try pip install --upgrade pip setuptools wheel and reinstall.
 - Windows build issues: ensure MSVC Build Tools are installed and on PATH.
+
+---
+<p align="center">
+  <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
+  <em>Version 0.1.3 - Complete technical documentation</em>
+</p>

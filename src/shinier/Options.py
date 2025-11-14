@@ -28,6 +28,7 @@ OPTION_TYPES = {
     'misc':             ['verbose']
 }
 
+
 class Options(InformativeBaseModel):
     """
     Class to hold SHINIER processing options.
@@ -70,7 +71,7 @@ class Options(InformativeBaseModel):
                 - `hist_specification = 1`
                 - `safe_lum_match = False`
             False = no legacy settings are forced and all options follow their current defaults.
-        
+
         seed (Optional[Int]): Seed to initialize the PRNG (default = None).
             Used for the 'Noisy bit dithering' and hist_specification (with "hybrid" or "noise" tie-breaking strategies).
             If 'None', int(time.time()) will be used.
@@ -80,7 +81,7 @@ class Options(InformativeBaseModel):
             Multiple iterations will allows a high degree a joint matching.
 
                 >This method of iterating was develop so that it recalculates the respective target at each iteration (i.e., no target hist/spectrum).
-    
+
     --------------------------------------------------Grayscale / color------------------------------------------------------
         as_gray (bool): Conversion into grayscale images (default = 0).
             False = No conversion applied.
@@ -109,7 +110,7 @@ class Options(InformativeBaseModel):
             1 = Rec.601 (SDTV, legacy systems)
             2 = Rec.709 (HDTV, sRGB default). Shinier assumes display-referred Rec. 709 with sRGB-like transfer.
             3 = Rec.2020 (UHDTV, wide-gamut HDR)
-    
+
     --------------------------------------------------Dithering / Memory------------------------------------------------------
         dithering (Literal[0-2]): Dithering applied before final conversion to uint8 (default = 1).
             0 = No dithering
@@ -135,7 +136,7 @@ class Options(InformativeBaseModel):
     --------------------------------------------------HISTOGRAM matching--------------------------------------------------------
         hist_optim (bool): Optimization of the histogram-matched images with structural similarity index measure (Avanaki, 2009) (default = False)
             True = SSIM optimization (Avanaki, 2009)
-                    >> Following Avanaki's experimental results, no tie-breaking strategy is applied when optimizing SSIM except for the very last 
+                    >> Following Avanaki's experimental results, no tie-breaking strategy is applied when optimizing SSIM except for the very last
                        iteration where the "hybrid" strategy is used (see hist_specification).
                     > To change the number if iterations (default = 5) and adjust step size (default = 35), see below
             False = No SSIM optimization
@@ -192,10 +193,10 @@ class Options(InformativeBaseModel):
         extra="forbid",  # Does not allow unknown attributes
         arbitrary_types_allowed=True,  # Allow non-pydantic types (e.g. np.ndarray)
     )
-    
+
     # --- I/O ---
-    input_folder: Optional[Path] = Field(default=REPO_ROOT / "INPUT")
-    output_folder: Path = Field(default=REPO_ROOT / "OUTPUT")
+    input_folder: Optional[Path] = Field(default=REPO_ROOT / "data/INPUT")
+    output_folder: Path = Field(default=REPO_ROOT / "data/OUTPUT")
 
     # --- Masks ---
     masks_folder: Optional[Path] = Field(default=None)

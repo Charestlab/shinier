@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 
 if _HAS_CYTHON:
     from . import _cconvolve
+from shinier import __version__ as package_version
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -65,7 +66,7 @@ class Bcolors:
     SECTION_BRIGHT = '\033[4m\033[1m\033[97m'  # Image loop
 
 
-def print_shinier_header(is_tty: bool = True, version: str = "v1.0.0"):
+def print_shinier_header(is_tty: bool = True, version: str = package_version):
     """Prints a styled header for the SHINIER CLI."""
     if is_tty:
         print("\033[2J")  # clear screen

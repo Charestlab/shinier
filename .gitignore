@@ -22,21 +22,21 @@ __pycache__/
 # -------------------------------
 
 # Ignore everything inside OUTPUT, but keep the folder itself
-OUTPUT/*
-!OUTPUT/.gitkeep
+src/shinier/data/OUTPUT/*
+!src/shinier/data/OUTPUT/.gitkeep
 
 # Ignore everything inside INPUT and MASK, but allow specific test files
-INPUT/*
-MASK/*
+src/shinier/data/INPUT/*
+src/shinier/data/MASK/*
 
 # Re-allow folders (so Git can descend into them)
-!INPUT/
-!MASK/
+!src/shinier/data/INPUT/
+!src/shinier/data/MASK/
 
 # Re-allow specific test assets
-!INPUT/test_face*.png
-!INPUT/test_scene*.png
-!MASK/mask.png
+!src/shinier/data/INPUT/test_face*.jpeg
+!src/shinier/data/INPUT/test_scene*.jpeg
+!src/shinier/data/MASK/mask.png
 
 # -------------------------------
 # TESTS

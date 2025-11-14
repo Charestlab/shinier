@@ -321,8 +321,8 @@ Centralized configuration class for all processing parameters.
 ```python
 class Options:
     # --- I/O ---
-    input_folder: Optional[Path] = Field(default=REPO_ROOT / "INPUT")
-    output_folder: Path = Field(default=REPO_ROOT / "OUTPUT")
+    input_folder: Optional[Path] = Field(default=REPO_ROOT / "data/INPUT")
+    output_folder: Path = Field(default=REPO_ROOT / "data/OUTPUT")
 
     # --- Masks ---
     masks_folder: Optional[Path] = Field(default=None)
@@ -623,5 +623,5 @@ Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum m
 
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-  <em>Version 0.1.0 - Complete technical documentation</em>
+  <em>Version 0.1.3 - Complete technical documentation</em>
 </p>

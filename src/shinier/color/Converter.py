@@ -38,9 +38,9 @@ if TYPE_CHECKING:
 WHITE_D65 = np.array([0.95047, 1.00000, 1.08883])
 
 # RGB → XYZ conversion matrices for D65
-M_RGB2XYZ_601 = np.load(REPO_ROOT / 'src/shinier/color/M_RGB2XYZ_601.npy')
-M_RGB2XYZ_709 = np.load(REPO_ROOT / 'src/shinier/color/M_RGB2XYZ_709.npy')
-M_RGB2XYZ_2020 = np.load(REPO_ROOT / 'src/shinier/color/M_RGB2XYZ_2020.npy')
+M_RGB2XYZ_601 = np.load(REPO_ROOT / 'color/M_RGB2XYZ_601.npy')
+M_RGB2XYZ_709 = np.load(REPO_ROOT / 'color/M_RGB2XYZ_709.npy')
+M_RGB2XYZ_2020 = np.load(REPO_ROOT / 'color/M_RGB2XYZ_2020.npy')
 
 COLOR_STANDARDS = {
     "rec601": {"M_RGB2XYZ": M_RGB2XYZ_601, "gamma": 2.2, "white": WHITE_D65},

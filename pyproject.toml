@@ -1,13 +1,17 @@
+#[build-system]
+#requires = ["setuptools>=68", "wheel", "Cython>=3.0", "numpy>=1.22"]
+#build-backend = "setuptools.build_meta"
+
 [build-system]
-requires = ["setuptools>=68", "wheel", "Cython>=3.0", "numpy>=1.22"]
+requires = ["setuptools>=68", "wheel", "numpy>=1.22"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "shinier"
-version = "0.1.0"
-description = "Shinier: Scientific Histogram Intensity Normalization and Image Equalization in R/G/B."
+version = "0.1.3"
+description = "Python port of the SHINE toolbox with added options (color management, dithering, EHS), optimized for large image sets."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 authors = [
     { name = "Nicolas Dupuis-Roy", email = "nicolas.dupuis.roy@umontreal.ca" }
 ]
@@ -16,9 +20,11 @@ dependencies = [
     "numpy>=1.22,<2.1",
     "Pillow>=9.0.0",
     "tqdm>=4.60",
-    "matplotlib>=3.8.0",
+    "cython>=3.0",
+    "matplotlib>=3.9.0",
     "pydantic>=2.12",
 ]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.0",
@@ -33,13 +39,42 @@ shinier = "shinier.SHINIER:main"
 [tool.setuptools]
 include-package-data = true
 
+[tool.setuptools.package-data]
+"shinier" = [
+  # Color conversion matrices
+  "color/M_RGB2XYZ_2020.npy",
+  "color/M_RGB2XYZ_601.npy",
+  "color/M_RGB2XYZ_709.npy",
+
+  # Demo INPUT images
+  "data/INPUT/test_face1.jpeg",
+  "data/INPUT/test_face2.jpeg",
+  "data/INPUT/test_face3.jpeg",
+  "data/INPUT/test_face4.jpeg",
+  "data/INPUT/test_face5.jpeg",
+  "data/INPUT/test_scene1.jpeg",
+  "data/INPUT/test_scene2.jpeg",
+  "data/INPUT/test_scene3.jpeg",
+  "data/INPUT/test_scene4.jpeg",
+  "data/INPUT/test_scene5.jpeg",
+
+  # Demo MASK
+  "data/MASK/mask.png",
+
+  # Empty OUTPUT dir marker
+  "data/OUTPUT/.gitkeep",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["shinier*"]
 
+[tool.setuptools.cmdclass]
+build_ext = "shinier.build_ext.build_ext"
+
 [[tool.setuptools.ext-modules]]
 name = "shinier._cconvolve"
-sources = ["src/shinier/_cconvolve.pyx"]
+sources = ["src/shinier/_cconvolve.cpp"]
 language = "c++"
 
 [tool.pytest.ini_options]
@@ -53,3 +88,12 @@ markers = [
     "unit_tests: default functional",
     "validation_tests: full combinatorial sweep (slow)"
 ]
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/Charestlab/shinier"

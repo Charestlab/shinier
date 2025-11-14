@@ -5,7 +5,7 @@ import numpy as np
 from datetime import datetime
 import re
 import warnings
-
+from shinier import __version__ as shinier_version
 from shinier.Options import ACCEPTED_IMAGE_FORMATS, OPTION_TYPES
 from shinier import ImageDataset, Options, ImageProcessor, REPO_ROOT
 from shinier.utils import (
@@ -190,6 +190,7 @@ def options_display(opts):
                         value = "AVERAGE"
                 console_log(f"{key:<20}: {value}", indent_level=1, color=Bcolors.OKBLUE)
 
+
 #########################################
 #            SHINIER CLI CORE           #
 #########################################
@@ -203,7 +204,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
     Returns:
         Options: Configured SHINIER options object.
     """
-    print_shinier_header(is_tty=IS_TTY, version="v0.1.0")
+    print_shinier_header(is_tty=IS_TTY, version=shinier_version)
     opts = Options()
 
     # --------- General I/O ---------
@@ -233,7 +234,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
 
         if whole == 4:
             if masks is None:
-                mdir = prompt(f"Masks folder (directory path)? Accepted formats: {ACCEPTED_FORMATS}. Will use ", default=str(REPO_ROOT / "MASK"), kind="str")
+                mdir = prompt(f"Masks folder (directory path)? Accepted formats: {ACCEPTED_FORMATS}. Will use ", default=str(REPO_ROOT / "data/MASK"), kind="str")
                 opts.masks_folder = Path(mdir).expanduser().resolve()
                 mask_paths = get_image_list(opts.masks_folder)
                 color = Bcolors.OKGREEN if len(mask_paths) > 0 else Bcolors.FAIL
@@ -362,7 +363,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
     console_log("╔══════════════════════════════════════════════════════╗")
     console_log("║                      OPTIONS                         ║")
     console_log("╚══════════════════════════════════════════════════════╝")
-    
+
     options_display(opts)
 
     return results

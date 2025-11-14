@@ -16,14 +16,17 @@ References:
 
 # Metadata
 __author__ = "Nicolas Dupuis-Roy"
-__version__ = "0.1.0"
+__version__ = "0.1.3"
 __email__ = "nicolas.dupuis.roy@umontreal.ca"
 
 # For direct importation
 from importlib import util
 from pathlib import Path
 _HAS_CYTHON = util.find_spec("shinier._cconvolve") is not None
-REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# This is the *package* root: src/shinier in dev, site-packages/shinier when installed
+DEV_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parent
 
 if _HAS_CYTHON:
     from ._cconvolve import convolve2d_direct, convolve2d_separable
@@ -41,7 +44,9 @@ __all__ = [
     "_HAS_CYTHON",
     "color",
     "SHINIER_CLI",
-    "REPO_ROOT"
+    "REPO_ROOT",
+    "DEV_ROOT",
+    "__version__",
 ]
 
 from .Options import Options
