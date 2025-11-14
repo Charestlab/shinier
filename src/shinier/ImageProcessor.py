@@ -8,10 +8,6 @@ from pydantic import Field, PrivateAttr, ConfigDict
 
 from tqdm import tqdm
 import sys
-try:
-    import matplotlib.pyplot as plt
-except ImportError:
-    plt = None
 
 # Local imports
 from shinier.base import InformativeBaseModel

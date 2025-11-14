@@ -1,12 +1,12 @@
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Callable, Tuple, get_args
+from typing import Optional, Any, List, Callable, Tuple, get_args
 import sys
 import numpy as np
 from datetime import datetime
 import re
 import warnings
 
-from shinier.Options import ACCEPTED_IMAGE_FORMATS
+from shinier.Options import ACCEPTED_IMAGE_FORMATS, OPTION_TYPES
 from shinier import ImageDataset, Options, ImageProcessor, REPO_ROOT
 from shinier.utils import (
     Bcolors, console_log, load_np_array, colorize,
@@ -162,6 +162,28 @@ def prompt(
 
     return val
 
+def options_display(opts):
+    """Display the options after images are processed.
+
+    Args:
+        opts (Options): Options object
+    """
+    types = ['io']
+    if opts.whole_image != 1:
+        types.append('mask')
+    types += ['mode', 'color', 'dithering_memory']
+    if opts.mode == 1:
+        types.append('luminance')
+    if opts.mode in (2, 5, 6, 7, 8):
+        types.append('histogram')
+    if opts.mode in (3, 4, 5, 6, 7, 8):
+        types.append('fourier')
+    types.append('misc')
+    for option_type in types:
+        console_log(f"\n---- {option_type}  ----", indent_level=1, color=Bcolors.OKBLUE)
+        for key, value in dict(opts).items():
+            if key in OPTION_TYPES[option_type]:
+                console_log(f"{key:<20}: {value}", indent_level=1, color=Bcolors.OKBLUE)
 
 #########################################
 #            SHINIER CLI CORE           #
@@ -317,23 +339,26 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
         if mode in (5, 6, 7, 8):
             opts.iterations = prompt("How many composite iterations (hist/spec coupling)?", default=2, kind="int", min_v=1, max_v=1_000_000)
 
+    # ---- Progress info ----
+    if prof != 1:
+        prog_info = prompt('Select verbosity level', kind="choice", default=2, choices=[
+                "None (quiet mode)",
+                "Progress bar with ETA",
+                "Basic progress steps (no progress bar)",
+                "Detailed step-by-step info (no progress bar)",
+                "Debug mode for developers (no progress bar)"
+        ])
+        opts.verbose = prog_info - 2
+
     # ---- Start SHINIER ----
-    prog_info = prompt('Select verbosity level', kind="choice", default=2, choices=[
-            "None (quiet mode)",
-            "Progress bar with ETA",
-            "Basic progress steps (no progress bar)",
-            "Detailed step-by-step info (no progress bar)",
-            "Debug mode for developers (no progress bar)"
-    ])
-    opts.verbose = prog_info - 2
     dataset = ImageDataset(images=images, masks=masks, options=opts) if (images or masks) else ImageDataset(options=opts)
     results = ImageProcessor(dataset=dataset, verbose=opts.verbose, from_cli=True)
 
     console_log("╔══════════════════════════════════════════════════════╗")
     console_log("║                      OPTIONS                         ║")
     console_log("╚══════════════════════════════════════════════════════╝")
-    for key, value in dict(opts).items():
-        console_log(f"{key:<20}: {value}", indent_level=1, color=Bcolors.OKBLUE)
+    
+    options_display(opts)
 
     return results
 
@@ -376,14 +401,20 @@ def main():
     # Overview mode
     if args.show_results:
         from shinier.utils import show_processing_overview
+        try :
+            import matplotlib.pyplot as plt
+        except ImportError:
+            raise RuntimeError(
+                "Matplotlib is not installed. "
+                "Install with: pip install shinier[viz]"
+            )
         fig = show_processing_overview(processor, img_idx=args.image_index, show_figure=False)
 
         if args.save_path is not None:
             fig.savefig(args.save_path, dpi=150)
+            print(f"Processing overview figure saved successfully at: {args.save_path}")
         else:
-            import matplotlib.pyplot as plt
             plt.show()
-
 
 if __name__ == "__main__":
     main()

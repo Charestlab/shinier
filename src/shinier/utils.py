@@ -297,7 +297,8 @@ def imhist_plot(
     binary_mask: Optional[np.ndarray] = None,
     descriptives: bool = False,
     ax: Optional[plt.Axes] = None,
-):
+) -> Tuple[plt.Figure, plt.Axes]:
+
     """Displays an image with its histogram and optional descriptive statistics.
 
     The image is shown on top, with a compact horizontal histogram below.
@@ -560,7 +561,12 @@ def sf_profile(
     return rot_avg, radians
 
 
-def sf_plot(image: np.ndarray, sf_p: Optional[np.ndarray], target_sf: Optional[np.ndarray], ax: Optional[plt.axis] = None) -> Union[plt.Figure, plt.Axes]:
+def sf_plot(
+        image: np.ndarray, 
+        sf_p: Optional[np.ndarray], 
+        target_sf: Optional[np.ndarray], 
+        ax: Optional[plt.axis] = None
+) -> Union[plt.Figure, plt.Axes]:
     """
     Rotational average of the Fourier energy spectrum.
 
@@ -626,7 +632,9 @@ def spectrum_plot(
         gamma: float = 1.0,
         ax: Optional[plt.Axes] = None,
         with_colorbar: bool = True,
-        colorbar_label: str = 'log(1 + |F|) (stretched)'):
+        colorbar_label: str = 'log(1 + |F|) (stretched)'
+    ) -> Union[plt.Figure, plt.Axes]:
+
 
     """Display a Fourier magnitude spectrum with optional log and gamma scaling."""
     if plt is None:
@@ -1980,9 +1988,15 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
     Returns:
         matplotlib.figure.Figure: Composite figure summarizing the image transformations.
     """
+    if plt is None:
+        raise RuntimeError(
+            "Matplotlib is not installed. "
+            "Install with: pip install shinier[viz]"
+        )
+    
     import os, matplotlib
     if os.environ.get("DISPLAY", "") == "":
-        matplotlib.use("Agg")
+        matplotlib.use("TkAgg")
 
     fontname = 'Arial'
 
@@ -2107,9 +2121,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
         fontname="Times New Roman",
         y=0.99,
     )
-
-    if show_figure:
-        fig.show()
+    
     return fig
 
 
@@ -2491,7 +2503,7 @@ def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], t
     return corr, rms
 
 
-def sf_match_validation(images: np.ndarray, target_sf: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+def sf_match_validation(images: np.ndarray, target_spectrum: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """
     Validates spectral match between a set of input images by comparing their
     rotational averages of magnitude spectra against a computed target spectrum.
