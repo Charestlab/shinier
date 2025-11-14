@@ -10,6 +10,7 @@ from pydantic import (
     confloat,
     field_validator,
     model_validator,
+    PrivateAttr
 )
 from pydantic.json_schema import model_json_schema, GenerateJsonSchema, JsonSchemaValue
 from shinier.utils import console_log, Bcolors
@@ -234,6 +235,9 @@ class Options(InformativeBaseModel):
 
     # --- Misc ---
     verbose: Literal[-1, 0, 1, 2, 3] = 0
+
+     # --- Private attributes ---
+    _is_moving_target: bool = PrivateAttr(default=True)
 
     # ================================================================================================
     # FIELD-LEVEL VALIDATIONS

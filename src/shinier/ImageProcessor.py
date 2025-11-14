@@ -649,6 +649,10 @@ class ImageProcessor(InformativeBaseModel):
         bit_size = 8
         n_bins = 2 ** bit_size
 
+        # Scientific rationale to verify
+        if self.options._is_moving_target and self.options.mode > 2: 
+            self._compute_initial_target_histogram()
+
         # If hist_optim disable, will run only one loop (n_iter = 1)
         n_iter = self.options.hist_iterations + 1 if hist_optim else 1  # See important note below to explain the +1. Also, note that the number of iterations for SSIM optimization (default = 10)
         step_sizes = np.zeros(buffer_collection.n_channels)  # Step size (default = 34)
@@ -776,6 +780,10 @@ class ImageProcessor(InformativeBaseModel):
         # Convert buffer to float [0, 1]
         buffer_collection = self.float255_to_float01(self.dataset.buffer)
 
+        # Scientific rationale to verify
+        if self.options._is_moving_target and self.options.mode > 3:
+            self._compute_initial_target_sf()
+
         # Compute Nyquist and radius grid
         x_size, y_size, n_channels = self._target_spectrum.shape[:3]
         nyquistLimit = np.floor(min(x_size, y_size) / 2)
@@ -871,6 +879,10 @@ class ImageProcessor(InformativeBaseModel):
         for idx, image in enumerate(buffer_collection):
             buffer_collection[idx] = image/255
         buffer_collection.drange = (0, 1)
+
+        # Scientific rationale to verify
+        if self.options._is_moving_target and self.options.mode > 4:
+            self._compute_initial_target_spectrum()
 
         # If target_spectrum is None, target magnitude is the average of all spectra
         x_size, y_size, n_channels = self._target_spectrum.shape[:3]
