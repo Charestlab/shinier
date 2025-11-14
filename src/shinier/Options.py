@@ -274,7 +274,7 @@ class Options(InformativeBaseModel):
             raise ValueError("Mode 9 requires dithering 1 or 2 (not 0).")
 
         # target_hist should match expected images size under as_gray and linear_luminance
-        if self.target_hist is not None:
+        if self.target_hist is not None and not isinstance(self.target_hist, str):
             if (not self.linear_luminance or self.as_gray) and self.target_hist.size != 256:
                 raise ValueError(f"target_hist must be (256, ) or (256, 1) when linear_luminance is False or as_gray is True. Current target_hist shape = {self.target_hist.shape}")
 
