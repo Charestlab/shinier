@@ -17,6 +17,16 @@ from shinier.base import InformativeBaseModel
 from shinier import REPO_ROOT
 ACCEPTED_IMAGE_FORMATS = Literal["png", "tif", "tiff", "jpg", "jpeg", "npy"]
 
+OPTION_TYPES = {
+    'io':        ['input_folder', 'output_folder'],
+    'mask':      ['masks_folder', 'background', 'whole_image'],
+    'mode_color': ['mode', 'as_gray', 'linear_luminance', 'rec_standard'],
+    'dithering_memory': ['dithering', 'conserve_memory', 'seed', 'legacy_mode'],
+    'luminance': ['safe_lum_match', 'target_lum'],
+    'histogram': ['hist_optim', 'hist_specification', 'hist_iterations', 'target_hist'],
+    'fourier':   ['rescaling', 'target_spectrum'],
+    'general':   ['verbose', 'iterations']
+}
 
 class Options(InformativeBaseModel):
     """

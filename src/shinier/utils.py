@@ -1924,7 +1924,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, save_p
     
     import os, matplotlib
     if os.environ.get("DISPLAY", "") == "":
-        matplotlib.use("Agg")
+        matplotlib.use("TkAgg")
 
     fontname = 'Arial'
 
@@ -2043,8 +2043,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, save_p
         fontname="Times New Roman",
         y=0.99,
     )
-
-    fig.show()
+    
     return fig
 
 
