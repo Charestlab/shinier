@@ -20,7 +20,7 @@ from shinier.utils import (
     beta_bounds_from_ssim, separate, imhist, im3D, cart2pol, pol2cart, soft_clip,
     rescale_images255, get_images_spectra, ssim_sens, spectrum_plot, imhist_plot, sf_plot, avg_hist,
     uint8_plus, float01_to_uint, uint_to_float01, noisy_bit_dithering, floyd_steinberg_dithering,
-    exact_histogram, Bcolors, MatlabOperators, compute_rmse,
+    exact_histogram, Bcolors, MatlabOperators, compute_rmse, get_radius_grid, rotational_avg,
     has_duplicates, stretch, console_log, print_log, StepSizeController
 )
 from shinier.color import ColorConverter, ColorTreatment, rgb2gray, gray2rgb, RGB2GRAY_WEIGHTS, RGB_STANDARD
@@ -101,6 +101,7 @@ class ImageProcessor(InformativeBaseModel):
     _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
     _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
     _target_sf: Optional[np.ndarray] = PrivateAttr(default=None)
+    _radius_grid: Optional[np.ndarray] = PrivateAttr(default=None)
     _final_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
     _initial_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
 
@@ -203,12 +204,81 @@ class ImageProcessor(InformativeBaseModel):
             )
 
     @staticmethod
-    def uint8_to_float255(input_collection: ImageDataset, output_collection: ImageDataset) -> ImageDataset:
-        """Convert a uintX dataset to float255"""
+    def uint8_to_float255(input_collection: ImageListIO, output_collection: ImageListIO) -> ImageListIO:
+        """Convert a uintX collection to float255"""
         for idx, image in enumerate(input_collection):
             output_collection[idx] = image.astype(float)
         output_collection.drange = (0, 255)
         return output_collection
+
+    @staticmethod
+    def float255_to_float01(a_list: ImageListIO) -> ImageListIO:
+        """Convert a float [0, 255] collection to a float [0, 1]"""
+        for idx, image in enumerate(a_list):
+            a_list[idx] = image/255
+        a_list.drange = (0, 1)
+        return a_list
+
+    @staticmethod
+    def float01_to_float255(a_list: ImageListIO) -> ImageListIO:
+        """Convert a float [0, 1] dataset to a float [0, 255]"""
+        for idx, image in enumerate(a_list):
+            a_list[idx] = image*255
+        a_list.drange = (0, 255)
+        return a_list
+
+    def _compute_initial_spectra(self):
+        """Compute initial Fourier spectra if required and not already computed."""
+        buffer_collection = self.float255_to_float01(self.dataset.buffer)
+
+        # Compute all spectra: Assumes float01
+        self.dataset.magnitudes, self.dataset.phases = get_images_spectra(
+            images=buffer_collection,
+            magnitudes=self.dataset.magnitudes,
+            phases=self.dataset.phases, rescale=False)
+        self.dataset.buffer = self.float01_to_float255(buffer_collection)
+
+    def _compute_initial_target_spectrum(self):
+        """Compute initial target spectrum."""
+        target_spectrum = self.options.target_spectrum
+        if target_spectrum is None or isinstance(target_spectrum, str):
+            target_spectrum = np.zeros(self.dataset.magnitudes[0].shape)
+            for idx, mag in enumerate(self.dataset.magnitudes):
+                target_spectrum += mag
+            target_spectrum /= len(self.dataset.magnitudes)
+        else:
+            if target_spectrum.shape[:2] != self.dataset.buffer.reference_size:
+                raise TypeError('The target spectrum must have the same size as the images.')
+        self._target_spectrum = im3D(target_spectrum)
+
+    def _compute_initial_target_histogram(self, n_bins: int = 256):
+        """Compute initial target histogram."""
+
+        # Get target histogram
+        target_hist = self.options.target_hist
+        if isinstance(target_hist, str):
+            target_hist = np.ones((n_bins, self.dataset.buffer.n_channels))/n_bins
+        if target_hist is None:
+            target_hist = avg_hist(self.dataset.buffer, binary_masks=self.bool_masks, n_bins=n_bins)
+        else:
+            if target_hist.shape[0] != n_bins:
+                raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
+            if target_hist.max() > 1:
+                target_hist = target_hist.astype(np.float64)
+                target_hist /= (target_hist.sum(axis=0, keepdims=True) + 1e-12)
+        if target_hist.ndim > 1 and target_hist.shape[-1] != self.dataset.buffer.n_channels:
+            raise ValueError(f"target_hist must have {self.dataset.buffer.n_channels} channels, ")
+        self._target_hist = target_hist
+
+    def _compute_initial_target_sf(self):
+        if self._target_spectrum is None:
+            raise ValueError('The target spectrum has not been computed yet.')
+        _target_sf = []
+        xs, ys, n_channels = self._target_spectrum.shape
+        self._radius_grid = get_radius_grid(x_size=xs, y_size=ys, legacy_mode=self.options.legacy_mode)
+        for ch in range(n_channels):
+            _target_sf.append(rotational_avg(spectrum=self._target_spectrum[..., ch], radius=self._radius_grid))
+        self._target_sf = np.stack(_target_sf).T
 
     def _get_mask(self, idx):
         """ Provide mask if masks exists in the dataset, if not make blank masks (all True). """
@@ -317,12 +387,24 @@ class ImageProcessor(InformativeBaseModel):
             linear_luminance=self.options.linear_luminance,
             as_gray=self.options.as_gray,
             conversion_type='sRGB_to_xyY')
-
-        # Initialize new instance and copy
-        self._initial_buffer = self.dataset.buffer.new_copy(to_list=False)
-
         if buffer_other is not None:
             self.dataset.buffer_other = buffer_other
+
+        # Copy of the original buffer
+        self._initial_buffer = self.dataset.buffer.new_copy(to_list=False)
+
+        # Compute target histogram if required
+        if self.options.mode in [2, 5, 6, 7, 8]:
+            self._compute_initial_target_histogram()
+
+        # Compute Fourier spectra and target spectrum if required
+        if self.options.mode in [3, 4, 5, 6, 7, 8]:
+            self._compute_initial_spectra()
+            self._compute_initial_target_spectrum()
+
+        # Compute target sf if required
+        if self.options.mode in [3, 5, 7]:
+            self._compute_initial_target_sf()
 
         # Set a seed for the random generator used in exact histogram specification
         if self.seed is None:
@@ -378,10 +460,11 @@ class ImageProcessor(InformativeBaseModel):
                         pbar.update(1)
                         cnt += 1
 
-        # Apply relevant inverse color treatment
-        buffer_other = self.dataset.buffer_other if not self.options.linear_luminance else None
+        # Copy of the final buffer (before
         self._final_buffer = self.dataset.buffer.new_copy(to_list=False)
 
+        # Apply relevant inverse color treatment
+        buffer_other = self.dataset.buffer_other if not self.options.linear_luminance else None
         self.dataset.buffer = ColorTreatment.backward_color_treatment(
             rec_standard=self._rec_standard,
             input_images=self.dataset.buffer,
@@ -571,23 +654,6 @@ class ImageProcessor(InformativeBaseModel):
         bit_size = 8
         n_bins = 2 ** bit_size
 
-        # Get target histogram
-        if self._target_hist is None:
-            target_hist = self.options.target_hist
-            if isinstance(target_hist, str):
-                target_hist = np.ones((n_bins, buffer_collection.n_channels))/n_bins
-            if target_hist is None:
-                target_hist = avg_hist(buffer_collection, binary_masks=self.bool_masks, n_bins=n_bins)
-            else:
-                if target_hist.shape[0] != n_bins:
-                    raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
-                if target_hist.max() > 1:
-                    target_hist = target_hist.astype(np.float64)
-                    target_hist /= (target_hist.sum(axis=0, keepdims=True) + 1e-12)
-            if target_hist.ndim > 1 and target_hist.shape[-1] != buffer_collection.n_channels:
-                raise ValueError(f"target_hist must have {buffer_collection.n_channels} channels, ")
-            self._target_hist = target_hist
-
         # If hist_optim disable, will run only one loop (n_iter = 1)
         n_iter = self.options.hist_iterations + 1 if hist_optim else 1  # See important note below to explain the +1. Also, note that the number of iterations for SSIM optimization (default = 10)
         step_sizes = np.zeros(buffer_collection.n_channels)  # Step size (default = 34)
@@ -712,67 +778,13 @@ class ImageProcessor(InformativeBaseModel):
                 self._is_last_operation is True.
         """
 
-        def rot_avg(arr2d: np.ndarray, radius: np.ndarray) -> np.ndarray:
-            """Mean magnitude per radius bin (annular average)."""
-            sums = np.bincount(radius, weights=arr2d.ravel())
-            return sums / ann_counts
+        # Convert buffer to float [0, 1]
+        buffer_collection = self.float255_to_float01(self.dataset.buffer)
 
-        # Target magnitude spectrum to which the
-        # input images should be matched. Should be a 2D or 3D array
-        # compatible with the image dimensions, typically of shape
-        # (H, W, C).
-
-        # Get proper input and output image collections
-        buffer_collection = self.dataset.buffer
-        for idx, image in enumerate(buffer_collection):
-            buffer_collection[idx] = image/255
-        buffer_collection.drange = (0, 1)
-
-        # Compute all spectra: Assumes float01
-        self.dataset.magnitudes, self.dataset.phases = get_images_spectra(
-            images=buffer_collection,
-            magnitudes=self.dataset.magnitudes,
-            phases=self.dataset.phases, rescale=False)
-
-        # If target_spectrum is None, target magnitude is the average of all spectra
-        if self._target_spectrum is None:
-            target_spectrum = self.options.target_spectrum
-            if target_spectrum is None or isinstance(target_spectrum, str):
-                target_spectrum = np.zeros(self.dataset.magnitudes[0].shape)
-                for idx, mag in enumerate(self.dataset.magnitudes):
-                    target_spectrum += mag
-                target_spectrum /= len(self.dataset.magnitudes)
-            else:
-                if target_spectrum.shape[:2] != self.dataset.buffer.reference_size:
-                    raise TypeError('The target spectrum must have the same size as the images.')
-            self._target_spectrum = im3D(target_spectrum)
-
+        # Compute Nyquist and radius grid
         x_size, y_size, n_channels = self._target_spectrum.shape[:3]
-
-        # Returns the frequencies of the image, bins range from -0.5f to 0.5f (0.5f is the Nyquist frequency) 1/y_size is the distance between each pixel in the image
-        f_cols = np.fft.fftshift(np.fft.fftfreq(y_size, d=1 / y_size))  # like f1 in MATLAB
-        f_rows = np.fft.fftshift(np.fft.fftfreq(x_size, d=1 / x_size))  # like f2 in MATLAB
-        XX, YY = np.meshgrid(f_cols, f_rows)
-        nyquistLimit = np.floor(max(x_size, y_size) / 2)
-        r, theta = cart2pol(XX, YY)
-
-        # Map of the frequency bins.
-        r = MatlabOperators.round(r) if self.options.legacy_mode else np.round(r, decimals=0)
-
-        # Need to be a 1D array of integers for the bincount function
-        r_int = r.astype(np.int32)
-        r1 = r_int.ravel()
-
-        # Precompute counts per radius (for true rotational *averages*, not sums)
-        ann_counts = np.bincount(r1)
-        ann_counts[ann_counts == 0] = 1  # protect against divide-by-zero
-
-        # Compute target rotational average
-        if self._target_sf is None:
-            self._target_sf = []
-            for ch in range(n_channels):
-                self._target_sf.append(rot_avg(self._target_spectrum[:, :, ch], radius=r1))
-            self._target_sf = np.stack(self._target_sf).T
+        nyquistLimit = np.floor(min(x_size, y_size) / 2)
+        r_int = self._radius_grid
 
         # Match spatial frequency on rotational average of the magnitude spectrum
         for idx, image in enumerate(buffer_collection):
@@ -782,12 +794,12 @@ class ImageProcessor(InformativeBaseModel):
             magnitude = im3D(self.dataset.magnitudes[idx])
             phase = im3D(self.dataset.phases[idx])
             for self._processed_channel in range(n_channels):
-                console_log(msg=f'\nChannel {self._processed_channel}', indent_level=1, verbose=self.verbose>=2, color=Bcolors.BOLD)
+                console_log(msg=f'\nChannel {self._processed_channel}', indent_level=1, verbose=self.verbose >= 2, color=Bcolors.BOLD)
                 fft_image = magnitude[:, :, self._processed_channel]
 
                 # Rotational averages (target vs source) as MEANS over annuli
                 target_ra = self._target_sf[:, self._processed_channel].squeeze()
-                source_ra = rot_avg(fft_image, radius=r1).squeeze()
+                source_ra = rotational_avg(spectrum=fft_image, radius=r_int)
 
                 # Per-radius scale coefficients; avoid divide-by-zero on empty/zero annuli
                 coef = target_ra / np.maximum(source_ra, 1e-12)
@@ -808,7 +820,7 @@ class ImageProcessor(InformativeBaseModel):
                 matched_image.append(output)
 
                 # Comparison: obtained vs target rotational averages (up to Nyquist)
-                obtained_ra = rot_avg(new_magnitude, radius=r1)
+                obtained_ra = rotational_avg(spectrum=new_magnitude, radius=r_int)
                 R = int(min(len(obtained_ra), len(target_ra), nyquistLimit + 1))
                 t = target_ra[:R]
                 o = obtained_ra[:R]
@@ -865,24 +877,7 @@ class ImageProcessor(InformativeBaseModel):
             buffer_collection[idx] = image/255
         buffer_collection.drange = (0, 1)
 
-        # Compute all spectra
-        self.dataset.magnitudes, self.dataset.phases = get_images_spectra(
-            images=buffer_collection,
-            magnitudes=self.dataset.magnitudes,
-            phases=self.dataset.phases)
-
         # If target_spectrum is None, target magnitude is the average of all spectra
-        if self._target_spectrum is None:
-            target_spectrum = self.options.target_spectrum
-            if target_spectrum is None or isinstance(target_spectrum, str):
-                target_spectrum = np.zeros(self.dataset.magnitudes[0].shape)
-                for idx, mag in enumerate(self.dataset.magnitudes):
-                    target_spectrum += mag
-                target_spectrum /= len(self.dataset.magnitudes)
-
-            # Ensure the target spectrum is 3D (H, W, C)
-            self._target_spectrum = im3D(target_spectrum)
-
         x_size, y_size, n_channels = self._target_spectrum.shape[:3]
         image = im3D(buffer_collection[0])
         if self._target_spectrum.shape != image.shape:

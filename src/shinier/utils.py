@@ -460,7 +460,53 @@ def imhist_plot(
         return ax_hist, ax_bar
 
 
-def sf_profile(image: np.ndarray, spectrum: Optional[np.ndarray] = None, is_power_spectrum: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+def freq_axis(n: int) -> np.ndarray:
+    """Compute spatial frequency axis for image spectrum"""
+    # MATLAB:
+    # even n:   -n/2 : n/2-1
+    # odd  n:   -n/2 : n/2-1  (with halves → -2.5,-1.5,...,+1.5 for n=5)
+    if n % 2 == 0:
+        return np.arange(-n//2, n//2, dtype=np.float64)
+    else:
+        # center at half-steps to avoid 0; e.g., n=5 -> -2.5..+1.5
+        half = n // 2
+        return np.arange(-(half + 0.5), half + 0.5, 1.0, dtype=np.float64)
+
+
+def get_radius_grid(x_size: int, y_size: int, legacy_mode: bool = False) -> np.ndarray:
+    """Compute the radius grid for rotational average"""
+    f2 = freq_axis(x_size)  # rows
+    f1 = freq_axis(y_size)  # cols
+    XX, YY = np.meshgrid(f1, f2)  # shape (xs, ys)
+
+    # --- polar radius, MATLAB rounding rule ---
+    r = np.hypot(XX, YY)
+    r_adjustment = -1 if (x_size % 2 == 1) or (y_size % 2 == 1) else 0
+    r = MatlabOperators.round(r) if legacy_mode else np.round(r, decimals=0) + r_adjustment
+
+    # Non-negative integer bin indices
+    return np.clip(r, 0, None).astype(np.int64)
+
+
+def rotational_avg(spectrum: np.ndarray, radius: np.ndarray) -> np.ndarray:
+    """Mean spectrum per radius bin (annular average)."""
+    # Precompute counts per radius (for true rotational *averages*, not sums)
+    r = radius if radius.ndim == 1 else radius.ravel()
+    weights = spectrum if spectrum.ndim == 1 else spectrum.ravel()
+    counts = np.bincount(r)
+    counts[counts == 0] = 1  # protect against divide-by-zero
+
+    sums = np.bincount(r, weights=weights)
+    return sums / counts
+
+
+def sf_profile(
+        image: np.ndarray,
+        spectrum: Optional[np.ndarray] = None,
+        is_power_spectrum: bool = True,
+        is_truncated: bool = True,
+        legacy_mode: bool = False,
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Rotational average of the Fourier (energy) spectrum.
 
@@ -471,23 +517,16 @@ def sf_profile(image: np.ndarray, spectrum: Optional[np.ndarray] = None, is_powe
             If not None, uses spectrum instead of computing new spectrum on input image.
         is_power_spectrum: bool, default = True
             If True, computes power spectrum else uses magnitude.
-
+        is_truncated: bool, default = True
+            If True, truncates sf profile to the nyquist of the shortest image size.
+        legacy_mode: bool, default = False
+            If True, uses Matlab round function
     Returns: Tuples[np.ndarray, np.ndarray]
         Rotational average of spectrum
         radius
     """
 
     # --- frequency grids replicating MATLAB logic ---
-    def freq_axis(n: int) -> np.ndarray:
-        # MATLAB:
-        # even n:   -n/2 : n/2-1
-        # odd  n:   -n/2 : n/2-1  (with halves → -2.5,-1.5,...,+1.5 for n=5)
-        if n % 2 == 0:
-            return np.arange(-n//2, n//2, dtype=np.float64)
-        else:
-            # center at half-steps to avoid 0; e.g., n=5 -> -2.5..+1.5
-            half = n // 2
-            return np.arange(-(half + 0.5), half + 0.5, 1.0, dtype=np.float64)
 
     # --- Fourier energy (fft-shifted) ---
     image = im3D(image)
@@ -498,36 +537,22 @@ def sf_profile(image: np.ndarray, spectrum: Optional[np.ndarray] = None, is_powe
     else:
         power_spectrum = spectrum ** exp
 
+    # Compute radius
     xs, ys, channels = image.shape
-    f2 = freq_axis(xs)  # rows
-    f1 = freq_axis(ys)  # cols
-    XX, YY = np.meshgrid(f1, f2)  # shape (xs, ys)
-
-    # --- polar radius, MATLAB rounding rule ---
-    r = np.hypot(XX, YY)
-    if (xs % 2 == 1) or (ys % 2 == 1):
-        r = np.rint(r) - 1.0
-    else:
-        r = np.rint(r)
-
-    # Non-negative integer bin indices
-    r = np.clip(r, 0, None).astype(np.int64)
+    r = get_radius_grid(x_size=xs, y_size=ys, legacy_mode=legacy_mode)
 
     # --- accumarray equivalent: mean energy per radius ---
-    flat_r = r.ravel()
     rot_avg = []
     radians = []
     for ch in range(channels):
-        flat_e = power_spectrum.ravel()
-        sums = np.bincount(flat_r, weights=flat_e)
-        counts = np.bincount(flat_r)
-        counts[counts == 0] = 1  # guard against divide-by-zero
-        avg_full = sums / counts
+        avg = rotational_avg(spectrum=power_spectrum[..., ch], radius=r)
+        radii = np.arange(1, avg.shape[0] + 1)
 
         # Match MATLAB: avg = avg(2:floor(min(xs,ys)/2)+1)
-        R = int(np.floor(min(xs, ys) / 2.0))
-        radii = np.arange(1, R + 1)
-        avg = avg_full[1:R + 1]
+        if is_truncated:
+            R = int(np.floor(min(xs, ys) / 2.0))
+            radii = np.arange(1, R + 1)
+            avg = avg[1:R + 1]
         rot_avg.append(avg)
         radians.append(radii)
     rot_avg = np.array(rot_avg).T
@@ -2043,8 +2068,14 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
         # ---- Spatial frequency matching ----
         elif step == "sf_match":
             target_sf = processor._target_sf ** 2
-            avg_before, radii = sf_profile(processor._initial_buffer[img_idx])
-            avg_after, radii = sf_profile(processor._final_buffer[img_idx])
+            avg_before, radii = sf_profile(
+                processor._initial_buffer[img_idx],
+                legacy_mode=processor.options.legacy_mode
+            )
+            avg_after, radii = sf_profile(
+                processor._final_buffer[img_idx],
+                legacy_mode=processor.options.legacy_mode
+            )
             _ = sf_plot(processor._initial_buffer[img_idx], sf_p=avg_before, target_sf=target_sf, ax=axL)
             _ = sf_plot(processor._final_buffer[img_idx], sf_p=avg_after, target_sf=target_sf, ax=axR)
 

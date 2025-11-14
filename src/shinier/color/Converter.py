@@ -205,7 +205,7 @@ class ColorTreatment(ColorConverter):
             input_images: ImageListIO,
             output_images: ImageListIO,
             linear_luminance: bool,
-            as_gray: Literal[0, 1],
+            as_gray: bool,
             output_other: Optional[ImageListIO] = None,
             conversion_type: Literal['sRGB_to_xyY', 'sRGB_to_lab'] = 'sRGB_to_xyY') -> Tuple[ImageListIO, Optional[ImageListIO]]:
         """
@@ -224,8 +224,8 @@ class ColorTreatment(ColorConverter):
             output_other (Optional[ImageListType]): Secondary buffer to store optional components (if applicable).
             linear_luminance (bool): Defines whether the color treatment is applied.
                 If False, color treatment is enabled.
-            as_gray (Literal[0, 1]): Determines whether to output images in grayscale format
-                (1 for grayscale, 0 for retaining color components).
+            as_gray (bool): Determines whether output should be a grayscale
+                image (True) or a color image (False).
             conversion_type (Literal['sRGB_to_xyY', 'sRGB_to_lab']): Specifies the type of color space
                 conversion to apply. Defaults to 'sRGB_to_xyY'.
 
@@ -297,7 +297,7 @@ class ColorTreatment(ColorConverter):
             input_images: ImageListIO,
             output_images: ImageListIO,
             linear_luminance: bool,
-            as_gray: Literal[0, 1],
+            as_gray: bool,
             input_other: Optional[ImageListIO] = None,
             conversion_type: Literal['xyY_to_sRGB', 'lab_to_sRGB'] = 'xyY_to_sRGB') -> ImageListIO:
         """
@@ -314,22 +314,16 @@ class ColorTreatment(ColorConverter):
         Args:
             rec_standard (REC_STANDARD): The color space standard used for processing
                 (e.g., REC709, REC2020).
-
             input_images (ImageListType): A list or array of images that have undergone prior
                 color treatment and need restoration.
-
             output_images (ImageListType): Temporary buffer to store the processed image data, must match the
                 structure of `images`.
-
             input_other (Optional[ImageListType]): Additional arrays containing auxiliary
                 data required for certain reconversions. Mandatory if `linear_luminance=1`.
-
             linear_luminance (bool): Indicator of whether color treatment was
                 applied; 0 means no treatment, 1 means treatment was applied.
-
-            as_gray (Literal[0, 1]): Determines whether output should be a grayscale
-                image (1) or a color image (0).
-
+            as_gray (bool): Determines whether output should be a grayscale
+                image (True) or a color image (False).
             conversion_type (Literal['xyY_to_sRGB', 'lab_to_sRGB']): Specifies the method
                 for reconverting colors: either 'xyY_to_sRGB' to transform xyY to sRGB,
                 or 'lab_to_sRGB' to transform Lab to sRGB. Defaults to 'xyY_to_sRGB'.
