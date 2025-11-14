@@ -610,14 +610,14 @@ options = Options(
 ```
 
 **Scientific Rationale:**
-Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum matching followed by histogram matching). Because each transformation modifies the image in ways that can partially undo the effects of the other, a **single pass rarely yields convergence**. As detailed in the original [SHINE documentation](documentation/articles/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), **iterative application** of both steps allows the algorithm to progressively minimize residual discrepancies between the desired luminance distribution and spectral amplitude structure.
+Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum matching followed by histogram matching). Because each transformation modifies the image in ways that can partially undo the effects of the other, a **single pass rarely yields convergence**. As detailed in the original [SHINE documentation](documentation/papers/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), **iterative application** of both steps allows the algorithm to progressively minimize residual discrepancies between the desired luminance distribution and spectral amplitude structure.
 
 1. **Sequential Processing**: Each cycle compensates for the distortions introduced by the preceding transformation (e.g., histogram adjustment altering spectral power).
 2. **Convergence**: Repeated alternation drives both properties toward their joint target values.
 3. **Iterative Refinement**: After several iterations (typically 5), the process reaches a stable equilibrium where further refinement yields negligible improvement.
 
 **Recommendations:**
-- **Target histogram and spectrum**: Avoid providing explicit target histograms or spectra. As explained in the [SHINE article](documentation/articles/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), the algorithm is designed to automatically compute the mean histogram and spectrum across all input images at each iteration, ensuring that the matching process remains adaptive and consistent.
+- **Target histogram and spectrum**: Avoid providing explicit target histograms or spectra. As explained in the [SHINE article](documentation/papers/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), the algorithm is designed to automatically compute the mean histogram and spectrum across all input images at each iteration, ensuring that the matching process remains adaptive and consistent.
 
 ---
 
