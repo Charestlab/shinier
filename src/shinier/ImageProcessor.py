@@ -257,11 +257,10 @@ class ImageProcessor(InformativeBaseModel):
         if target_hist is None:
             target_hist = avg_hist(self.dataset.buffer, binary_masks=self.bool_masks, n_bins=n_bins)
         else:
+            target_hist = im3D(target_hist.astype(np.float64))
+            target_hist /= (target_hist.sum(axis=0, keepdims=True) + 1e-12)
             if target_hist.shape[0] != n_bins:
                 raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
-            if target_hist.max() > 1:
-                target_hist = target_hist.astype(np.float64)
-                target_hist /= (target_hist.sum(axis=0, keepdims=True) + 1e-12)
         if target_hist.ndim > 1 and target_hist.shape[-1] != self.dataset.buffer.n_channels:
             raise ValueError(f"target_hist must have {self.dataset.buffer.n_channels} channels, ")
         self._target_hist = target_hist

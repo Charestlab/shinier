@@ -562,9 +562,9 @@ def sf_profile(
 
 
 def sf_plot(
-        image: np.ndarray, 
-        sf_p: Optional[np.ndarray], 
-        target_sf: Optional[np.ndarray], 
+        image: np.ndarray,
+        sf_p: Optional[np.ndarray],
+        target_sf: Optional[np.ndarray],
         ax: Optional[plt.axis] = None
 ) -> Union[plt.Figure, plt.Axes]:
     """
@@ -1993,7 +1993,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
             "Matplotlib is not installed. "
             "Install with: pip install shinier[viz]"
         )
-    
+
     import os, matplotlib
     if os.environ.get("DISPLAY", "") == "":
         matplotlib.use("TkAgg")
@@ -2121,7 +2121,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
         fontname="Times New Roman",
         y=0.99,
     )
-    
+
     return fig
 
 
