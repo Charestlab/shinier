@@ -419,12 +419,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-OPTION_TYPES = {
-               'lum_options':     ['safe_lum_match', 'target_lum'],
-               'hist_options':    ['hist_optim', 'hist_specification', 'hist_iterations', 'target_hist'],
-               'fourier_options': ['rescaling', 'target_spectrum'],
-               'color_options':   ['as_gray', 'linear_luminance', 'rec_standard'],
-               'mask_options':    ['masks_folder', 'background', 'whole_image'],
-               'general_options': ['input_folder', 'output_folder', 'conserve_memory', 'mode', 'dithering', 'seed', 'legacy_mode', 'verbose', 'iterations']
-               }

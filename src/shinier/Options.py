@@ -16,7 +16,6 @@ from shinier.utils import console_log, Bcolors
 from shinier.base import InformativeBaseModel
 from shinier import REPO_ROOT
 ACCEPTED_IMAGE_FORMATS = Literal["png", "tif", "tiff", "jpg", "jpeg", "npy"]
-
 OPTION_TYPES = {
     'io':        ['input_folder', 'output_folder'],
     'mask':      ['masks_folder', 'background', 'whole_image'],
