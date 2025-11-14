@@ -1,6 +1,20 @@
-# Contributing to Shinier
+```text
+   ███████╗██╗  ██╗██╗███╗  ██╗██╗███████╗██████╗
+   ██╔════╝██║  ██║██║████╗ ██║██║██╔════╝██╔══██╗
+   ███████╗███████║██║██╔██╗██║██║█████╗  ██████╔╝
+   ╚════██║██╔══██║██║██║╚████║██║██╔══╝  ██╔══██╗
+   ███████║██║  ██║██║██║ ╚███║██║███████╗██║  ██║
+   ╚══════╝╚═╝  ╚═╝╚═╝╚═╝  ╚══╝╚═╝╚══════╝╚═╝  ╚═╝
+```
 
-Thanks for your interest in improving **Shinier**. This document explains how to set up a development environment, coding standards, testing strategy (unit vs. validation), and the pull-request process. Please read it fully before opening a PR.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)]()
+[![PyPI version](https://img.shields.io/pypi/v/shinier.svg)](https://pypi.org/project/shinier/)
+---
+
+# Contributing to SHINIER
+
+Thanks for your interest in improving **SHINIER**. This document explains how to set up a development environment, coding standards, testing strategy (unit vs. validation), and the pull-request process. Please read it fully before opening a PR.
 
 ---
 
@@ -126,8 +140,8 @@ class Options(InformativeBaseModel):
     )
 
     # --- I/O ---
-    input_folder: Optional[Path] = Field(default=REPO_ROOT / "data/INPUT")
-    output_folder: Path = Field(default=REPO_ROOT / "data/OUTPUT")
+    input_folder: Optional[Path] = Field(default=REPO_ROOT / "INPUT")
+    output_folder: Path = Field(default=REPO_ROOT / "OUTPUT")
 
     # --- Masks ---
     masks_folder: Optional[Path] = Field(default=None)

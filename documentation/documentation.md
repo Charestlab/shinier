@@ -1,3 +1,19 @@
+```text
+   ███████╗██╗  ██╗██╗███╗  ██╗██╗███████╗██████╗
+   ██╔════╝██║  ██║██║████╗ ██║██║██╔════╝██╔══██╗
+   ███████╗███████║██║██╔██╗██║██║█████╗  ██████╔╝
+   ╚════██║██╔══██║██║██║╚████║██║██╔══╝  ██╔══██╗
+   ███████║██║  ██║██║██║ ╚███║██║███████╗██║  ██║
+   ╚══════╝╚═╝  ╚═╝╚═╝╚═╝  ╚══╝╚═╝╚══════╝╚═╝  ╚═╝
+```
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)]()
+[![PyPI version](https://img.shields.io/pypi/v/shinier.svg)](https://pypi.org/project/shinier/)
+---
+
+# Documentation
+
 ## 📋 Table of Contents
 
 1. [Overview](#overview)
@@ -14,7 +30,7 @@
 
 ## 🎯 Overview
 
-**SHINIER** is a modern Python implementation of the **SHINE** (Spectrum, Histogram, and Intensity Normalization and Equalization) toolbox, originally developed in MATLAB by [Willenbockel et al. (2010)](https://doi.org/10.3758/BRM.42.3.671). This new version implemented new options (e.g., color management, dithering and [Coltuc, Bolon & Chassery (2006)](https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf) exact histogram specification algorithm) and refined the previous ones.
+**SHINIER** is a modern Python implementation of the **SHINE** (Spectrum, Histogram, and Intensity Normalization, Equalization, and Refinements) toolbox, originally developed in MATLAB by [Willenbockel et al. (2010)](https://doi.org/10.3758/BRM.42.3.671). This new version implemented new options (e.g., color management, dithering and [Coltuc, Bolon & Chassery (2006)](https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf) exact histogram specification algorithm) and refined the previous ones.
 
 **Reference** : [Willenbockel, V., Sadr, J., Fiset, D., Horne, G. O., Gosselin, F., & Tanaka, J. W. (2010). Controlling low-level image properties: The SHINE toolbox. *Behavior Research Methods*, 42(3), 671-684.](https://doi.org/10.3758/BRM.42.3.671)
 
@@ -321,8 +337,8 @@ Centralized configuration class for all processing parameters.
 ```python
 class Options:
     # --- I/O ---
-    input_folder: Optional[Path] = Field(default=REPO_ROOT / "data/INPUT")
-    output_folder: Path = Field(default=REPO_ROOT / "data/OUTPUT")
+    input_folder: Optional[Path] = Field(default=REPO_ROOT / "INPUT")
+    output_folder: Path = Field(default=REPO_ROOT / "OUTPUT")
 
     # --- Masks ---
     masks_folder: Optional[Path] = Field(default=None)
@@ -616,12 +632,9 @@ Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum m
 2. **Convergence**: Repeated alternation drives both properties toward their joint target values.
 3. **Iterative Refinement**: After several iterations (typically 5), the process reaches a stable equilibrium where further refinement yields negligible improvement.
 
-**Recommendations:**
-- **Target histogram and spectrum**: Avoid providing explicit target histograms or spectra. As explained in the [SHINE article](documentation/papers/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), the algorithm is designed to automatically compute the mean histogram and spectrum across all input images at each iteration, ensuring that the matching process remains adaptive and consistent.
-
 ---
 
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-  <em>Version 0.1.3 - Complete technical documentation</em>
+  <em>Version 0.1.0 - Complete technical documentation</em>
 </p>
