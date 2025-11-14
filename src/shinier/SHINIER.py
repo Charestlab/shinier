@@ -183,6 +183,11 @@ def options_display(opts):
         console_log(f"\n---- {option_type}  ----", indent_level=1, color=Bcolors.OKBLUE)
         for key, value in dict(opts).items():
             if key in OPTION_TYPES[option_type]:
+                if "target" in key:
+                    if isinstance(value, np.ndarray):
+                        value = "CUSTOM"
+                    else:
+                        value = "AVERAGE"
                 console_log(f"{key:<20}: {value}", indent_level=1, color=Bcolors.OKBLUE)
 
 #########################################
