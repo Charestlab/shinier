@@ -71,9 +71,10 @@ def prompt(
     if kind == 'choice' and choices is None:
         raise ValueError('Must provide `choices` when kind == "choice"')
     if kind == 'bool':
+        accepted_choices = ['yes', 'no', 'y', 'n']
         if choices is not None:
             warnings.warn("choices are ignored for kind 'bool'")
-        if not isinstance(default, str):
+        if not isinstance(default, str) or default.lower().strip() not in accepted_choices:
             raise ValueError('`default` should be a string ("y" or "n") for kind "bool"')
 
     if kind == "choice" and choices:
@@ -90,7 +91,8 @@ def prompt(
             new_default_str = f" [{default_str}]" if is_default else ""
             if new_default is None and is_default:
                 new_default = i + 1
-            choice_str = f"{colorize(c[0].lower(), Bcolors.DEFAULT_TEXT)}" if default == i else colorize(c[0].lower(), Bcolors.CHOICE_VALUE)
+            choice_color = Bcolors.DEFAULT_TEXT if is_default else Bcolors.CHOICE_VALUE
+            choice_str = f"{colorize(str(c[0].lower()), choice_color)}"
             console_log(f"[{choice_str}] {choices[i]}{new_default_str}", indent_level=0, color=Bcolors.BOLD)
         default = new_default
 
@@ -206,7 +208,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
         opts.input_folder = Path(in_dir).expanduser().resolve()
         image_paths = get_image_list(opts.input_folder)
         color = Bcolors.OKGREEN if len(image_paths) > 0 else Bcolors.FAIL
-        console_log(msg=f'-> {len(image_paths)} image(s) found in {opts.input_folder}', indent_level=0, color=color)
+        console_log(msg=f'\033[F-> {len(image_paths)} image(s) found in {opts.input_folder}\n', indent_level=0, color=color, strip=False)
     else:
         opts.input_folder = None
 
@@ -231,7 +233,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
                 opts.masks_folder = Path(mdir).expanduser().resolve()
                 mask_paths = get_image_list(opts.masks_folder)
                 color = Bcolors.OKGREEN if len(mask_paths) > 0 else Bcolors.FAIL
-                console_log(msg=f'-> {len(mask_paths)} image(s) found in {opts.input_folder}', indent_level=0, color=color)
+                console_log(msg=f'\033[F-> {len(mask_paths)} image(s) found in {opts.input_folder}\n', indent_level=0, color=color, strip=False)
             else:
                 opts.masks_folder = None
         opts.whole_image = [1, 2, 2, 3][whole-1]
@@ -259,7 +261,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
 
     # --------- Custom Profile ---------
     if prof == 3:
-        as_gray = prompt("Load images as grayscale?", default="Yes", kind="bool")
+        as_gray = prompt("Load images as grayscale?", default="No", kind="bool")
         opts.as_gray = as_gray == 1
         linear_luminance = prompt("Are pixel values linearly related to luminance?", default=2, kind='choice', choices=[
             f"{Bcolors.CHOICE_VALUE}Yes [legacy mode]{Bcolors.ENDC}\n\t- No color-space conversion.\n\t- Assuming input images are linear to luminance.\n\t- All transformations will be applied independently to each channel which may produce out-of-gamut values",
@@ -295,13 +297,6 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
         if mode == 1:
             opts.safe_lum_match = prompt("Safe luminance matching (will ensure pixel values fall within [0, 255])?", default='n', kind="bool")
             opts.target_lum = prompt("Target luminance list (mean, std)", default="0, 0", kind="tuple")
-            # rgb_weights = prompt("RGB coefficients for luminance", default=3, kind="choice", choices=[
-            #     "Equal weights",
-            #     "Rec.ITU-R 601 (SD monitor)",
-            #     "Rec.ITU-R 709 (HD monitor)",
-            #     "Rec.ITU-R 2020 (UHD monitor)"
-            # ])
-            # kwargs["rgb_weights"] = rgb_weights
 
         if mode in (2, 5, 6, 7, 8):
             ho = prompt("Histogram specification with SSIM optimization (see Avanaki, 2009)?", default='y', kind="bool")
@@ -335,7 +330,8 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             rsel = prompt("What type of rescaling after sf/spec?", default=2, kind="choice",
                           choices=["none", "min/max of all images", "avg min/max"])
             opts.rescaling = rsel - 1
-            if prompt("Use a specific target spectrum?", default='n', kind="bool"):
+            ans = prompt("Use a specific target spectrum?", default='n', kind="bool")
+            if ans == 1:
                 tsp = prompt("Path to target spectrum (.npy/.txt/.csv)?", kind="str")
                 ts = load_np_array(tsp)
                 if ts is not None:
@@ -413,8 +409,8 @@ def main():
                 "Matplotlib is not installed. "
                 "Install with: pip install shinier[viz]"
             )
-        
-        fig = show_processing_overview(processor, img_idx=args.image_index)
+        fig = show_processing_overview(processor, img_idx=args.image_index, show_figure=False)
+
         if args.save_path is not None:
             fig.savefig(args.save_path, dpi=150)
             print(f"Processing overview figure saved successfully at: {args.save_path}")

@@ -1869,7 +1869,7 @@ def colorize(text: str, color: str) -> str:
     return f"{color}{text}{Bcolors.ENDC}"
 
 
-def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, verbose: bool = True):
+def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, verbose: bool = True, strip: bool = True) -> str:
     """
     Logs a message to the console with optional indentation, color, and verbose control.
 
@@ -1881,6 +1881,7 @@ def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, ve
             Defaults to None, indicating no color formatting.
         verbose (bool): A flag to determine whether to print the message to the console.
             If False, the message is only processed and not output. Defaults to False.
+        strip (bool): String ainsi characters
 
     Returns:
         str: The formatted message as a string with any ANSI color codes stripped.
@@ -1893,14 +1894,52 @@ def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, ve
         else:
             return "\n".join(f'{indent_str}{line}' for line in text.splitlines())
 
+    def _coat_check(
+            text: str,
+            transform: Callable[[str], str]) -> str:
+        prefix_parts: list[str] = []
+        remaining = text
+        ESC_UP_ONE = "\x1b[F"
+
+        while remaining:
+            if remaining.startswith(ESC_UP_ONE):
+                prefix_parts.append(ESC_UP_ONE)
+                remaining = remaining[len(ESC_UP_ONE):]
+            elif remaining.startswith("\n"):
+                prefix_parts.append("\n")
+                remaining = remaining[1:]
+            else:
+                break
+
+        # --- 2) Strip & record trailing newlines ---
+        trailing_count = 0
+        # Work on a separate variable so we don't lose remaining entirely
+        tmp = remaining
+        while tmp.endswith("\n"):
+            trailing_count += 1
+            tmp = tmp[:-1]
+
+        core = tmp
+        suffix_newlines = "\n" * trailing_count
+
+        # --- 3) Transform the core text ---
+        transformed_core = transform(core)
+
+        # --- 4) Reassemble ---
+        prefix = "".join(prefix_parts)
+        return prefix + transformed_core + suffix_newlines
+
     # Log message
-    msg = _set_indent_and_color(msg, indent_level, color)
+    msg = _coat_check(msg, lambda core: _set_indent_and_color(core, indent_level, color))
+    # msg = _set_indent_and_color(msg, indent_level, color)
     if verbose:
         print(msg)
-    return strip_ansi(msg)
+    if strip:
+        msg = strip_ansi(msg)
+    return msg
 
 
-def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, save_path: Optional[Union[str, Path]] = None) -> plt.Figure:
+def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_figure: bool = True) -> plt.Figure:
     """Display before/after images and diagnostics for all processing steps in one figure.
 
     The figure layout adapts to the active SHINIER mode:
@@ -1911,7 +1950,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, save_p
     Args:
         processor (ImageProcessor): The SHINIER ImageProcessor instance.
         img_idx (int, optional): Index of the image to visualize. Defaults to 0.
-        save_path (str | Path, optional): Path to save the figure. Defaults to None.
+        show_figure (bool): If False, return the fig object without showing it (i.e. plt.show())
 
     Returns:
         matplotlib.figure.Figure: Composite figure summarizing the image transformations.
