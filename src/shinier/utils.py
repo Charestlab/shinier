@@ -297,7 +297,8 @@ def imhist_plot(
     binary_mask: Optional[np.ndarray] = None,
     descriptives: bool = False,
     ax: Optional[plt.Axes] = None,
-):
+) -> Tuple[plt.Figure, plt.Axes]:
+
     """Displays an image with its histogram and optional descriptive statistics.
 
     The image is shown on top, with a compact horizontal histogram below.
@@ -535,7 +536,12 @@ def sf_profile(image: np.ndarray, spectrum: Optional[np.ndarray] = None, is_powe
     return rot_avg, radians
 
 
-def sf_plot(image: np.ndarray, sf_p: Optional[np.ndarray], target_sf: Optional[np.ndarray], ax: Optional[plt.axis] = None) -> Union[plt.Figure, plt.Axes]:
+def sf_plot(
+        image: np.ndarray, 
+        sf_p: Optional[np.ndarray], 
+        target_sf: Optional[np.ndarray], 
+        ax: Optional[plt.axis] = None
+) -> Union[plt.Figure, plt.Axes]:
     """
     Rotational average of the Fourier energy spectrum.
 
@@ -601,7 +607,9 @@ def spectrum_plot(
         gamma: float = 1.0,
         ax: Optional[plt.Axes] = None,
         with_colorbar: bool = True,
-        colorbar_label: str = 'log(1 + |F|) (stretched)'):
+        colorbar_label: str = 'log(1 + |F|) (stretched)'
+    ) -> Union[plt.Figure, plt.Axes]:
+
 
     """Display a Fourier magnitude spectrum with optional log and gamma scaling."""
     if plt is None:

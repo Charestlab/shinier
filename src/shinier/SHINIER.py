@@ -171,20 +171,19 @@ def options_display(opts):
     types = ['io']
     if opts.whole_image != 1:
         types.append('mask')
-    types += ['mode_color', 'dithering_memory']
+    types += ['mode', 'color', 'dithering_memory']
     if opts.mode == 1:
         types.append('luminance')
     if opts.mode in (2, 5, 6, 7, 8):
         types.append('histogram')
     if opts.mode in (3, 4, 5, 6, 7, 8):
         types.append('fourier')
-    types.append('general')
+    types.append('misc')
     for option_type in types:
         console_log(f"\n---- {option_type}  ----", indent_level=1, color=Bcolors.OKBLUE)
         for key, value in dict(opts).items():
             if key in OPTION_TYPES[option_type]:
                 console_log(f"{key:<20}: {value}", indent_level=1, color=Bcolors.OKBLUE)
-
 
 #########################################
 #            SHINIER CLI CORE           #

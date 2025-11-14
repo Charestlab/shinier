@@ -31,12 +31,15 @@
 ### Module Structure
 
 ```
-shinier/
+shinier/src
+├── color                # Color-space conversion
+│   └── ...
 ├── __init__.py          # Package entry point
-├── Options.py           # Parameter configuration
+├── base.py              # Customized Pydantic base-model
 ├── ImageDataset.py      # Image collection management
 ├── ImageListIO.py       # Image file input/output
 ├── ImageProcessor.py    # Main image processing
+├── Options.py           # Parameter configuration
 ├── SHINIER.py          # Command-line interface
 └── utils.py            # Utility functions and MATLAB operators
 ```
@@ -301,50 +304,62 @@ mode = 9  # only dithering
 ---
 
 ## 🏛️ Main Classes
+### `ColorConverter`
+Encapsulates color-space conversions for Rec.601/709/2020 systems.
+```python
+class ColorConverter:
+    standard: Literal["rec601", "rec709", "rec2020"] = "rec709"
+    gamma: float = 2.4
+    white_point: np.ndarray = Field(default_factory=lambda: WHITE_D65.copy())
+    M_RGB2XYZ: np.ndarray = Field(default_factory=lambda: M_RGB2XYZ_709.copy())
+    M_XYZ2RGB: np.ndarray = Field(default_factory=lambda: np.linalg.inv(M_RGB2XYZ_709))
+```
 
 ### `Options`
 Centralized configuration class for all processing parameters.
 
 ```python
 class Options:
-    def __init__(
-        # Folders and formats
-        input_folder: Union[str, Path] = Path('./../INPUT'),
-        output_folder: Union[str, Path] = Path('./../OUTPUT'),
-        
-        # Masks and figure-ground separation
-        masks_folder: Optional[Union[str, Path]] = None,
-        whole_image: Literal[1, 2, 3] = 1,
-        background: Union[int, float] = 300,
-        
-        # General options
-        mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8,
-        as_gray: Literal[0, 1, 2, 3, 4] = 0,
-        dithering: Literal[0, 1, 2] = 1,
-        conserve_memory: bool = True,
-        seed: Optional[int] = None, 
-        legacy_mode: bool = False,
+    # --- I/O ---
+    input_folder: Optional[Path] = Field(default=REPO_ROOT / "INPUT")
+    output_folder: Path = Field(default=REPO_ROOT / "OUTPUT")
 
-        iterations: int = 2,
+    # --- Masks ---
+    masks_folder: Optional[Path] = Field(default=None)
+    whole_image: Literal[1, 2, 3] = 1
+    background: Union[conint(ge=0, le=255), Literal[300]] = 300
 
-        # Processing mode
-        mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8,
-        
-        # Luminance matching
-        safe_lum_match: bool = False,
-        target_lum: Optional[Iterable[Union[int, float]]] = (0, 0),
-        
-        # Histogram matching
-        hist_specification: Literal[0, 1] = 0,
-        hist_optim: Literal[0, 1] = 0,
-        hist_iterations: int = 10,
-        step_size: int = 34,
-        target_hist: Optional[np.ndarray] = None,
-        
-        # Fourier matching
-        rescaling: Optional[Literal[0, 1, 2, 3]] = 2,
-        target_spectrum: Optional[np.ndarray] = None
-    ):
+    # --- Mode ---
+    mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8
+    seed: Optional[int] = None
+    legacy_mode: bool = False
+    iterations: conint(ge=1) = 2
+
+    # --- Color ---
+    as_gray: bool = False
+    linear_luminance: bool = False
+    rec_standard: Literal[1, 2, 3] = 2
+
+    # --- Dithering / Memory ---
+    dithering: Literal[0, 1, 2] = 1
+    conserve_memory: bool = True
+
+    # --- Luminance ---
+    safe_lum_match: bool = False
+    target_lum: Tuple[conint(ge=0, le=255), confloat(ge=0)] = (0, 0)
+
+    # --- Histogram ---
+    hist_optim: bool = False
+    hist_specification: Optional[Literal[1, 2, 3, 4]] = 4
+    hist_iterations: conint(ge=1) = 10
+    target_hist: Optional[Union[np.ndarray, Literal["equal", "unit_test"]]] = Field(default=None)
+
+    # --- Fourier ---
+    rescaling: Optional[Literal[0, 1, 2, 3]] = 2
+    target_spectrum: Optional[Union[np.ndarray, Literal["unit_test"]]] = Field(default=None)
+
+    # --- Misc ---
+    verbose: Literal[-1, 0, 1, 2, 3] = 0
 ```
 
 ### `ImageDataset`
@@ -352,18 +367,22 @@ Management of image and mask collections with state tracking.
 
 ```python
 class ImageDataset:
-    def __init__(
-        self,
-        images: ImageListType = None,
-        masks: ImageListType = None,
-        options: Optional[Options] = None
-    ):
-        self.images: ImageListIO      # Image collection
-        self.masks: ImageListIO       # Mask collection
-        self.n_images: int           # Number of images
-        self.n_masks: int            # Number of masks
-        self.processing_logs: List   # Processing log
-        self.options: Options        # Configuration options
+    # --- User-provided / externally settable attributes ---
+    images: Optional[Union[ImageListIO, ImageListType]] = None
+    masks: Optional[Union[ImageListIO, ImageListType]] = None
+    options: Options = Field(default_factory=Options)
+
+    # --- Internally constructed / derived attributes ---
+    processing_logs: List[str] = Field(default_factory=list)
+    n_images: Optional[int] = None
+    n_masks: Optional[int] = None
+    images_name: Optional[List[str]] = None
+    masks_name: Optional[List[str]] = None
+
+    magnitudes: Optional[ImageListIO] = None
+    phases: Optional[ImageListIO] = None
+    buffer: Optional[ImageListIO] = None
+    buffer_other: Optional[ImageListIO] = None
 ```
 
 ### `ImageProcessor`
@@ -371,17 +390,42 @@ Main image processing class.
 
 ```python
 class ImageProcessor:
-    def __init__(
-        self, 
-        dataset: ImageDataset, 
-        options: Optional[Options] = None, 
-        verbose: Literal[0, 1, 2] = 0
-    ):
-        self.dataset: ImageDataset
-        self.options: Options
-        self.verbose: Literal[0, 1, 2]
-        self.log: List              # Processing log
-        self.validation: List      # Validation results
+    # --- Public attributes ---
+    dataset: ImageDataset
+    options: Optional[Options] = None
+    verbose: Literal[-1, 0, 1, 2, 3] = 0
+    log: List[str] = Field(default_factory=list)
+    validation: List[dict] = Field(default_factory=list)
+    ssim_results: List[dict] = Field(default_factory=list)
+    ssim_data: List[dict] = Field(default_factory=list)
+    seed: Optional[int] = None
+    bool_masks: List = Field(default_factory=list)
+    from_cli: bool = Field(default=False)
+    from_unit_test: bool = Field(default=False)
+    from_validation_test: bool = Field(default=False)
+
+    # --- Private attributes ---
+    _dataset_map: dict = PrivateAttr(default_factory=dict)
+    _mode2processing_steps: dict = PrivateAttr(default_factory=dict)
+    _fct_name2process_name: dict = PrivateAttr(default_factory=dict)
+    _iter_num: int = PrivateAttr(default=0)
+    _processing_steps: List[str] = PrivateAttr(default_factory=list)
+    _n_steps: int = PrivateAttr(default=0)
+    _step: int = PrivateAttr(default=0)
+    _processing_function: Optional[str] = PrivateAttr(default=None)
+    _processed_image: Optional[str] = PrivateAttr(default=None)
+    _processed_channel: Optional[int] = PrivateAttr(default=None)
+    _log_param: dict = PrivateAttr(default_factory=dict)
+    _is_last_operation: bool = PrivateAttr(default=False)
+    _sum_bool_masks: List = PrivateAttr(default_factory=list)
+    _complete: bool = PrivateAttr(default=False)
+    _rec_standard: str = PrivateAttr(default="rec709")
+    _target_lum: Optional[List[Tuple[float, float]]] = PrivateAttr(default=None)
+    _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
+    _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
+    _target_sf: Optional[np.ndarray] = PrivateAttr(default=None)
+    _final_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
+    _initial_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
 ```
 
 ---
@@ -389,14 +433,40 @@ class ImageProcessor:
 ## Visualization Functions
 
 ```python
-def imhist_plot(img, bins=256, figsize=(8, 6)):
+def imhist_plot(
+    img: np.ndarray,
+    bins: int = 256,
+    figsize=(8, 6),
+    dpi=100,
+    title: Optional[str] = None,
+    target_hist: Optional[np.ndarray] = None,
+    binary_mask: Optional[np.ndarray] = None,
+    descriptives: bool = False,
+    ax: Optional[plt.Axes] = None,
+) -> Tuple[plt.Figure, plt.Axes]:
     """Image histogram plotting"""
     
-def spectrum_plot(spectrum, figsize=(10, 8)):
-    """Magnitude spectrum plotting"""
+def spectrum_plot(
+        spectrum: np.ndarray,
+        cmap: str = "gray",
+        log: bool = True,
+        gamma: float = 1.0,
+        ax: Optional[plt.Axes] = None,
+        with_colorbar: bool = True,
+        colorbar_label: str = 'log(1 + |F|) (stretched)'
+    ) -> Union[plt.Figure, plt.Axes]:
+    """Display a Fourier magnitude spectrum with optional log and gamma scaling."""
     
-def sf_plot(sf_profile, figsize=(8, 6)):
+def sf_plot(
+        image: np.ndarray, 
+        sf_p: Optional[np.ndarray], 
+        target_sf: Optional[np.ndarray], 
+        ax: Optional[plt.axis] = None
+) -> Union[plt.Figure, plt.Axes]:
     """Spatial frequency profile plotting"""
+
+def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_figure: bool = True) -> plt.Figure:
+    """Display before/after images and diagnostics for all processing steps in one figure.
 ```
 
 ---
@@ -489,11 +559,11 @@ class ImageListIO:
 
 ## 📚 Usage Examples
 
-- [See](documentation/Example_usage.ipynb) `Example_usage.ipynb` [in the documentation folder for](documentation/Example_usage.ipynb):
+- [See](documentation/demos.ipynb) `demos.ipynb` [in the documentation folder for](documentation/demos.ipynb):
   - Coding usage
   - Interactive CLI usage
 
-Examples in this README have been intentionally minimized; please open the notebook for complete, executable code.
+Examples in here have been intentionally minimized; please open the demos for more examples.
 
 ---
 
@@ -535,19 +605,19 @@ options = Options(
 # Solution: Increase iterations for composite modes
 options = Options(
     mode=8,  # Spectrum + Histogram
-    iterations=5,  # Increase from default 2 for better dual matching
+    iterations=5,
 )
 ```
 
 **Scientific Rationale:**
-Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum matching followed by histogram matching). Because each transformation modifies the image in ways that can partially undo the effects of the other, a **single pass rarely yields convergence**. As detailed in the original [SHINE documentation](documentation/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), **iterative application** of both steps allows the algorithm to progressively minimize residual discrepancies between the desired luminance distribution and spectral amplitude structure.
+Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum matching followed by histogram matching). Because each transformation modifies the image in ways that can partially undo the effects of the other, a **single pass rarely yields convergence**. As detailed in the original [SHINE documentation](documentation/articles/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), **iterative application** of both steps allows the algorithm to progressively minimize residual discrepancies between the desired luminance distribution and spectral amplitude structure.
 
 1. **Sequential Processing**: Each cycle compensates for the distortions introduced by the preceding transformation (e.g., histogram adjustment altering spectral power).
 2. **Convergence**: Repeated alternation drives both properties toward their joint target values.
 3. **Iterative Refinement**: After several iterations (typically 5), the process reaches a stable equilibrium where further refinement yields negligible improvement.
 
 **Recommendations:**
-- **Target histogram and spectrum**: Avoid providing explicit target histograms or spectra. As explained in the [SHINE article](documentation/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), the algorithm is designed to automatically compute the mean histogram and spectrum across all input images at each iteration, ensuring that the matching process remains adaptive and consistent.
+- **Target histogram and spectrum**: Avoid providing explicit target histograms or spectra. As explained in the [SHINE article](documentation/articles/Controlling%20low-level%20image%20properties:%20The%20SHINE%20toolbox.pdf), the algorithm is designed to automatically compute the mean histogram and spectrum across all input images at each iteration, ensuring that the matching process remains adaptive and consistent.
 
 ---
 

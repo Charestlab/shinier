@@ -17,14 +17,15 @@ from shinier.base import InformativeBaseModel
 from shinier import REPO_ROOT
 ACCEPTED_IMAGE_FORMATS = Literal["png", "tif", "tiff", "jpg", "jpeg", "npy"]
 OPTION_TYPES = {
-    'io':        ['input_folder', 'output_folder'],
-    'mask':      ['masks_folder', 'background', 'whole_image'],
-    'mode_color': ['mode', 'as_gray', 'linear_luminance', 'rec_standard'],
-    'dithering_memory': ['dithering', 'conserve_memory', 'seed', 'legacy_mode'],
-    'luminance': ['safe_lum_match', 'target_lum'],
-    'histogram': ['hist_optim', 'hist_specification', 'hist_iterations', 'target_hist'],
-    'fourier':   ['rescaling', 'target_spectrum'],
-    'general':   ['verbose', 'iterations']
+    'io':               ['input_folder', 'output_folder'],
+    'mask':             ['masks_folder', 'background', 'whole_image'],
+    'mode':             ['mode', 'legacy_mode', 'seed', 'iterations'],
+    'color':            ['as_gray', 'linear_luminance', 'rec_standard'],
+    'dithering_memory': ['dithering', 'conserve_memory'],
+    'luminance':        ['safe_lum_match', 'target_lum'],
+    'histogram':        ['hist_optim', 'hist_specification', 'hist_iterations', 'target_hist'],
+    'fourier':          ['rescaling', 'target_spectrum'],
+    'misc':             ['verbose']
 }
 
 class Options(InformativeBaseModel):
@@ -32,12 +33,12 @@ class Options(InformativeBaseModel):
     Class to hold SHINIER processing options.
 
     Args:
-    ----------------------------------------------INPUT/OUTPUT images folders-------------------------------------------------
+    ------------------------------------------INPUT/OUTPUT images folders------------------------------------------
         input_folder (Union[str, Path]): relative or absolute path of the image folder (default = ./INPUT)
 
         output_folder (Union[str, Path]): relative or absolute path where processed images will be saved (default = ./OUTPUT)
 
-    -------------------------------------------MASKS and FIGURE-GROUND separation----------------------------------------------
+    ------------------------------------------MASKS and FIGURE-GROUND separation------------------------------------------
         masks_folder (Union[str, Path]): relative or absolute path of mask (default = ./MASKS)
 
         whole_image (Literal[1-3]): Binary ROI masks: Analysis run on selected pixels (default = 1)
@@ -49,7 +50,7 @@ class Options(InformativeBaseModel):
             (By default (300), the most frequent luminance intensity in the image is used as the background value);
             i.e., all regions of that luminance intensity are treated as background
 
-    ------------------------------------------SHINIER MODE, COLORS, RAM management---------------------------------------------
+    --------------------------------------------------   SHINIER MODE  --------------------------------------------------
         mode (Literal[1-9]): Image processing treatment (default = 8)
             1 = lum_match only
             2 = hist_match only
@@ -61,6 +62,26 @@ class Options(InformativeBaseModel):
             8 = spec_match & hist_match (default)
             9 = only dithering
 
+        legacy_mode (Optional[bool]): Enables backward compatibility with older versions while retaining recent optimizations (default = False).
+            True = reproduces the behavior of previous releases by setting:
+                - `conserve_memory = False`
+                - `as_gray = 1`
+                - `dithering = 0`
+                - `hist_specification = 1`
+                - `safe_lum_match = False`
+            False = no legacy settings are forced and all options follow their current defaults.
+        
+        seed (Optional[Int]): Seed to initialize the PRNG (default = None).
+            Used for the 'Noisy bit dithering' and hist_specification (with "hybrid" or "noise" tie-breaking strategies).
+            If 'None', int(time.time()) will be used.
+
+        iterations (int): Number of iteration for composites mode (default = 2).
+            For these modes, histogram specification and Fourier amplitude specification affect each other.
+            Multiple iterations will allows a high degree a joint matching.
+
+                >This method of iterating was develop so that it recalculates the respective target at each iteration (i.e., no target hist/spectrum).
+    
+    --------------------------------------------------Grayscale / color------------------------------------------------------
         as_gray (bool): Conversion into grayscale images (default = 0).
             False = No conversion applied.
             True = Convert into grayscale images.
@@ -88,7 +109,8 @@ class Options(InformativeBaseModel):
             1 = Rec.601 (SDTV, legacy systems)
             2 = Rec.709 (HDTV, sRGB default). Shinier assumes display-referred Rec. 709 with sRGB-like transfer.
             3 = Rec.2020 (UHDTV, wide-gamut HDR)
-
+    
+    --------------------------------------------------Dithering / Memory------------------------------------------------------
         dithering (Literal[0-2]): Dithering applied before final conversion to uint8 (default = 1).
             0 = No dithering
             1 = Noisy bit dithering (Allard R. & Faubert J., 2008)
@@ -100,29 +122,21 @@ class Options(InformativeBaseModel):
                 in memory one at a time upon request.
             False = Increases memory usage substantially by loading all images into memory at once, but may improve processing speed.
 
-        seed (Optional[Int]): Seed to initialize the PRNG (default = None).
-            Used for the 'Noisy bit dithering' and hist_specification (with "hybrid" or "noise" tie-breaking strategies).
-            If 'None', int(time.time()) will be used.
+    --------------------------------------------------LUMINANCE matching------------------------------------------------------
+        safe_lum_match (bool): Adjusting the mean and standard deviation to keep all luminance values [0, 255] (default = False).
+            True = No values will be clipped, but the resulting targets may differ from the requested values.
+            False = Values will be clipped, but the resulting targets will stay the same.
 
-        legacy_mode (Optional[bool]): Enables backward compatibility with older versions while retaining recent optimizations (default = False).
-            True = reproduces the behavior of previous releases by setting:
-                - `conserve_memory = False`
-                - `as_gray = 1`
-                - `dithering = 0`
-                - `hist_specification = 1`
-                - `safe_lum_match = False`
-            False = no legacy settings are forced and all options follow their current defaults.
-
-        iterations (int): Number of iteration for composites mode (default = 2).
-            For these modes, histogram specification and Fourier amplitude specification affect each other.
-            Multiple iterations will allows a high degree a joint matching.
-
-                >This method of iterating was develop so that it recalculates the respective target at each iteration (i.e., no target hist/spectrum).
+        target_lum (Optional[Iterable[Union[int, float]]]): Pair (mean, std) of target luminance for luminance matching (default = (0, 0)).
+            The mean must be in [0, 255], and the standard deviation must be ≥ 0.
+            If (0, 0), the mean and std will be the average mean and average std of the images.
+            Only for mode 1.
 
     --------------------------------------------------HISTOGRAM matching--------------------------------------------------------
         hist_optim (bool): Optimization of the histogram-matched images with structural similarity index measure (Avanaki, 2009) (default = False)
             True = SSIM optimization (Avanaki, 2009)
-                    >> Following Avanaki's experimental results, no tie-breaking strategy is applied when optimizing SSIM except for the very last iteration where the "hybrid" strategy is used (see hist_specification).
+                    >> Following Avanaki's experimental results, no tie-breaking strategy is applied when optimizing SSIM except for the very last 
+                       iteration where the "hybrid" strategy is used (see hist_specification).
                     > To change the number if iterations (default = 5) and adjust step size (default = 35), see below
             False = No SSIM optimization
 
@@ -146,16 +160,6 @@ class Options(InformativeBaseModel):
                 from shinier.utils import imhist
                 target_hist = imhist(im)
 
-    --------------------------------------------------LUMINANCE matching------------------------------------------------------
-        safe_lum_match (bool): Adjusting the mean and standard deviation to keep all luminance values [0, 255] (default = False).
-            True = No values will be clipped, but the resulting targets may differ from the requested values.
-            False = Values will be clipped, but the resulting targets will stay the same.
-
-        target_lum (Optional[Iterable[Union[int, float]]]): Pair (mean, std) of target luminance for luminance matching (default = (0, 0)).
-            The mean must be in [0, 255], and the standard deviation must be ≥ 0.
-            If (0, 0), the mean and std will be the average mean and average std of the images.
-            Only for mode 1.
-
     --------------------------------------------------FOURIER matching--------------------------------------------------------
         rescaling (Literal[0-3]): Post-processing applied after sf_match or spec_match only (default = 2).
             0 = no rescaling
@@ -174,7 +178,7 @@ class Options(InformativeBaseModel):
                 rho, theta = cart2pol(np.real(fftim), np.imag(fftim))
                 target_spectrum = rho
 
-    --------------------------------------------------EXTRA--------------------------------------------------------
+    --------------------------------------------------Misc--------------------------------------------------------
         verbose (Literal[-1, 0, 1, 2, 3]): Controls verbosity levels (default = 0).
             -1 = Quiet mode
             0 = Progress bar with ETA
@@ -188,7 +192,7 @@ class Options(InformativeBaseModel):
         extra="forbid",  # Does not allow unknown attributes
         arbitrary_types_allowed=True,  # Allow non-pydantic types (e.g. np.ndarray)
     )
-
+    
     # --- I/O ---
     input_folder: Optional[Path] = Field(default=REPO_ROOT / "INPUT")
     output_folder: Path = Field(default=REPO_ROOT / "OUTPUT")
@@ -198,8 +202,13 @@ class Options(InformativeBaseModel):
     whole_image: Literal[1, 2, 3] = 1
     background: Union[conint(ge=0, le=255), Literal[300]] = 300
 
-    # --- Mode / Color ---
+    # --- Mode ---
     mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8
+    seed: Optional[int] = None
+    legacy_mode: bool = False
+    iterations: conint(ge=1) = 2
+
+    # --- Color ---
     as_gray: bool = False
     linear_luminance: bool = False
     rec_standard: Literal[1, 2, 3] = 2
@@ -207,8 +216,6 @@ class Options(InformativeBaseModel):
     # --- Dithering / Memory ---
     dithering: Literal[0, 1, 2] = 1
     conserve_memory: bool = True
-    seed: Optional[int] = None
-    legacy_mode: bool = False
 
     # --- Luminance ---
     safe_lum_match: bool = False
@@ -223,7 +230,6 @@ class Options(InformativeBaseModel):
     # --- Fourier ---
     rescaling: Optional[Literal[0, 1, 2, 3]] = 2
     target_spectrum: Optional[Union[np.ndarray, Literal["unit_test"]]] = Field(default=None)
-    iterations: conint(ge=1) = 2
 
     # --- Misc ---
     verbose: Literal[-1, 0, 1, 2, 3] = 0
