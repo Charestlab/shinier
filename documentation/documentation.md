@@ -28,6 +28,7 @@
 
 ---
 
+<a id="overview"></a>
 ## 🎯 Overview
 
 **SHINIER** is a modern Python implementation of the **SHINE** (Spectrum, Histogram, and Intensity Normalization, Equalization, and Refinements) toolbox, originally developed in MATLAB by [Willenbockel et al. (2010)](https://doi.org/10.3758/BRM.42.3.671). This new version implemented new options (e.g., color management, dithering and [Coltuc, Bolon & Chassery (2006)](https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf) exact histogram specification algorithm) and refined the previous ones.
@@ -42,6 +43,7 @@
 
 ---
 
+<a id="package-architecture"></a>
 ## 🏗️ Package Architecture
 
 ### Module Structure
@@ -73,6 +75,7 @@ graph TD
 
 ---
 
+<a id="matlab-vs-python-differences"></a>
 ## 🔬 MATLAB vs Python Differences
 
 ### 1. **Rounding Operators**
@@ -228,6 +231,7 @@ and the precise calibration of display monitors are essential for accurate visua
 
 ---
 
+<a id="detailed-processing-modes"></a>
 ## ⚙️ Detailed Processing Modes
 
 ### Mode 1: Luminance Matching Only
@@ -319,6 +323,7 @@ mode = 9  # only dithering
 
 ---
 
+<a id="main-classes"></a>
 ## 🏛️ Main Classes
 ### `ColorConverter`
 Encapsulates color-space conversions for Rec.601/709/2020 systems.
@@ -446,6 +451,7 @@ class ImageProcessor:
 
 ---
 
+<a id="visualization-functions"></a>
 ## Visualization Functions
 
 ```python
@@ -487,6 +493,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
 
 ---
 
+<a id="implemented-algorithms"></a>
 ## 🧮 Implemented Algorithms
 
 ### 1. Exact Histogram Specification
@@ -524,6 +531,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
 
 ---
 
+<a id="memory-management-and-performance"></a>
 ## 💾 Memory Management and Performance
 
 ### Memory Conservation Mode (`conserve_memory=True`)
@@ -552,6 +560,7 @@ class ImageListIO:
 
 ---
 
+<a id="testing-and-validation"></a>
 ## 🧪 Testing and Validation
 
 ### Unit Tests

@@ -208,7 +208,7 @@ class Options(InformativeBaseModel):
     mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8
     seed: Optional[int] = None
     legacy_mode: bool = False
-    iterations: conint(ge=1) = 2
+    iterations: conint(ge=1) = 5
 
     # --- Color ---
     as_gray: bool = False
