@@ -664,7 +664,7 @@ class ImageProcessor(InformativeBaseModel):
         # Match the histogram
         self._processed_channel = None
         for idx, image in enumerate(buffer_collection):
-            original_image = self._initial_buffer[idx] if self._is_moving_target else image . # TODO: Verify scientific rationale
+            original_image = self._initial_buffer[idx] if self.options._is_moving_target else image # TODO: Verify scientific rationale
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
             console_log(msg=f"\nImage {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
 
