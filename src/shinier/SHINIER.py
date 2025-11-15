@@ -238,7 +238,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
                 opts.masks_folder = Path(mdir).expanduser().resolve()
                 mask_paths = get_image_list(opts.masks_folder)
                 color = Bcolors.OKGREEN if len(mask_paths) > 0 else Bcolors.FAIL
-                console_log(msg=f'\033[F-> {len(mask_paths)} image(s) found in {opts.input_folder}\n', indent_level=0, color=color, strip=False)
+                console_log(msg=f'\033[F-> {len(mask_paths)} image(s) found in {opts.masks_folder}\n', indent_level=0, color=color, strip=False)
             else:
                 opts.masks_folder = None
         opts.whole_image = [1, 2, 2, 3][whole-1]
