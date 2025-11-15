@@ -298,6 +298,7 @@ def imhist_plot(
     binary_mask: Optional[np.ndarray] = None,
     descriptives: bool = False,
     ax: Optional[plt.Axes] = None,
+    show_normalized_rmse: bool = False,
 ) -> Tuple[plt.Figure, plt.Axes]:
 
     """Displays an image with its histogram and optional descriptive statistics.
@@ -319,12 +320,13 @@ def imhist_plot(
         normalize (bool, optional): If True, plots density (area = 1). If False, plots
             counts. Defaults to False.
         title (str | None, optional): Optional title for the image. Defaults to None.
-        hist_target (np.ndarray | None, optional): If provided, overlays a
+        target_hist (np.ndarray | None, optional): If provided, overlays a
             target histogram. Defaults to None.
         binary_mask (np.ndarray | None, optional): Optional mask corresponding
             to image for computing histogram. Defaults to None.
         descriptives (bool, optional): If True, overlays mean (μ) and ±1σ on the
             histogram (per-channel for RGB). Defaults to False.
+        show_normalized_rmse (bool, False): If True, shows normalized RMSE.
 
     Returns:
         tuple:
@@ -386,6 +388,12 @@ def imhist_plot(
             # target_hist, initial_hist = _hist_match_target(target_images, target_masks, normalized=normalize)
             ax_hist.plot(centers, target_hist[:, ch], ls='--', lw=1, color=colors[ch], label=f'Target {labels[ch]}')
 
+    # --- Normalized RMSE computation and display ---
+    if show_normalized_rmse:
+        if target_hist is not None:
+            nrmse = normalized_rmse(hist_normalized, target_hist, mode="assume [0, 1]")
+            rmse_text = "RMSE [current vs target] = {:1.4e}".format(nrmse)
+            ax_hist.text(0.05, 0.98, rmse_text, transform=ax_hist.transAxes, ha="left", va="top", fontsize=9, fontname=fontname)
     ax_hist.set_xlim(0, 255)
     ax_hist.set_ylim(0, Hmax * 1.05 if Hmax > 0 else 1)
     ax_hist.set_yticks([])
@@ -566,7 +574,8 @@ def sf_plot(
         image: np.ndarray,
         sf_p: Optional[np.ndarray],
         target_sf: Optional[np.ndarray],
-        ax: Optional[plt.axis] = None
+        ax: Optional[plt.axis] = None,
+        show_normalized_rmse: bool = False,
 ) -> Union[plt.Figure, plt.Axes]:
     """
     Rotational average of the Fourier energy spectrum.
@@ -581,6 +590,8 @@ def sf_plot(
             If not None, display target_sf against sf_p.
         ax : plt.Axes, default None
             If not None, uses the ax instead of generating a new figure.
+        show_normalized_rmse: bool, default = False
+            If True, show normalized RMSE on graph.
 
     Returns:
         fig, ax : plt.Figure, plt.Axes
@@ -614,6 +625,13 @@ def sf_plot(
         if target_sf is not None:
             fig.loglog(radii[:, ch], target_sf[:, ch], ls='--', lw=1, color=colors[ch], label=f'Target {labels[ch]}')
 
+    # --- Normalized RMSE computation and display ---
+    if show_normalized_rmse:
+        if target_sf is not None:
+            nrmse = normalized_rmse(target_sf, rot_avg, mode="actual range")
+            rmse_text = "RMSE [current vs target] = {:1.4e}".format(nrmse)
+            fig.text(0.5, 0.98, rmse_text, transform=fig.transAxes, ha="center", va="top", fontsize=9)
+
     if ax is None:
         fig.xlabel('Spatial frequency (cycles/image)')
         fig.ylabel('Energy')
@@ -633,9 +651,10 @@ def spectrum_plot(
         gamma: float = 1.0,
         ax: Optional[plt.Axes] = None,
         with_colorbar: bool = True,
-        colorbar_label: str = 'log(1 + |F|) (stretched)'
+        colorbar_label: str = 'log(1 + |F|) (stretched)',
+        target_spectrum: Optional[np.ndarray] = None,
+        show_normalized_rmse: bool = False,
     ) -> Union[plt.Figure, plt.Axes]:
-
 
     """Display a Fourier magnitude spectrum with optional log and gamma scaling."""
     if plt is None:
@@ -676,6 +695,12 @@ def spectrum_plot(
         if ax is not None:
             fig = ax.figure
         fig.colorbar(implot, ax=ax, label=colorbar_label)
+
+    if show_normalized_rmse:
+        if target_spectrum is not None:
+            nrmse = normalized_rmse(stretch(target_spectrum), stretch(spectrum), mode="assume [0, 1]")
+            rmse_text = "RMSE [current vs target] = {:1.4e}".format(nrmse)
+            ax.text(0.5, 1.02, rmse_text, transform=ax.transAxes, ha="center", va="bottom", fontsize=9)
 
     ax.set_xlabel("Spatial frequency (cycles/image)")
     ax.set_ylabel("Spatial frequency (cycles/image)")
@@ -2069,7 +2094,8 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
                 binary_mask=masks if masks is not None else None,
                 descriptives=False,
                 title=f"Before – {readable}",
-                ax=axL
+                ax=axL,
+                show_normalized_rmse=True
             )
             _ = imhist_plot(
                 img=processor._final_buffer[img_idx],
@@ -2077,7 +2103,8 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
                 binary_mask=masks if masks is not None else None,
                 descriptives=False,
                 title=f"After – {readable}",
-                ax=axR
+                ax=axR,
+                show_normalized_rmse=True
             )
 
         # ---- Spatial frequency matching ----
@@ -2085,22 +2112,22 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
             target_sf = processor._target_sf ** 2
             avg_before, radii = sf_profile(
                 processor._initial_buffer[img_idx],
-                legacy_mode=processor.options.legacy_mode
+                legacy_mode=processor.options.legacy_mode,
             )
             avg_after, radii = sf_profile(
                 processor._final_buffer[img_idx],
                 legacy_mode=processor.options.legacy_mode
             )
-            _ = sf_plot(processor._initial_buffer[img_idx], sf_p=avg_before, target_sf=target_sf, ax=axL)
-            _ = sf_plot(processor._final_buffer[img_idx], sf_p=avg_after, target_sf=target_sf, ax=axR)
+            _ = sf_plot(processor._initial_buffer[img_idx], sf_p=avg_before, target_sf=target_sf, ax=axL, show_normalized_rmse=True)
+            _ = sf_plot(processor._final_buffer[img_idx], sf_p=avg_after, target_sf=target_sf, ax=axR, show_normalized_rmse=True)
 
         # ---- Fourier spectrum matching ----
         elif step == "spec_match":
             target_spectrum = processor._target_spectrum
             mag_before, _ = image_spectrum(processor._initial_buffer[img_idx])
             mag_after, _ = image_spectrum(processor._final_buffer[img_idx])
-            _ = spectrum_plot(mag_before, ax=axL)
-            _ = spectrum_plot(mag_after, ax=axR)
+            _ = spectrum_plot(mag_before, ax=axL, target_spectrum=target_spectrum, show_normalized_rmse=True)
+            _ = spectrum_plot(mag_after, ax=axR, target_spectrum=target_spectrum, show_normalized_rmse=True)
 
         # ---- Dithering ----
         elif step == "dithering":
@@ -2122,6 +2149,8 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
         fontname="Times New Roman",
         y=0.99,
     )
+    if show_figure:
+        fig.show()
 
     return fig
 
