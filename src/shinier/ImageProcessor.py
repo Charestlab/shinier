@@ -90,6 +90,7 @@ class ImageProcessor(InformativeBaseModel):
     _processed_channel: Optional[int] = PrivateAttr(default=None)
     _log_param: dict = PrivateAttr(default_factory=dict)
     _is_last_operation: bool = PrivateAttr(default=False)
+    _is_first_operation: bool = PrivateAttr(default=True)
     _sum_bool_masks: List = PrivateAttr(default_factory=list)
     _complete: bool = PrivateAttr(default=False)
     _rec_standard: str = PrivateAttr(default="rec709")
@@ -270,7 +271,8 @@ class ImageProcessor(InformativeBaseModel):
             raise ValueError('The target spectrum has not been computed yet.')
         _target_sf = []
         xs, ys, n_channels = self._target_spectrum.shape
-        self._radius_grid = get_radius_grid(x_size=xs, y_size=ys, legacy_mode=self.options.legacy_mode)
+        if self._radius_grid is None:
+            self._radius_grid = get_radius_grid(x_size=xs, y_size=ys, legacy_mode=self.options.legacy_mode)
         for ch in range(n_channels):
             _target_sf.append(rotational_avg(spectrum=self._target_spectrum[..., ch], radius=self._radius_grid))
         self._target_sf = np.stack(_target_sf).T
@@ -454,6 +456,8 @@ class ImageProcessor(InformativeBaseModel):
                     if self.verbose == 0:
                         pbar.update(1)
                         cnt += 1
+
+                self._is_first_operation = False
 
         # Copy of the final buffer (before
         self._final_buffer = self.dataset.buffer.new_copy(to_list=False)
@@ -649,8 +653,8 @@ class ImageProcessor(InformativeBaseModel):
         bit_size = 8
         n_bins = 2 ** bit_size
 
-        # Scientific rationale to verify
-        if self.options._is_moving_target and self.options.mode > 2: 
+        # TODO: Verify scientific rationale
+        if not self._is_first_operation and self.options._is_moving_target and self.options.mode > 2:
             self._compute_initial_target_histogram()
 
         # If hist_optim disable, will run only one loop (n_iter = 1)
@@ -660,7 +664,7 @@ class ImageProcessor(InformativeBaseModel):
         # Match the histogram
         self._processed_channel = None
         for idx, image in enumerate(buffer_collection):
-            original_image = self._initial_buffer[idx]
+            original_image = self._initial_buffer[idx] if self._is_moving_target else image . # TODO: Verify scientific rationale
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
             console_log(msg=f"\nImage {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
 
@@ -780,8 +784,10 @@ class ImageProcessor(InformativeBaseModel):
         # Convert buffer to float [0, 1]
         buffer_collection = self.float255_to_float01(self.dataset.buffer)
 
-        # Scientific rationale to verify
-        if self.options._is_moving_target and self.options.mode > 3:
+        # TODO: Verify scientific rationale
+        if not self._is_first_operation and self.options._is_moving_target and self.options.mode > 3:
+            self._compute_initial_spectra()
+            self._compute_initial_target_spectrum()
             self._compute_initial_target_sf()
 
         # Compute Nyquist and radius grid
@@ -880,8 +886,9 @@ class ImageProcessor(InformativeBaseModel):
             buffer_collection[idx] = image/255
         buffer_collection.drange = (0, 1)
 
-        # Scientific rationale to verify
-        if self.options._is_moving_target and self.options.mode > 4:
+        # TODO: Verify scientific rationale
+        if not self._is_first_operation and self.options._is_moving_target and self.options.mode > 4:
+            self._compute_initial_spectra()
             self._compute_initial_target_spectrum()
 
         # If target_spectrum is None, target magnitude is the average of all spectra
