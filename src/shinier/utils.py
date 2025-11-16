@@ -392,7 +392,7 @@ def imhist_plot(
     if show_normalized_rmse:
         if target_hist is not None:
             nrmse = normalized_rmse(hist_normalized, target_hist, mode="assume [0, 1]")
-            rmse_text = "RMSE [current vs target] = {:1.4e}".format(nrmse)
+            rmse_text = "NRMSE = {:1.2e}".format(nrmse)
             ax_hist.text(0.05, 0.98, rmse_text, transform=ax_hist.transAxes, ha="left", va="top", fontsize=9, fontname=fontname)
     ax_hist.set_xlim(0, 255)
     ax_hist.set_ylim(0, Hmax * 1.05 if Hmax > 0 else 1)
@@ -629,7 +629,7 @@ def sf_plot(
     if show_normalized_rmse:
         if target_sf is not None:
             nrmse = normalized_rmse(target_sf, rot_avg, mode="actual range")
-            rmse_text = "RMSE [current vs target] = {:1.4e}".format(nrmse)
+            rmse_text = "NRMSE = {:1.2e}".format(nrmse)
             fig.text(0.5, 0.98, rmse_text, transform=fig.transAxes, ha="center", va="top", fontsize=9)
 
     if ax is None:
@@ -699,7 +699,7 @@ def spectrum_plot(
     if show_normalized_rmse:
         if target_spectrum is not None:
             nrmse = normalized_rmse(stretch(target_spectrum), stretch(spectrum), mode="assume [0, 1]")
-            rmse_text = "RMSE [current vs target] = {:1.4e}".format(nrmse)
+            rmse_text = "NRMSE = {:1.2e}".format(nrmse)
             ax.text(0.5, 1.02, rmse_text, transform=ax.transAxes, ha="center", va="bottom", fontsize=9)
 
     ax.set_xlabel("Spatial frequency (cycles/image)")
@@ -1998,7 +1998,7 @@ def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, ve
     return msg
 
 
-def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_figure: bool = True) -> plt.Figure:
+def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_figure: bool = True, show_initial_target: bool = False) -> plt.Figure:
     """Display before/after images and diagnostics for all processing steps in one figure.
 
     The figure layout adapts to the active SHINIER mode:
@@ -2010,6 +2010,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
         processor (ImageProcessor): The SHINIER ImageProcessor instance.
         img_idx (int, optional): Index of the image to visualize. Defaults to 0.
         show_figure (bool): If False, return the fig object without showing it (i.e. plt.show())
+        show_initial_target (bool): If True, plots the initial target in composite modes.
 
     Returns:
         matplotlib.figure.Figure: Composite figure summarizing the image transformations.
@@ -2028,6 +2029,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
 
     # --- Retrieve relevant info ---
     steps = getattr(processor, "_processing_steps", [])
+    n_steps = len(steps)
     name_map = getattr(processor, "_fct_name2process_name", {})
 
     mode = getattr(processor.options, "mode", None)
@@ -2087,10 +2089,15 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
 
         # ---- Histogram matching ----
         elif step == "hist_match":
-            target_hist = getattr(processor, "_target_hist", None)
+            final_target_hist = processor._target_hist
+            if 'hist' in processor._initial_targets.keys() and show_initial_target:
+                initial_target_hist = processor._initial_targets['hist']
+            else:
+                initial_target_hist = final_target_hist
+
             _ = imhist_plot(
                 img=processor._initial_buffer[img_idx],
-                target_hist=target_hist if target_hist is not None else None,
+                target_hist=initial_target_hist,
                 binary_mask=masks if masks is not None else None,
                 descriptives=False,
                 title=f"Before – {readable}",
@@ -2099,17 +2106,25 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
             )
             _ = imhist_plot(
                 img=processor._final_buffer[img_idx],
-                target_hist=target_hist if target_hist is not None else None,
+                target_hist=initial_target_hist,
                 binary_mask=masks if masks is not None else None,
                 descriptives=False,
                 title=f"After – {readable}",
                 ax=axR,
                 show_normalized_rmse=True
             )
+            if n_steps > 1 and show_initial_target:
+                axR.plot(final_target_hist[:, 0], ls='--', lw=1, color='gray', label=f'Moving target')
+                axR.legend(frameon=False, fontsize=9, loc='upper right')
 
         # ---- Spatial frequency matching ----
         elif step == "sf_match":
-            target_sf = processor._target_sf ** 2
+            final_target_sf = processor._target_sf ** 2
+            if 'sf' in processor._initial_targets.keys() and show_initial_target:
+                initial_target_sf = processor._initial_targets['sf'] ** 2
+            else:
+                initial_target_sf = final_target_sf
+
             avg_before, radii = sf_profile(
                 processor._initial_buffer[img_idx],
                 legacy_mode=processor.options.legacy_mode,
@@ -2118,8 +2133,17 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
                 processor._final_buffer[img_idx],
                 legacy_mode=processor.options.legacy_mode
             )
-            _ = sf_plot(processor._initial_buffer[img_idx], sf_p=avg_before, target_sf=target_sf, ax=axL, show_normalized_rmse=True)
-            _ = sf_plot(processor._final_buffer[img_idx], sf_p=avg_after, target_sf=target_sf, ax=axR, show_normalized_rmse=True)
+            _ = sf_plot(processor._initial_buffer[img_idx], sf_p=avg_before, target_sf=initial_target_sf, ax=axL, show_normalized_rmse=True)
+            _ = sf_plot(processor._final_buffer[img_idx], sf_p=avg_after, target_sf=initial_target_sf, ax=axR, show_normalized_rmse=True)
+
+            if n_steps > 1 and show_initial_target:
+                image = im3D(processor._initial_buffer[img_idx])
+                xs, ys, channels = image.shape
+                R = int(np.floor(min(xs, ys) / 2.0))
+                if final_target_sf is not None and final_target_sf.shape[0] > xs / 2:
+                    final_target_sf = final_target_sf[1: R + 1]
+                axR.loglog(radii[:, 0], final_target_sf[:, 0], ls='--', lw=1, color='gray', label=f'Moving target')
+                axR.legend(frameon=False, fontsize=9, loc='upper right')
 
         # ---- Fourier spectrum matching ----
         elif step == "spec_match":

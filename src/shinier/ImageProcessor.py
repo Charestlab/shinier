@@ -98,6 +98,7 @@ class ImageProcessor(InformativeBaseModel):
     _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
     _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
     _target_sf: Optional[np.ndarray] = PrivateAttr(default=None)
+    _initial_targets: Optional[Dict[str, np.ndarray]] = PrivateAttr(default={})
     _radius_grid: Optional[np.ndarray] = PrivateAttr(default=None)
     _final_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
     _initial_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
@@ -393,15 +394,18 @@ class ImageProcessor(InformativeBaseModel):
         # Compute target histogram if required
         if self.options.mode in [2, 5, 6, 7, 8]:
             self._compute_initial_target_histogram()
+            self._initial_targets['hist'] = self._target_hist.copy()
 
         # Compute Fourier spectra and target spectrum if required
         if self.options.mode in [3, 4, 5, 6, 7, 8]:
             self._compute_initial_spectra()
             self._compute_initial_target_spectrum()
+            self._initial_targets['spectrum'] = self._target_spectrum.copy()
 
         # Compute target sf if required
         if self.options.mode in [3, 5, 7]:
             self._compute_initial_target_sf()
+            self._initial_targets['sf'] = self._target_sf.copy()
 
         # Set a seed for the random generator used in exact histogram specification
         if self.seed is None:
@@ -781,14 +785,12 @@ class ImageProcessor(InformativeBaseModel):
                 self._is_last_operation is True.
         """
 
-        # Convert buffer to float [0, 1]
-        buffer_collection = self.float255_to_float01(self.dataset.buffer)
-
         # TODO: Verify scientific rationale
         if not self._is_first_operation and self.options._is_moving_target and self.options.mode > 3:
             self._compute_initial_spectra()
             self._compute_initial_target_spectrum()
             self._compute_initial_target_sf()
+        buffer_collection = self.dataset.buffer
 
         # Compute Nyquist and radius grid
         x_size, y_size, n_channels = self._target_spectrum.shape[:3]
@@ -880,16 +882,11 @@ class ImageProcessor(InformativeBaseModel):
         # compatible with the image dimensions, typically of shape
         # (H, W, C).
 
-        # Get proper input and output image collections
-        buffer_collection = self.dataset.buffer
-        for idx, image in enumerate(buffer_collection):
-            buffer_collection[idx] = image/255
-        buffer_collection.drange = (0, 1)
-
         # TODO: Verify scientific rationale
         if not self._is_first_operation and self.options._is_moving_target and self.options.mode > 4:
             self._compute_initial_spectra()
             self._compute_initial_target_spectrum()
+        buffer_collection = self.dataset.buffer
 
         # If target_spectrum is None, target magnitude is the average of all spectra
         x_size, y_size, n_channels = self._target_spectrum.shape[:3]
