@@ -55,13 +55,13 @@ class Options(InformativeBaseModel):
     --------------------------------------------------   SHINIER MODE  --------------------------------------------------
         mode (Literal[1-9]): Image processing treatment (default = 8)
             1 = lum_match only
-            2 = hist_match only
+            2 = hist_match only (default)
             3 = sf_match only
             4 = spec_match only
             5 = hist_match & sf_match
             6 = hist_match & spec_match
             7 = sf_match & hist_match
-            8 = spec_match & hist_match (default)
+            8 = spec_match & hist_match
             9 = only dithering
 
         legacy_mode (Optional[bool]): Enables backward compatibility with older versions while retaining recent optimizations (default = False).
@@ -205,7 +205,7 @@ class Options(InformativeBaseModel):
     background: Union[conint(ge=0, le=255), Literal[300]] = 300
 
     # --- Mode ---
-    mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8
+    mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 2
     seed: Optional[int] = None
     legacy_mode: bool = False
     iterations: conint(ge=1) = 5
