@@ -122,7 +122,7 @@ And documentation:
 7. [Implemented Algorithms](documentation/documentation.md#implemented-algorithms)
 8. [Memory Management and Performance](documentation/documentation.md#memory-management-and-performance)
 9. [Testing and Validation](documentation/documentation.md#testing-and-validation)
-10. [Usage Demonstrations](documentation/demos.ipynb)
+10. [Usage Demonstrations](documentation/demos.py)
 
 ---
 ## 📚 Citing
