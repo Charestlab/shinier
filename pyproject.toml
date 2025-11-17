@@ -6,8 +6,6 @@
 requires = ["setuptools>=68", "wheel", "numpy>=1.22"]
 build-backend = "setuptools.build_meta"
 
-
-
 [project]
 name = "shinier"
 version = "0.1.3"
@@ -98,4 +96,3 @@ markers = [
     "validation_tests: full combinatorial sweep (slow)",
     "test_all_options: test all option combinations (slow)"
 ]
-
