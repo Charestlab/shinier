@@ -301,8 +301,8 @@ class Options(InformativeBaseModel):
         # target_spectrum should match expected images size under as_gray and linear_luminance
         if self.target_spectrum is not None:
             if not self.linear_luminance or self.as_gray:
-                if self.target_spectrum.squeeze().ndim != 2:
-                    raise ValueError(f"target_spectrum must be (W, H, ) or (W, H, 1) when linear_luminance is False or as_gray is True. Current target_spectrum shape = {self.target_spectrum.shape}")
+                if not isinstance(self.target_spectrum, str) and self.target_spectrum.squeeze().ndim != 2:
+                    raise ValueError(f"target_spectrum must be (W, H,) or (W, H, 1) when linear_luminance is False or as_gray is True. Current target_spectrum shape = {self.target_spectrum.shape}")
 
         # hist_specification ignored if hist_optim = True
         if self.hist_optim:

@@ -6,14 +6,16 @@ Covers:
     2. Specific cross-field consistency and behavioral logic
     3. Edge cases and boundary conditions
 """
-
+from tqdm.auto import tqdm
+import itertools
 import pytest
 import numpy as np
 from pathlib import Path
 from pydantic import ValidationError
 from shinier.Options import Options
-
-pytestmark = pytest.mark.unit_tests
+from tests.validation_tests.ImageProcessor_validation_test import get_possible_values
+from tests.tools import utils as utils_test
+# pytestmark = pytest.mark.unit_tests
 
 
 # =============================================================================
@@ -88,6 +90,7 @@ def generate_invalid_kwargs(field_name):
     return {field_name: generate_invalid_value(f)}
 
 
+@pytest.mark.unit_tests
 @pytest.mark.parametrize("field_name", list(Options.model_fields))
 def test_field_validation(field_name, tmp_dirs):
     """Schema-based validation for every field in the model."""
@@ -105,6 +108,7 @@ def test_field_validation(field_name, tmp_dirs):
 # =============================================================================
 # SPECIFIC BEHAVIORAL & CROSS-FIELD TESTS
 # =============================================================================
+@pytest.mark.unit_tests
 def test_default_initialization(tmp_dirs):
     """Ensure defaults instantiate correctly."""
     in_dir, out_dir, _ = tmp_dirs
@@ -116,6 +120,7 @@ def test_default_initialization(tmp_dirs):
     assert isinstance(opt.as_gray, bool)
 
 
+@pytest.mark.unit_tests
 def test_invalid_paths_raise(tmp_path):
     """Non-existent folders must raise ValueError."""
     bogus = tmp_path / "nonexistent"
@@ -123,6 +128,7 @@ def test_invalid_paths_raise(tmp_path):
         Options(input_folder=bogus, output_folder=bogus)
 
 
+@pytest.mark.unit_tests
 @pytest.mark.parametrize("val", [-1, 400, 999])
 def test_background_out_of_range(val, tmp_dirs):
     """Background intensity must be [0–255] or 300."""
@@ -130,7 +136,7 @@ def test_background_out_of_range(val, tmp_dirs):
     with pytest.raises((ValidationError, ValueError)):
         Options(input_folder=in_dir, output_folder=out_dir, background=val)
 
-
+@pytest.mark.unit_tests
 def test_background_valid_values(tmp_dirs):
     """0, 255, and 300 are valid backgrounds."""
     in_dir, out_dir, _ = tmp_dirs
@@ -139,6 +145,7 @@ def test_background_valid_values(tmp_dirs):
         assert opt.background == val
 
 
+@pytest.mark.unit_tests
 def test_target_hist_valid_and_invalid_shapes(tmp_dirs):
     """Validate histogram array shape and dtype constraints."""
     in_dir, out_dir, _ = tmp_dirs
@@ -156,6 +163,7 @@ def test_target_hist_valid_and_invalid_shapes(tmp_dirs):
         Options(input_folder=in_dir, output_folder=out_dir, target_hist=bad_type)
 
 
+@pytest.mark.unit_tests
 def test_target_spectrum_validation(tmp_dirs):
     """Target spectrum must be float ndarray."""
     in_dir, out_dir, _ = tmp_dirs
@@ -166,6 +174,7 @@ def test_target_spectrum_validation(tmp_dirs):
         Options(input_folder=in_dir, output_folder=out_dir, target_spectrum=bad_type)
 
 
+@pytest.mark.unit_tests
 def test_hist_optim_overwrites_hist_spec(tmp_dirs):
     """hist_optim=True should nullify hist_specification."""
     in_dir, out_dir, _ = tmp_dirs
@@ -173,6 +182,7 @@ def test_hist_optim_overwrites_hist_spec(tmp_dirs):
     assert opt.hist_specification is None
 
 
+@pytest.mark.unit_tests
 def test_rescaling_forbidden_modes_overwrite(tmp_dirs):
     """Rescaling forced to 0 for luminance/histogram modes."""
     in_dir, out_dir, _ = tmp_dirs
@@ -181,6 +191,7 @@ def test_rescaling_forbidden_modes_overwrite(tmp_dirs):
         assert opt.rescaling == 0
 
 
+@pytest.mark.unit_tests
 def test_mode9_dithering_zero_raises(tmp_dirs):
     """Mode 9 cannot have dithering=0."""
     in_dir, out_dir, _ = tmp_dirs
@@ -188,6 +199,7 @@ def test_mode9_dithering_zero_raises(tmp_dirs):
         Options(input_folder=in_dir, output_folder=out_dir, mode=9, dithering=0)
 
 
+@pytest.mark.unit_tests
 def test_iterations_clamped_for_noncomposite_modes(tmp_dirs):
     """iterations >1 only valid for composite modes (5–8)."""
     in_dir, out_dir, _ = tmp_dirs
@@ -195,6 +207,7 @@ def test_iterations_clamped_for_noncomposite_modes(tmp_dirs):
     assert opt.iterations == 1
 
 
+@pytest.mark.unit_tests
 def test_whole_image_requires_mask_folder(tmp_dirs):
     """whole_image=3 requires masks_folder."""
     in_dir, out_dir, mask_dir = tmp_dirs
@@ -205,6 +218,7 @@ def test_whole_image_requires_mask_folder(tmp_dirs):
         Options(input_folder=in_dir, output_folder=out_dir, whole_image=3, masks_folder=None)
 
 
+@pytest.mark.unit_tests
 def test_legacy_mode_overrides(tmp_dirs):
     """legacy_mode should force multiple field overwrites."""
     in_dir, out_dir, _ = tmp_dirs
@@ -216,6 +230,7 @@ def test_legacy_mode_overrides(tmp_dirs):
     assert not opt.safe_lum_match
 
 
+@pytest.mark.unit_tests
 def test_export_schema(tmp_dirs, tmp_path):
     """Ensure schema export works."""
     in_dir, out_dir, _ = tmp_dirs
@@ -227,9 +242,36 @@ def test_export_schema(tmp_dirs, tmp_path):
     assert "title" in txt and "properties" in txt
 
 
+@pytest.mark.unit_tests
 def test_repr_output(tmp_dirs):
     """__repr__ should contain all key-value pairs."""
     in_dir, out_dir, _ = tmp_dirs
     opt = Options(input_folder=in_dir, output_folder=out_dir)
     r = repr(opt)
     assert "mode:" in r and "input_folder" in r
+
+
+@pytest.mark.test_all_options
+def test_all_combo(tmp_dirs):
+    mask_dir = tmp_dirs[2]
+    choices = {name: get_possible_values(field) for name, field in Options.model_fields.items()}
+    choices['input_folder'] = [utils_test.IMAGE_PATH]
+    choices['masks_folder'] = [mask_dir]
+    choices['background'] += [120, 130]
+    choices['seed'] += [4242424242]
+    choices['target_lum'] += [(100, 20)]
+    choices['target_hist'] += ['unit_test']
+    choices['target_spectrum'] += ['unit_test']
+    choices['hist_iterations'] = [3]
+    choices['verbose'] = [-1]
+    total_combo = np.prod([len(v) for v in choices.values() if hasattr(v, '__len__') and not isinstance(v, str)])
+    start_at = 1591274
+    pbar = tqdm(total=total_combo, initial=start_at)
+    keys = list(choices)
+    for i, combo in enumerate(itertools.product(*(choices[k] for k in keys))):
+        if i > start_at:
+            params = dict(zip(keys, combo))
+            if params['mode'] == 9 and params['dithering'] == 0:
+                params['dithering'] = 1
+            Options(**params)
+            pbar.update(1)

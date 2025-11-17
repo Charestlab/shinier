@@ -93,7 +93,7 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
     h, w = src0.shape[:2]
     targets = utils_test.precompute_targets(images_buffers)
     ag, ct, rs = 1, 0, 1
-    targets['hist'][ag][ct][rs]
+
     mask_dir = test_tmpdir / "MASK"
     utils_test.make_masks(mask_dir, h=h, w=w, n=1)
 
