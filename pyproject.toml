@@ -24,6 +24,14 @@ dependencies = [
     "matplotlib>=3.9.0",
     "pydantic>=2.12",
 ]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/Charestlab/shinier"
 
 [project.optional-dependencies]
 dev = [
@@ -89,11 +97,3 @@ markers = [
     "validation_tests: full combinatorial sweep (slow)"
 ]
 
-classifiers = [
-  "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
-  "Operating System :: OS Independent",
-]
-
-[project.urls]
-Homepage = "https://github.com/Charestlab/shinier"

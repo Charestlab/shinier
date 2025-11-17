@@ -170,3 +170,58 @@ def test_color_converter_against_colour(rec_std):
 
     rgb_round = conv.lab_to_sRGB(conv.sRGB_to_lab(rgb))
     assert mse(rgb, rgb_round) < 1e-8, f"sRGB↔Lab round-trip MSE too large ({rec_std})"
+
+    # -------------------------------------------------------------------------
+    # sRGB / XYZ ↔ xyY  (compare with colour-science + round-trip)
+    # -------------------------------------------------------------------------
+
+    # --- XYZ ↔ xyY (direct check on XYZ domain) ---
+    # Reuse xyz_own from earlier, or recompute to be explicit:
+    xyz_src = conv.sRGB_to_xyz(rgb)
+
+    # Our XYZ → xyY vs colour-science
+    xyY_own_from_xyz = conv.xyz_to_xyY(xyz_src)
+    xyY_ref_from_xyz = colour.XYZ_to_xyY(xyz_src)
+    assert mse(xyY_own_from_xyz, xyY_ref_from_xyz) < 1e-12, (f"XYZ→xyY mismatch ({rec_std})")
+
+    # Backward: xyY → XYZ
+    xyz_own_back = conv.xyY_to_xyz(xyY_own_from_xyz)
+    xyz_ref_back = colour.xyY_to_XYZ(xyY_ref_from_xyz)
+    assert mse(xyz_own_back, xyz_ref_back) < 1e-12, (
+        f"xyY→XYZ mismatch ({rec_std})"
+    )
+
+    # Round-trip XYZ ↔ xyY
+    xyz_round = conv.xyY_to_xyz(conv.xyz_to_xyY(xyz_src))
+    assert mse(xyz_src, xyz_round) < 1e-12, (
+        f"XYZ↔xyY round-trip error too large ({rec_std})"
+    )
+
+    # --- sRGB ↔ xyY (end-to-end check) ---
+    # Forward: sRGB → xyY
+    xyY_own = conv.sRGB_to_xyY(rgb)
+    xyz_ref = colour.RGB_to_XYZ(
+        rgb,
+        cs_customized,
+        illuminant=cs_customized.whitepoint,
+        apply_cctf_decoding=True,
+    )
+    xyY_ref = colour.XYZ_to_xyY(xyz_ref)
+    assert mse(xyY_own, xyY_ref) < 1e-8, (f"sRGB→xyY MSE too large ({rec_std})")
+
+    # Backward: xyY → sRGB
+    rgb_own = conv.xyY_to_sRGB(xyY_own)
+    xyz_back_ref = colour.xyY_to_XYZ(xyY_ref)
+    rgb_ref = colour.XYZ_to_RGB(
+        xyz_back_ref,
+        cs_customized,
+        illuminant=cs_customized.whitepoint,
+        apply_cctf_encoding=True,
+    )
+    assert mse(rgb_own, rgb_ref) < 1e-4, (f"xyY→sRGB MSE too large ({rec_std})")
+
+    # Round-trip sRGB ↔ xyY using *only* your converter
+    rgb_round = conv.xyY_to_sRGB(conv.sRGB_to_xyY(rgb))
+    assert mse(rgb, rgb_round) < 1e-8, (
+        f"sRGB↔xyY round-trip MSE too large ({rec_std})"
+    )
