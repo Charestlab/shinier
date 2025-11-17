@@ -323,7 +323,7 @@ class Options(InformativeBaseModel):
         if self.legacy_mode:
             object.__setattr__(self, "conserve_memory", False)
             object.__setattr__(self, "as_gray", True)
-            object.__setattr__(self, "linear_luminance", 0)
+            object.__setattr__(self, "linear_luminance", False)
             object.__setattr__(self, "rec_standard", 1)
             object.__setattr__(self, "dithering", 0)
             object.__setattr__(self, "hist_specification", 1)

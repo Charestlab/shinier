@@ -265,7 +265,7 @@ def test_all_combo(tmp_dirs):
     choices['hist_iterations'] = [3]
     choices['verbose'] = [-1]
     total_combo = np.prod([len(v) for v in choices.values() if hasattr(v, '__len__') and not isinstance(v, str)])
-    start_at = 1591274
+    start_at = 0
     pbar = tqdm(total=total_combo, initial=start_at)
     keys = list(choices)
     for i, combo in enumerate(itertools.product(*(choices[k] for k in keys))):

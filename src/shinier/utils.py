@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 import warnings
 from pathlib import Path
+from unicodedata import is_normalized
+
 import numpy as np
 from datetime import datetime
 from numpy.lib.stride_tricks import sliding_window_view
@@ -2521,29 +2523,8 @@ def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], t
             of correlation coefficients, and the second element is an array of RMS
             values for all images compared against the target histogram.
     """
-    def normalize_hist(a_hist):
-        a_hist = np.float64(a_hist)
-        return a_hist / (a_hist.sum(axis=0, keepdims=True) + 1e-12)
 
-    initial_hist = []
-    image = im3D(images[0])
-    n_channels = image.shape[2]
-    compute_target_hist = target_hist is None
-    if not compute_target_hist:
-        n_channels_th = target_hist.shape[1] if target_hist.ndim == 2 else 1
-        if n_channels_th != n_channels:
-            raise ValueError(f"Target histogram has {n_channels_th} channels, but image has {n_channels} channels")
-
-    target_hist = np.zeros((images.drange[-1]+1, n_channels)) if compute_target_hist else target_hist
-    for idx, image in enumerate(images):
-        initial_hist.append(imhist(image, mask=binary_masks[idx]))
-        if compute_target_hist:
-            target_hist += initial_hist[-1]
-        initial_hist[-1] = normalize_hist(initial_hist[-1])
-    if compute_target_hist:
-        target_hist /= len(images)
-
-    target_hist = normalize_hist(target_hist)
+    target_hist, initial_hist = avg_hist(images=images, binary_masks=binary_masks, normalized=True, n_bins=256, output_list_hist=True)
 
     # Compute metric
     N = len(initial_hist)
@@ -2557,7 +2538,7 @@ def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], t
     return corr, rms
 
 
-def sf_match_validation(images: np.ndarray, target_spectrum: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+def sf_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """
     Validates spectral match between a set of input images by comparing their
     rotational averages of magnitude spectra against a computed target spectrum.
@@ -2565,10 +2546,10 @@ def sf_match_validation(images: np.ndarray, target_spectrum: Optional[np.ndarray
     mean square error (RMSE) to evaluate the quality of the spectral match.
 
     Args:
-        images (np.ndarray): Array of images for which the spectral validation
+        images (ImageListIO): Array of images for which the spectral validation
             is performed. Each image is assumed to have three channels (e.g., RGB).
-        target_sf (Optional[np.ndarray]). A target rotational average to compare against.
-        normalize_rmse (Optional[bool]): Whether to normalize the RMSE
+        target_spectrum (Optional[np.ndarray]). A target spectrum to compute rotational average to compare against.
+        normalize_rmse (bool): Whether to normalize the RMSE
 
     Returns:
         Tuple[np.ndarray, np.ndarray]: A tuple containing two arrays:
@@ -2577,70 +2558,46 @@ def sf_match_validation(images: np.ndarray, target_spectrum: Optional[np.ndarray
             - Root mean square errors (np.ndarray) for the same comparison.
     """
 
-    def rot_avg(arr2d: np.ndarray, radius: np.ndarray, ann_counts: np.ndarray) -> np.ndarray:
-        """Mean magnitude per radius bin (annular average)."""
-        sums = np.bincount(radius, weights=arr2d.ravel())
-        return sums / ann_counts
-
     x_size, y_size = images[0].shape[:2]
     n_channels = 1 if images[0].ndim == 2 else 3
-    compute_target_spectrum = target_spectrum is None
-    if not compute_target_spectrum:
-        n_channels_ts = target_spectrum.shape[2] if target_spectrum.ndim == 3 else 1
-        if n_channels_ts != n_channels:
-            raise ValueError(f"Target spectrum has {n_channels_ts} channels but images have {n_channels} channels")
 
-    # Compute spectra and mean spectrum
+    # Compute spectra and mean spectrum if required
     magnitudes, phases = get_images_spectra(images=images)
-    target_spectrum = im3D(np.zeros(images[0].shape)) if compute_target_spectrum else im3D(target_spectrum)
-    if compute_target_spectrum:
+    if target_spectrum is None:
+        target_spectrum = im3D(np.zeros(images[0].shape))
         for idx, mag in enumerate(magnitudes):
             target_spectrum += mag
         target_spectrum /= len(magnitudes)
-        target_spectrum = im3D(target_spectrum)
+    target_spectrum = im3D(target_spectrum)
 
     # Returns the frequencies of the image, bins range from -0.5f to 0.5f (0.5f is the Nyquist frequency) 1/y_size is the distance between each pixel in the image
-    f_cols = np.fft.fftshift(np.fft.fftfreq(y_size, d=1 / y_size))  # like f1 in MATLAB
-    f_rows = np.fft.fftshift(np.fft.fftfreq(x_size, d=1 / x_size))  # like f2 in MATLAB
-    XX, YY = np.meshgrid(f_cols, f_rows)
-    nyquistLimit = np.floor(max(x_size, y_size) / 2)
-    r, theta = cart2pol(XX, YY)
-
-    # Map of the bins of the frequencies
-    r = np.round(r, decimals=0)
-
-    # Need to be a 1D array of integers for the bincount function
-    r_int = r.astype(np.int32)
-    r1 = r_int.ravel()
-
-    # Precompute counts per radius (for true rotational *averages*, not sums)
-    ann_counts = np.bincount(r1)
-    ann_counts[ann_counts == 0] = 1  # protect against divide-by-zero
+    r_int = get_radius_grid(x_size=x_size, y_size=y_size)
     target_rot_avg = []
     initial_rot_avg = []
     for idx, image in enumerate(images):
         magnitude = im3D(magnitudes[idx])
-        # phase = im3D(phases[idx])
         tra = []
         ira = []
         for channel in range(n_channels):
             fft_image = magnitude[:, :, channel]
 
             # Rotational averages (target vs source) as MEANS over annuli
-            tra.append(rot_avg(target_spectrum[:, :, channel], radius=r1, ann_counts=ann_counts))
-            ira.append(rot_avg(fft_image, radius=r1, ann_counts=ann_counts))
-        target_rot_avg.append(np.stack(tra))
-        initial_rot_avg.append(np.stack(ira))
+            ira.append(rotational_avg(spectrum=fft_image, radius=r_int))
+            if idx == 0:
+                tra.append(rotational_avg(spectrum=target_spectrum[..., channel], radius=r_int))
+        if idx == 0:
+            target_rot_avg = np.stack(tra).T
+        initial_rot_avg.append(np.stack(ira).T)
 
     # Compute metrics
     N = len(initial_rot_avg)
     corr, rms = np.zeros((N,)), np.zeros((N,))
     for idx, ira in enumerate(initial_rot_avg):
-        corr[idx] = np.corrcoef(ira.ravel(), target_rot_avg[idx].ravel())[0, 1]
+        corr[idx] = np.corrcoef(ira.ravel(), target_rot_avg.ravel())[0, 1]
         if normalize_rmse:
-            rms[idx] = normalized_rmse(ira.ravel(), target_rot_avg[idx].ravel(), mode='actual range')
+            rms[idx] = normalized_rmse(ira.ravel(), target_rot_avg.ravel(), mode='actual range')
         else:
-            rms[idx] = compute_rmse(ira.ravel(), target_rot_avg[idx].ravel())
+            rms[idx] = compute_rmse(ira.ravel(), target_rot_avg.ravel())
     return corr, rms
 
 
@@ -3043,7 +3000,7 @@ def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins: int = 2
     return count
 
 
-def avg_hist(images: ImageListIO, binary_masks: List[np.ndarray], normalized: bool = True, n_bins: int = 256) -> np.ndarray:
+def avg_hist(images: ImageListIO, binary_masks: List[np.ndarray], normalized: bool = True, n_bins: int = 256, output_list_hist: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, List[np.ndarray]]]:
     """Computes the average histogram of a set of images.
 
     Args:
@@ -3051,23 +3008,35 @@ def avg_hist(images: ImageListIO, binary_masks: List[np.ndarray], normalized: bo
         binary_masks (List[np.ndarray]): A list of binary mask.
         normalized (bool): Indicate of the result should be normalize to sum to 1.
         n_bins (int): Number of levels in the image (uint8 = 256)
+        output_list_hist (bool): If True, outputs a list of histogram corresponding to each image in images (along with the average)
 
     Returns:
-        average (np.ndarray): Average histogram counts for each channel.
+        average (Union[np.ndarray, Tuple[np.ndarray, List[np.ndarray]]]): Average histogram counts for each channel.
 
     """
+    def normalize_hist(a_hist):
+        a_hist = np.float64(a_hist)
+        return a_hist / (a_hist.sum(axis=0, keepdims=True) + 1e-12)
+
     n_channels = 1 if images.n_dims == 2 else 3
     if len(binary_masks) != images.n_images:
         raise ValueError('Length of binary_masks should be equal to length of images')
 
-    # n_bins = max(images.drange) + 1 if not np.issubdtype(images.dtype, np.floating) else 256  # TODO: Imposing 256 but is this ok for all use case?
     hist_sum = np.zeros((n_bins, n_channels))
+    hist_list = []
     for idx, im in enumerate(images):
-        hist_sum += imhist(im, binary_masks[idx], n_bins=n_bins)
+        hist_list.append(imhist(im, binary_masks[idx], n_bins=n_bins))
+        hist_sum += hist_list[-1]
+        if normalized:
+            hist_list[-1] = normalize_hist(hist_list[-1])
 
     # Average of the pixels in the bins
     average = hist_sum / len(images)
     if normalized:
-        average = average / (average.sum(axis=0, keepdims=True) + 1e-12)
+        average = normalize_hist(average)
 
-    return average
+    if output_list_hist:
+        return average, hist_list
+    else:
+        return average
+

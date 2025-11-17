@@ -259,7 +259,7 @@ class ImageProcessor(InformativeBaseModel):
         if target_hist is None:
             target_hist = avg_hist(self.dataset.buffer, binary_masks=self.bool_masks, n_bins=n_bins)
         else:
-            target_hist = im3D(target_hist.astype(np.float64))
+            target_hist = target_hist[:, None] if target_hist.ndim == 1 else target_hist
             target_hist /= (target_hist.sum(axis=0, keepdims=True) + 1e-12)
             if target_hist.shape[0] != n_bins:
                 raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
@@ -268,6 +268,7 @@ class ImageProcessor(InformativeBaseModel):
         self._target_hist = target_hist
 
     def _compute_initial_target_sf(self):
+        """Compute initial target rotational average."""
         if self._target_spectrum is None:
             raise ValueError('The target spectrum has not been computed yet.')
         _target_sf = []
@@ -695,7 +696,6 @@ class ImageProcessor(InformativeBaseModel):
                     Y, OA = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=self._target_hist, tie_strategy=tie_strategy, n_bins=n_bins)
                     if hist_spec_names != 'noise' and (n_iter == 1 or (n_iter > 1 and self._sub_iter < n_iter - 1)):
                         console_log(msg=f"Ordering accuracy per channel = {OA}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose == 3)
-
                 # Compute Structural Similarity and gradient map (sens), along with max and min
                 if self._sub_iter < n_iter - 1:
                     sens, ssim = ssim_sens(original_image, Y, data_range=n_bins-1, use_sample_covariance=False, binary_mask=self.bool_masks[idx])
