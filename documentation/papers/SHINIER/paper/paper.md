@@ -36,7 +36,6 @@ date: 14 November 2025
 bibliography: paper.bib
 ---
 
-# The SHINIER the Better: An Adaptation of the SHINE Toolbox on Python
 # Summary
 
 The SHINIER (Spectrum, Histogram, and Intensity Normalization, Equalization, and Refinement) toolbox, written in Python, is an open-source package that replicates and extends the functionality of the original SHINE toolbox [@willenbockel2010controlling], written in MATLAB. Like SHINE, it includes functions for normalizing and scaling mean luminance and contrast, for specifying either the full Fourier amplitude spectrum or its rotational average, and for exact histogram specification. In addition, SHINIER supports color images, better memory management, implements image dithering algorithms for improving pixel depth, and offers improved exact histogram equalization methods, among other enhancements. The original SHINE toolbox [@willenbockel2010controlling], written in MATLAB, has been cited more than 1,350 times according to Google Scholar—an average of about 100 citations per year—clearly indicating its popularity and usefulness in vision science research. SHINIER aims to provide the same benefits to the research community, while expanding accessibility and functionality.
