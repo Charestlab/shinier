@@ -53,7 +53,7 @@ pip install shinier
 ---
 ### I. Calling the CLI
 
-#### 1) (Intended usage) From terminal
+#### 1) Recommended: From terminal
 ##### Calls the CLI
 ```bash
 shinier
@@ -67,7 +67,7 @@ shinier --show_results --image_index=1
 shinier --show_results --save_path="path/file.png"
 ```
 
-#### 2) From Python
+#### 2) From Python (Not recommended)
 
 ```python
 from shinier import SHINIER_CLI
@@ -153,7 +153,7 @@ Example use case: the "luminance" will be ajusted so that the mean values and th
  "safe_lum_match" setting being off will cause some values to be clipped and 
  set to either 0 (< 0) or 255 (> 255).
 """
-options = Options(
+opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 1,
@@ -176,7 +176,7 @@ Example use case: the histogram matching will be done using Coltuc, Bolon and
   2009) and the target histogram will be the average of the input images.
   verbose at 3 will give you more informations about the processing.
 """
-options = Options(
+opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 2,
@@ -201,7 +201,7 @@ Example use case: will match the rotational average with the average spectrum of
   the images will be then rescaled after the image modification with the option
   #2 (Rescaling absolute max/min — shared 0–1 range).
 """
-options = Options(
+opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 3,
@@ -225,7 +225,7 @@ Example use case: will match the amplitude spectrum of the images with the
   modification with the option #2 (Rescaling absolute max/min — shared 0–1 range).
 """
 
-options = Options(
+opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 4,
@@ -248,7 +248,7 @@ Example use case: Histogram specification with noise is applied (legacy method),
   afterwards,to preserve the luminance distribution imposed by histogram
   matching.
 """
-options = Options(
+opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 5,
@@ -271,7 +271,7 @@ Example use case: Exact histogram specification (no noise), with SSIM
   optimization enabled. After spectrum alignment. Rescaling is done by 
   default.
 """
-options = Options(
+opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 6,
@@ -293,7 +293,7 @@ Example use case: Spectrum alignment ensures comparable spatial frequency
   content, then histogram specification is applied with noise. No SSIM
   optimization is performed. Rescaling is skipped.
 """
-options = Options(
+opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 7,
@@ -325,7 +325,7 @@ im = Image.open("mon_image.png").convert("L")
 im = np.array(im, dtype=np.float64)
 target_spectrum = image_spectrum(im)[0]
 
-options = Options(
+opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 8,
@@ -346,7 +346,7 @@ Example use case: dithering will be applied with the default noisy-bit method
   (Allard & Faubert, 2008), while leaving the original image luminance and
   spectrum unchanged.
 """
-options = Options(
+opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 9
@@ -372,7 +372,7 @@ Example use case: hist_matching using Coltuc, Bolon & Chassery (2006) exact
   gestion won't be used here and legacy_mode, which is to replicate MATLAB more
   closely is used.
 """
-options = Options(
+opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     masks_folder=MASKS_FOLDER,
@@ -393,7 +393,7 @@ options = Options(
 #### (i) Recommended: from folders
 
 ```python
-dataset = ImageDataset(options=options)
+dataset = ImageDataset(options=opts)
 ```
 
 #### (ii) Manual: from pre-loaded images (not recommended)
@@ -402,7 +402,7 @@ dataset = ImageDataset(options=options)
 from shinier import ImageListIO
 
 im_loaded_before = [...]  # list of numpy arrays
-dataset = ImageDataset(images=ImageListIO(im_loaded_before))
+dataset = ImageDataset(images=ImageListIO(im_loaded_before), options=opts)
 ```
 
 ---
