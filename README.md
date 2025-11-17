@@ -16,7 +16,7 @@
 
 ## 🎯 Overview
 
-Shinier is a modern Python implementation of SHINE (Spectrum, Histogram, and Intensity Normalization and Equalization), originally developed in MATLAB by Willenbockel et al., 2010. It provides precise control over luminance, contrast, histograms, and spectral content across large image sets for well-calibrated visual experiments.
+SHINIER is a modern Python implementation of SHINE (Spectrum, Histogram, and Intensity Normalization and Equalization), originally developed in MATLAB by Willenbockel et al., 2010. It provides precise control over luminance, contrast, histograms, and spectral content across large image sets for well-calibrated visual experiments.
 
 ### Key Features and Improvements
 
