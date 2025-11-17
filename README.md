@@ -73,7 +73,7 @@ Call the following bash command to quickly start using the interactive CLI.
 shinier --show_results --image_index=1
 ```
 <p>
-  <img src="./assets/DEMO_INTERACTIVE_CLI.gif" width="1000" alt="CLI demo">
+  <img src="https://github.com/Charestlab/shinier/blob/main/assets/DEMO_INTERACTIVE_CLI.gif" width="1000" alt="CLI demo">
 </p>
 
 ### 🧩 Example in Python
@@ -105,7 +105,7 @@ Change the mode number (e.g. `opt = Options(mode=3)`) to change image processing
 
 Below is an example of results obtained using mode 5 with joint histogram equalization and spatial frequency normalization.
 <p>
-  <img src="./assets/demo_cli_mode5.png" width="600" alt="CLI demo">
+  <img src="https://github.com/Charestlab/shinier/blob/main/assets/demo_cli_mode5.png" width="600" alt="CLI demo">
 </p>
 
 ---
