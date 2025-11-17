@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shinier"
-version = "0.1.4"
+version = "0.1.5"
 description = "Python port of the SHINE toolbox with added options (color management, dithering, EHS), optimized for large image sets."
 readme = "README.md"
 license = { file = "LICENSE" }

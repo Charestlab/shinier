@@ -149,5 +149,5 @@ See [LICENSE](documentation/license.md) for more information.
 ---
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-  <em>Version 0.1.4 - Complete technical documentation</em>
+  <em>Version 0.1.5 - Complete technical documentation</em>
 </p>
