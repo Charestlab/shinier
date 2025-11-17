@@ -110,7 +110,7 @@ Below is an example of results obtained using mode 5 with joint histogram equali
 
 ---
 ## 🏛️ **Technical information**
-See the accompanying the paper: [The SHINIER the Better: An Adaptation of the SHINE Toolbox on Python](documentation/papers/SHINIER/paper.md)
+See the accompanying the paper: [The SHINIER the Better: An Adaptation of the SHINE Toolbox on Python](documentation/papers/SHINIER/paper/paper.md)
 
 And documentation:
 1. [Package Overview](documentation/documentation.md#overview)
