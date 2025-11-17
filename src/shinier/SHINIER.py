@@ -247,7 +247,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             opts.background = opts.background if whole == 3 else prompt("ROI masks: Analysis will be run on pixels != [input a value between 0–255]", default=127, kind="int", min_v=0, max_v=255)
 
     # --------- Processing Mode ---------
-    mode = prompt("Processing mode", default=8, kind="choice", choices=[
+    mode = prompt("Processing mode", default=2, kind="choice", choices=[
         "Luminance only (lum_match)",
         "Histogram only (hist_match)",
         "Spatial frequency only (sf_match)",
