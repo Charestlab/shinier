@@ -85,7 +85,7 @@ def print_shinier_header(is_tty: bool = True, version: str = package_version):
     console_log("")
     console_log(banner)
     console_log("")
-    console_log(f"SHINIER — Scientific Histogram Intensity Normalization and Image Equalization in RGB ({colorize(version, color=Bcolors.OKGREEN)})")
+    console_log(f"SHINIER — Spectrum, Histogram, and Intensity Normalization, Equalization, and Refinement ({colorize(version, color=Bcolors.OKGREEN)})")
     console_log(f"Session started: {date_str}")
     console_log("─" * 60)
     console_log("")

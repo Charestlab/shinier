@@ -7,7 +7,7 @@
    ███████║██║  ██║██║██║ ╚███║██║███████╗██║  ██║
    ╚══════╝╚═╝  ╚═╝╚═╝╚═╝  ╚══╝╚═╝╚══════╝╚═╝  ╚═╝
 ```
-> Scientific Histogram Intensity Normalization and Image Equalization in R/G/B.
+> Spectrum, Histogram, and Intensity Normalization, Equalization, and Refinement.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)]()

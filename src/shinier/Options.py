@@ -205,7 +205,7 @@ class Options(InformativeBaseModel):
     background: Union[conint(ge=0, le=255), Literal[300]] = 300
 
     # --- Mode ---
-    mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8
+    mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 2
     seed: Optional[int] = None
     legacy_mode: bool = False
     iterations: conint(ge=1) = 5

@@ -23,13 +23,13 @@
 ```python
 modes:
       1 = lum_match
-      2 = hist_match
+      2 = hist_match (default)
       3 = safe_lum_match
       4 = spec_match
       5 = hist_match & sf_match
       6 = hist_match & spec_match
       7 = sf_match & hist_match
-      8 = spec_match & hist_match (default)
+      8 = spec_match & hist_match
       9 = only dithering
 ```
 
