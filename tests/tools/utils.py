@@ -24,7 +24,7 @@ from shinier.color import ColorTreatment, REC_STANDARD, RGB_STANDARD
 AS_GRAY_NAME = {0: None, 1: "equal", 2: "rec601", 3: "rec709", 4: "rec2020"}
 
 # Get Image path
-IMAGE_PATH = Path(__file__).resolve().parent.parent / 'IMAGES/SAMPLE_64X64/'
+IMAGE_PATH = Path(__file__).resolve().parent.parent / 'assets/SAMPLE_64X64/'
 
 ComboType = Tuple[
     int,  # mode

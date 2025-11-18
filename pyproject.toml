@@ -15,7 +15,7 @@ license = { file = "LICENSE" }
 authors = [
     { name = "Nicolas Dupuis-Roy", email = "nicolas.dupuis.roy@umontreal.ca" }
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.11"
 dependencies = [
     "numpy>=1.22,<2.1",
     "Pillow>=9.0.0",
@@ -25,7 +25,8 @@ dependencies = [
     "pydantic>=2.12",
 ]
 classifiers = [
-  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
   "Operating System :: OS Independent",
 ]
 
@@ -35,9 +36,11 @@ Homepage = "https://github.com/Charestlab/shinier"
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.0",
-    "setuptools>=44.1.0",
+    "wheel>=0.44.0",
+    "setuptools>=74.1",
     "scikit-image>=0.24.0",
     "colour-science >= 0.4.0",
+    "build>=1.2.1",
 ]
 
 [project.scripts]

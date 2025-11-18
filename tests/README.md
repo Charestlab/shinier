@@ -158,7 +158,7 @@ This will rebuild the same `Options`, reload selected images, and re-run the fai
 2. Inspect failures:
 
    ```bash
-   ls tests/IMAGES/tmp/**/failure_*.pkl
+   ls tests/assets/tmp/**/failure_*.pkl
    ```
 
 3. Replay a failure interactively:

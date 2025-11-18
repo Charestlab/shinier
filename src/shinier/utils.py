@@ -17,12 +17,9 @@ from typing import (
 from PIL import Image
 from itertools import chain
 
-try:
-    from matplotlib.gridspec import GridSpec
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
-except ImportError:
-    plt = None
+from matplotlib.gridspec import GridSpec
+import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # Local package imports
 from . import _HAS_CYTHON
