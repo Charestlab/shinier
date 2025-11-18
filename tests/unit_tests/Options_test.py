@@ -113,8 +113,8 @@ def test_default_initialization(tmp_dirs):
     """Ensure defaults instantiate correctly."""
     in_dir, out_dir, _ = tmp_dirs
     opt = Options(input_folder=in_dir, output_folder=out_dir)
-    assert opt.mode == 8
-    assert opt.rescaling == 2
+    assert opt.mode == 2
+    assert opt.rescaling == 0
     assert opt.background == 300
     assert opt.hist_specification == 4
     assert isinstance(opt.as_gray, bool)
@@ -265,7 +265,7 @@ def test_all_combo(tmp_dirs):
     choices['hist_iterations'] = [3]
     choices['verbose'] = [-1]
     total_combo = np.prod([len(v) for v in choices.values() if hasattr(v, '__len__') and not isinstance(v, str)])
-    start_at = 1591274
+    start_at = 0
     pbar = tqdm(total=total_combo, initial=start_at)
     keys = list(choices)
     for i, combo in enumerate(itertools.product(*(choices[k] for k in keys))):

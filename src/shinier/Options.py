@@ -55,13 +55,13 @@ class Options(InformativeBaseModel):
     --------------------------------------------------   SHINIER MODE  --------------------------------------------------
         mode (Literal[1-9]): Image processing treatment (default = 8)
             1 = lum_match only
-            2 = hist_match only
+            2 = hist_match only (default)
             3 = sf_match only
             4 = spec_match only
             5 = hist_match & sf_match
             6 = hist_match & spec_match
             7 = sf_match & hist_match
-            8 = spec_match & hist_match (default)
+            8 = spec_match & hist_match
             9 = only dithering
 
         legacy_mode (Optional[bool]): Enables backward compatibility with older versions while retaining recent optimizations (default = False).
@@ -236,7 +236,7 @@ class Options(InformativeBaseModel):
     # --- Misc ---
     verbose: Literal[-1, 0, 1, 2, 3] = 0
 
-     # --- Private attributes ---
+    # --- Private attributes ---
     _is_moving_target: bool = PrivateAttr(default=True)
 
     # ================================================================================================
@@ -323,7 +323,7 @@ class Options(InformativeBaseModel):
         if self.legacy_mode:
             object.__setattr__(self, "conserve_memory", False)
             object.__setattr__(self, "as_gray", True)
-            object.__setattr__(self, "linear_luminance", 0)
+            object.__setattr__(self, "linear_luminance", False)
             object.__setattr__(self, "rec_standard", 1)
             object.__setattr__(self, "dithering", 0)
             object.__setattr__(self, "hist_specification", 1)
@@ -408,4 +408,3 @@ class Options(InformativeBaseModel):
                        'out-of-gamut colors; use joint RGB histograms for consistency.')
         if msg:
             console_log(msg, indent_level=0, color=Bcolors.WARNING, verbose=self.verbose >= 1)
-

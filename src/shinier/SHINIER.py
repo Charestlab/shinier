@@ -16,6 +16,7 @@ from shinier.utils import (
 # Compute repo root as parent of /src/shinier/
 IS_TTY = sys.stdin.isatty()
 ACCEPTED_FORMATS = list(get_args(ACCEPTED_IMAGE_FORMATS))
+ESCAPE_KEYS = ['q', 'exit']
 
 
 #########################################
@@ -65,7 +66,7 @@ def prompt(
 
     # Display question
     default_str = colorize('default', Bcolors.DEFAULT_TEXT)
-    console_log(f"{Bcolors.COLOR_TEXT}{label} (Enter=[{Bcolors.DEFAULT_TEXT}{default}{Bcolors.COLOR_TEXT}], q=quit):{Bcolors.ENDC}")
+    console_log(f"{Bcolors.BOLD}{label} (Enter=[{Bcolors.DEFAULT_TEXT}{default}{Bcolors.ENDC}{Bcolors.BOLD}], q=quit):{Bcolors.ENDC}")
 
     # Check args and set choices
     if kind == 'choice' and choices is None:
@@ -102,7 +103,7 @@ def prompt(
     # raw = input("> ").strip()
 
     # ---- Exit ----
-    if raw.lower() == "q":
+    if raw.lower().strip() in ESCAPE_KEYS:
         console_log("Exit requested (q).", color=Bcolors.FAIL)
         sys.exit(0)
 
