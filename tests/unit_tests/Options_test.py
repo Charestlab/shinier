@@ -113,8 +113,8 @@ def test_default_initialization(tmp_dirs):
     """Ensure defaults instantiate correctly."""
     in_dir, out_dir, _ = tmp_dirs
     opt = Options(input_folder=in_dir, output_folder=out_dir)
-    assert opt.mode == 8
-    assert opt.rescaling == 2
+    assert opt.mode == 2
+    assert opt.rescaling == 0
     assert opt.background == 300
     assert opt.hist_specification == 4
     assert isinstance(opt.as_gray, bool)

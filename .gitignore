@@ -14,8 +14,10 @@ __pycache__/
 *.pyd
 *.dll
 .pytest_tmp/
+*venv*/
 *.db
 *.db*
+**/.vscode/
 
 # -------------------------------
 # PACKAGE DATA
@@ -41,8 +43,8 @@ src/shinier/data/MASK/*
 # -------------------------------
 # TESTS
 # -------------------------------
-tests/IMAGES/tmp/*
-!tests/IMAGES/SAMPLE_64X64/test_face*.png
-!tests/IMAGES/SAMPLE_64X64/test_scene*.png
-!tests/IMAGES/SAMPLE_512X512/test_face*.png
-!tests/IMAGES/SAMPLE_512X512/test_scene*.png
+tests/assets/tmp/*
+!tests/assets/SAMPLE_64X64/test_face*.png
+!tests/assets/SAMPLE_64X64/test_scene*.png
+!tests/assets/SAMPLE_512X512/test_face*.png
+!tests/assets/SAMPLE_512X512/test_scene*.png

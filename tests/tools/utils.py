@@ -24,7 +24,7 @@ from shinier.color import ColorTreatment, REC_STANDARD, RGB_STANDARD
 AS_GRAY_NAME = {0: None, 1: "equal", 2: "rec601", 3: "rec709", 4: "rec2020"}
 
 # Get Image path
-IMAGE_PATH = Path(__file__).resolve().parent.parent / 'IMAGES/SAMPLE_64X64/'
+IMAGE_PATH = Path(__file__).resolve().parent.parent / 'assets/SAMPLE_64X64/'
 
 ComboType = Tuple[
     int,  # mode
@@ -70,12 +70,35 @@ def _ensure_db() -> None:
         conn.commit()
 
 
+def mark_hash_range_done(start: int, end: int) -> None:
+    """Mark all hashes whose integer value is in [start, end] as 'done'.
+    Args:
+        start: Lowest integer hash value (inclusive).
+        end: Highest integer hash value (inclusive).
+    """
+    _ensure_db()
+    if end < start:
+        raise ValueError(f"end ({end}) must be >= start ({start})")
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        conn.execute(
+            """
+            UPDATE hashes
+            SET status = 'done',
+                error = NULL,
+                timestamp = CURRENT_TIMESTAMP
+            WHERE CAST(hash AS INTEGER) BETWEEN ? AND ?
+            """,
+            (start, end),
+        )
+        conn.commit()
+
+
 def is_already_done(hash_str: str) -> bool:
-    """Return True if the given combo hash is already marked complete."""
+    """Return True if the given combo hash is already processed (status is not 'pending')."""
     _ensure_db()
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(
-            "SELECT 1 FROM hashes WHERE hash = ? AND status = 'done' LIMIT 1",
+            "SELECT 1 FROM hashes WHERE hash = ? AND status != 'pending' LIMIT 1",
             (hash_str,),
         )
         return cur.fetchone() is not None
@@ -144,6 +167,80 @@ def get_all_hashes(status: Optional[str] = None) -> List[Tuple[str, str, str, Op
         else:
             cur.execute("SELECT hash, status, timestamp, error FROM hashes ORDER BY timestamp DESC")
         return cur.fetchall()
+
+
+def ensure_sequential_hashes(
+    max_hash: int,
+    *,
+    chunk_size: int = 100_000,
+) -> None:
+    """Ensure the hash registry contains rows for '0'..str(max_hash).
+
+    This function is idempotent: it uses INSERT OR IGNORE so re-running it
+    will only add missing rows and leave existing ones untouched.
+
+    Args:
+        max_hash: Highest integer hash value to ensure, inclusive. The function
+            will ensure that every hash from "0" to str(max_hash) exists.
+        chunk_size: Number of rows to batch per executemany() call to avoid
+            building a gigantic parameter list in memory.
+    """
+    _ensure_db()
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        cursor = conn.cursor()
+        for start in range(0, max_hash + 1, chunk_size):
+            end = min(max_hash + 1, start + chunk_size)
+            batch = [(str(i),) for i in range(start, end)]
+            cursor.executemany(
+                "INSERT OR IGNORE INTO hashes (hash) VALUES (?)",
+                batch,
+            )
+        conn.commit()
+
+
+def initialize_db(
+    total_number_of_tests: int,
+    *,
+    chunk_size: int = 100_000,
+) -> None:
+    """Drop and rebuild the hash registry with hashes 0..max_hash.
+
+    Args:
+        total_number_of_tests: Highest integer hash value to create, inclusive.
+        chunk_size: Batch size for inserts.
+    """
+    reset_hash_registry(confirm=True)
+    ensure_sequential_hashes(max_hash=total_number_of_tests, chunk_size=chunk_size)
+
+
+def mark_hash_status(
+    hash_str: str,
+    status: str = "done",
+    error: Optional[str] = None,
+) -> None:
+    """Mark an existing hash row as 'done'.
+
+    This is a lighter-weight helper than `register_hash` for the case where
+    the row is guaranteed to exist (e.g., after `ensure_sequential_hashes`).
+
+    Args:
+        hash_str: Hash identifier (e.g., "0", "1", "1180676").
+        status: Status of the hash row to mark as 'done', 'invalide', etc.
+        error: Optional error message to record; defaults to NULL.
+    """
+    _ensure_db()
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        conn.execute(
+            """
+            UPDATE hashes
+            SET status = ?,
+                error = ?,
+                timestamp = CURRENT_TIMESTAMP
+            WHERE hash = ?
+            """,
+            (status, error, hash_str),
+        )
+        conn.commit()
 
 
 def ensure_paths_exist(paths: Iterable[Path]) -> None:

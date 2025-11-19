@@ -10,8 +10,9 @@
 > Spectrum, Histogram, and Intensity Normalization, Equalization, and Refinement.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)]()
+[![Python versions](https://img.shields.io/pypi/pyversions/shinier)](https://pypi.org/project/shinier/)
 [![PyPI version](https://img.shields.io/pypi/v/shinier.svg)](https://pypi.org/project/shinier/)
+[![Tests](https://github.com/Charestlab/shinier/actions/workflows/tests.yml/badge.svg)](https://github.com/Charestlab/shinier/actions/workflows/tests.yml)
 ---
 
 ## 🎯 Overview

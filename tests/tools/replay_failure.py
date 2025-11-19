@@ -18,13 +18,13 @@ from shinier.ImageProcessor import ImageProcessor
 def _default_base_tmp() -> Path:
     """Return the unified base tmp directory for replays/tests.
 
-    The default is `<repo>/tests/IMAGES/tmp`, but this can be overridden
+    The default is `<repo>/tests/assets/tmp`, but this can be overridden
     by setting the `SHINIER_BASE_TMP` environment variable.
 
     Returns:
         Path: Absolute path to the base temporary directory.
     """
-    default_base = DEV_ROOT / "tests" / "IMAGES" / "tmp"
+    default_base = DEV_ROOT / "tests" / "assets" / "tmp"
     return Path(os.getenv("SHINIER_BASE_TMP", default_base)).resolve()
 
 
@@ -128,16 +128,16 @@ if __name__ == "__main__":
         file_path = Path(sys.argv[1])
         main(file_path)
     finally:
-        src_path = DEV_ROOT / 'tests/IMAGES/SAMPLE_64X64'
-        # src_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_512X512')
-        # src_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/SAMPLE_1024X124')
+        src_path = DEV_ROOT / 'tests/assets/SAMPLE_64X64'
+        # src_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/assets/SAMPLE_512X512')
+        # src_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/assets/SAMPLE_1024X124')
 
-        # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-8/master/case-42ec98b3eaf2/failure_05410ad6.pkl')
-        # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-8/master/case-609dab2fd6e2/failure_5d1f75f4.pkl')
-        file_path = DEV_ROOT / 'tests/IMAGES/tmp/shard0-of-8/master/case-d73efbdf68da/failure_dcfd264c.pkl'
+        # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/assets/tmp/shard0-of-8/master/case-42ec98b3eaf2/failure_05410ad6.pkl')
+        # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/assets/tmp/shard0-of-8/master/case-609dab2fd6e2/failure_5d1f75f4.pkl')
+        file_path = DEV_ROOT / 'tests/assets/tmp/shard0-of-8/master/case-d73efbdf68da/failure_dcfd264c.pkl'
 
-        # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-8/master/case-bb6ed7c15ec8/failure_b866525e.pkl')
-        # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard0-of-8/master/case-98e0c29c9110/failure_df5942e4.json')
-        # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/IMAGES/tmp/shard3-of-8/master/case-8b448e852111/failure_dbd8c896.json')
+        # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/assets/tmp/shard0-of-8/master/case-bb6ed7c15ec8/failure_b866525e.pkl')
+        # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/assets/tmp/shard0-of-8/master/case-98e0c29c9110/failure_df5942e4.json')
+        # file_path = Path('/Users/ndr/GIT_REPO/GITHUB/shine/shinier/tests/assets/tmp/shard3-of-8/master/case-8b448e852111/failure_dbd8c896.json')
         main(file_path, src_path)
 

@@ -236,7 +236,7 @@ class Options(InformativeBaseModel):
     # --- Misc ---
     verbose: Literal[-1, 0, 1, 2, 3] = 0
 
-     # --- Private attributes ---
+    # --- Private attributes ---
     _is_moving_target: bool = PrivateAttr(default=True)
 
     # ================================================================================================
@@ -408,4 +408,3 @@ class Options(InformativeBaseModel):
                        'out-of-gamut colors; use joint RGB histograms for consistency.')
         if msg:
             console_log(msg, indent_level=0, color=Bcolors.WARNING, verbose=self.verbose >= 1)
-

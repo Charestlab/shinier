@@ -19,12 +19,9 @@ from typing import (
 from PIL import Image
 from itertools import chain
 
-try:
-    from matplotlib.gridspec import GridSpec
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
-except ImportError:
-    plt = None
+from matplotlib.gridspec import GridSpec
+import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # Local package imports
 from . import _HAS_CYTHON
@@ -1194,7 +1191,7 @@ def floyd_steinberg_dithering(image: np.ndarray, depth: int = 256, legacy_mode: 
     for xx in np.arange(1,image.shape[1]-1,1):
         for yy in np.arange(1,image.shape[0]-1,1):  # exchange with the following
             old_pixel = tim[yy,xx]
-            new_pixel = MatlabOperators.round(tim[yy,xx])
+            new_pixel = MatlabOperators.round(tim[yy,xx]) if legacy_mode else np.round(tim[yy,xx])
             quant_error = old_pixel - new_pixel
             tim[yy,xx+1] = tim[yy,xx+1] + 7/16 * quant_error
             tim[yy+1,xx-1] = tim[yy+1,xx-1] + 3/16 * quant_error

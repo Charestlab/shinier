@@ -31,7 +31,7 @@ def _compute_base_tmp(worker_id: str) -> Path:
         Path: The worker-scoped temp root.
     """
     # Base root (override via env if you like putting temps on a faster volume)
-    default_base = Path(__file__).resolve().parent / "IMAGES" / "tmp"
+    default_base = Path(__file__).resolve().parent / "assets" / "tmp"
     base = Path(os.getenv("SHINIER_BASE_TMP", default_base)).resolve()
 
     # Shard namespace (job-level parallelism)

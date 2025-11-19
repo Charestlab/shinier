@@ -1,21 +1,17 @@
-#[build-system]
-#requires = ["setuptools>=68", "wheel", "Cython>=3.0", "numpy>=1.22"]
-#build-backend = "setuptools.build_meta"
-
 [build-system]
 requires = ["setuptools>=68", "wheel", "numpy>=1.22"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "shinier"
-version = "0.1.6"
+version = "0.1.7"
 description = "Python port of the SHINE toolbox with added options (color management, dithering, EHS), optimized for large image sets."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
     { name = "Nicolas Dupuis-Roy", email = "nicolas.dupuis.roy@umontreal.ca" }
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.13"
 dependencies = [
     "numpy>=1.22,<2.1",
     "Pillow>=9.0.0",
@@ -25,8 +21,12 @@ dependencies = [
     "pydantic>=2.12",
 ]
 classifiers = [
-  "Programming Language :: Python :: 3",
-  "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
 ]
 
 [project.urls]
@@ -35,9 +35,11 @@ Homepage = "https://github.com/Charestlab/shinier"
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.0",
-    "setuptools>=44.1.0",
+    "wheel>=0.44.0",
+    "setuptools>=74.1",
     "scikit-image>=0.24.0",
     "colour-science >= 0.4.0",
+    "build>=1.2.1",
 ]
 
 [project.scripts]
@@ -94,5 +96,6 @@ testpaths = [
 markers = [
     "unit_tests: default functional",
     "validation_tests: full combinatorial sweep (slow)",
-    "test_all_options: test all option combinations (slow)"
+    "test_all_options: test all option combinations"
 ]
+
