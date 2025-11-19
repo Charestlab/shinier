@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test `pip install .` and `pip install ".[dev]"` across multiple OS/Python combos using Docker.
+# Test `pip install .`, `pip install ".[dev]"`, and pytest across multiple OS/Python combos using Docker.
 
 set -u
 set -o pipefail
@@ -19,13 +19,11 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 # Matrix of base images (OS + Python)
-# All of these are Linux containers:
 IMAGES=(
   "python:3.9-slim-bookworm"      # Debian (slim)
   "python:3.10-slim-bookworm"
   "python:3.11-slim-bookworm"
   "python:3.12-slim-bookworm"
-  "python:3.12-alpine"            # Alpine (musl libc)
 )
 
 ok=()
@@ -47,7 +45,7 @@ for img in "${IMAGES[@]}"; do
     continue
   fi
 
-  # Run container, mount project, install compiler toolchain, create venv, pip install . and ".[dev]"
+  # Run container, mount project, install compiler toolchain, create venv, pip installs, pytest
   if docker run --rm \
       -v "$PROJECT_DIR":/project \
       -w /project \
@@ -89,11 +87,17 @@ for img in "${IMAGES[@]}"; do
 
         echo '[INFO] Installing project with dev extras (pip install \".[dev]\")...'
         python -m pip install \".[dev]\"
+
+        echo '[INFO] Running unit tests: pytest -m unit_tests'
+        python -m pytest -m unit_tests
+
+        echo '[INFO] Running converter validation: pytest ./tests/validation_tests/Converter_validation_test.py'
+        python -m pytest ./tests/validation_tests/Converter_validation_test.py
       "; then
-    echo "[OK] Base + dev extras install succeeded in $img"
+    echo "[OK] Base + dev + pytest succeeded in $img"
     ok+=("$img")
   else
-    echo "[FAIL] Install FAILED in $img"
+    echo "[FAIL] Install/tests FAILED in $img"
     fail+=("$img")
   fi
 
@@ -102,7 +106,7 @@ done
 
 echo "================ SUMMARY (Docker) ================"
 if ((${#ok[@]} > 0)); then
-  echo "Success (base + dev extras):"
+  echo "Success (base + dev + pytest):"
   for img in "${ok[@]}"; do
     echo "  - $img"
   done

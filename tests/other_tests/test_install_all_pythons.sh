@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test `pip install .` and `pip install ".[dev]"` across multiple Python versions
+# Test `pip install .`, `pip install ".[dev]"`, and pytest across multiple Python versions
 # using version-specific virtualenvs on the local machine.
 #
 # Usage (from anywhere inside the repo):
@@ -14,25 +14,12 @@
 #     * Runs:
 #         - python -m pip install .
 #         - python -m pip install ".[dev]"
+#         - python -m pytest -m unit_tests
+#         - python -m pytest ./tests/validation_tests/Converter_validation_test.py
 # - Prints a summary of:
-#     * Versions where BOTH installs SUCCEEDED
-#     * Versions where either install FAILED
+#     * Versions where ALL steps succeeded
+#     * Versions where something failed
 #     * Versions that were MISSING (interpreter not found)
-#
-# Installing missing Python versions
-# ----------------------------------
-# On macOS with Homebrew:
-#   brew install python@3.9 python@3.10 python@3.11 python@3.12
-#
-# This will give you python3.9, python3.10, python3.11, python3.12 in PATH
-# (after `brew doctor` / `brew info` instructions, or re-opening your shell).
-#
-# On Linux:
-#   - Use your distro package manager (apt, dnf, pacman, etc.) or `pyenv`.
-#
-# On Windows:
-#   - Use the official installers from python.org or pyenv-win, then ensure
-#     `python3.X` is on PATH (or adapt this script to use pyenv shims).
 
 set -u  # treat unset variables as errors
 set -o pipefail
@@ -63,7 +50,7 @@ if [[ ! -f "pyproject.toml" && ! -f "setup.py" ]]; then
   exit 1
 fi
 
-echo "Testing pip install . and pip install '.[dev]' from Python 3.${MIN_MINOR} to 3.${MAX_MINOR}"
+echo "Testing pip install ., pip install '.[dev]', and pytest from Python 3.${MIN_MINOR} to 3.${MAX_MINOR}"
 echo "Project directory: $PROJECT_DIR"
 echo
 
@@ -102,22 +89,45 @@ for minor in $(seq "$MIN_MINOR" "$MAX_MINOR"); do
 
   # 1) Base install
   echo "[INFO] Running: pip install ."
-  if python -m pip install .; then
-    echo "[OK] Base install succeeded with Python 3.${minor}"
-
-    # 2) Dev extras install
-    echo "[INFO] Running: pip install '.[dev]'"
-    if python -m pip install ".[dev]"; then
-      echo "[OK] Dev extras install succeeded with Python 3.${minor}"
-      ok_versions+=("3.${minor}")
-    else
-      echo "[FAIL] Dev extras install FAILED with Python 3.${minor}"
-      fail_versions+=("3.${minor} (dev extras)")
-    fi
-  else
+  if ! python -m pip install .; then
     echo "[FAIL] Base install FAILED with Python 3.${minor}"
-    fail_versions+=("3.${minor} (base)")
+    fail_versions+=("3.${minor} (base install)")
+    deactivate || true
+    continue
   fi
+  echo "[OK] Base install succeeded with Python 3.${minor}"
+
+  # 2) Dev extras install
+  echo "[INFO] Running: pip install '.[dev]'"
+  if ! python -m pip install ".[dev]"; then
+    echo "[FAIL] Dev extras install FAILED with Python 3.${minor}"
+    fail_versions+=("3.${minor} (dev extras)")
+    deactivate || true
+    continue
+  fi
+  echo "[OK] Dev extras install succeeded with Python 3.${minor}"
+
+  # 3) Unit tests
+  echo "[INFO] Running unit tests: pytest -m unit_tests"
+  if ! python -m pytest -m unit_tests; then
+    echo "[FAIL] Unit tests FAILED with Python 3.${minor}"
+    fail_versions+=("3.${minor} (pytest -m unit_tests)")
+    deactivate || true
+    continue
+  fi
+  echo "[OK] Unit tests passed with Python 3.${minor}"
+
+  # 4) Converter validation test
+  echo "[INFO] Running converter validation: pytest ./tests/validation_tests/Converter_validation_test.py"
+  if ! python -m pytest ./tests/validation_tests/Converter_validation_test.py; then
+    echo "[FAIL] Converter validation test FAILED with Python 3.${minor}"
+    fail_versions+=("3.${minor} (Converter_validation_test)")
+    deactivate || true
+    continue
+  fi
+  echo "[OK] Converter validation test passed with Python 3.${minor}"
+
+  ok_versions+=("3.${minor}")
 
   # Deactivate venv before next loop
   deactivate || true
@@ -126,7 +136,7 @@ done
 echo
 echo "================ SUMMARY ================"
 if ((${#ok_versions[@]} > 0)); then
-  echo "Success (base + dev extras):"
+  echo "Success (base + dev + pytest):"
   for v in "${ok_versions[@]}"; do
     echo "  - Python $v"
   done
@@ -156,7 +166,6 @@ if ((${#missing_versions[@]} > 0)); then
     echo "  On macOS with Homebrew, you can install them with:"
     echo -n "    brew install"
     for v in "${missing_versions[@]}"; do
-      # strip '3.' and build python@3.X formula name
       minor="${v#3.}"
       echo -n " python@3.${minor}"
     done
