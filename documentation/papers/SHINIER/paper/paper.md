@@ -57,7 +57,7 @@ SHINIER is available as a pip-install package using `pip install shinier` with i
 
 # Acknowledgements
 
-The author would like to thank the original contributors of the SHINE toolbox. 
+The authors would like to thank the original contributors of the SHINE toolbox. 
 
 
 # References

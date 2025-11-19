@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 import warnings
 from pathlib import Path
+from unicodedata import is_normalized
+
 import numpy as np
 from datetime import datetime
 from numpy.lib.stride_tricks import sliding_window_view

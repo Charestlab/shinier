@@ -6,7 +6,7 @@ Tests are organized into **unit** and **validation (integration)** levels.
 ---
 
 ## ⚙️ Pytest Configuration
-Make sure you did to install all dev dependencies: ```pip install shinier[dev]```
+Make sure you did to install all dev dependencies: ```pip install '.[dev]'```
 
 ```ini
 [pytest]
@@ -18,6 +18,7 @@ testpaths =
 markers =
     unit_tests: fast functional unit tests
     validation_tests: full combinatorial sweep (slow)
+    test_all_options: test all option combinations (slow)
 ```
 
 **Naming convention:**\
@@ -33,25 +34,26 @@ All test files must either:
 
 Use markers to select subsets of tests:
 
-| Marker             | Description                  | Example Command              |
-| ------------------ | ---------------------------- | ---------------------------- |
-| `unit_tests`       | Fast functional unit tests   | `pytest -m unit_tests`       |
-| `validation_tests` | Exhaustive validation (slow) | `pytest -m validation_tests` |
+| Marker              | Description                             | Example Command               |
+|---------------------|-----------------------------------------|-------------------------------|
+| `unit_tests`        | Fast functional unit tests              | `pytest -m unit_tests`        |
+| `validation_tests`  | Exhaustive validation (slow)            | `pytest -m validation_tests`  |
+| `tests_all_options` | Exhaustive unit tests on Options (slow) | `pytest -m tests_all_options` |
 
----
+--- 
 
 ## 🧵 Multi-Core Execution
 
 Run tests in parallel automatically:
 
 ```bash
-pytest -n auto -m unit_tests -s
+pytest -n auto -s -m unit_tests
 ```
 
 Or specify the number of cores explicitly:
 
 ```bash
-pytest -n 4 -m unit_tests
+pytest -n 4 -s -m unit_tests
 ```
 
 ---
@@ -91,19 +93,19 @@ parallel --ungroup --jobs 8 \
 ### Drop into debugger on failure
 
 ```bash
-pytest -m validation_tests --maxfail=1 --pdb
+pytest -m validation_tests -s --maxfail=1 --pdb
 ```
 
 ### Step interactively inside test
 
 ```bash
-pytest -m validation_tests --trace
+pytest -m validation_tests -s --trace
 ```
 
 ### Show full traceback
 
 ```bash
-pytest -m validation_tests -vv --tb=long
+pytest -m validation_tests -vv -s --tb=long
 ```
 
 ---

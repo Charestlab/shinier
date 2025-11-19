@@ -1,5 +1,5 @@
 """
-Shinier: Scientific Histogram Intensity Normalization and Image Equalization in R/G/B.
+SHINIER: Spectrum, Histogram, and Intensity Normalization, Equalization, and Refinement.
 
 This package provides advanced image-processing utilities for luminance,
 histogram, and spatial frequency normalization, adapted from the original

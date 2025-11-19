@@ -489,7 +489,16 @@ def make_masks(dirpath: Path, h: int = 64, w: int = 64, n: int = 1) -> None:
         Image.fromarray(mask).save(dirpath / (f"mask_{i}.png" if n > 1 else "mask.png"))
 
 
-def prepare_images(path_img: Path) -> None:
+def prepare_images(path_img: Path) -> Dict[str, Any]:
+    """
+    Prepare images for validation tests.
+
+    Args:
+        path_img: Path to the image.
+
+    Returns:
+        Dict[str, Any]: Dictionary of image list (ImageListIO).
+    """
     out = {"buffers": {0: {0: {}, 1: {0: {}, 1: {}}}, 1: {0: {}, 1: {}}}}
     out['buffers_other'] = copy.deepcopy(out['buffers'])
     out['images'] = None

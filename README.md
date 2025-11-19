@@ -17,7 +17,7 @@
 
 ## 🎯 Overview
 
-Shinier is a modern Python implementation of SHINE (Spectrum, Histogram, and Intensity Normalization and Equalization), originally developed in MATLAB by Willenbockel et al., 2010. It provides precise control over luminance, contrast, histograms, and spectral content across large image sets for well-calibrated visual experiments.
+SHINIER is a modern Python implementation of SHINE (Spectrum, Histogram, and Intensity Normalization and Equalization), originally developed in MATLAB by Willenbockel et al., 2010. It provides precise control over luminance, contrast, histograms, and spectral content across large image sets for well-calibrated visual experiments.
 
 ### Key Features and Improvements
 
@@ -74,7 +74,7 @@ Call the following bash command to quickly start using the interactive CLI.
 shinier --show_results --image_index=1
 ```
 <p>
-  <img src="./assets/DEMO_INTERACTIVE_CLI.gif" width="1000" alt="CLI demo">
+  <img src="https://raw.githubusercontent.com/Charestlab/shinier/main/assets/DEMO_INTERACTIVE_CLI.gif" width="1000" alt="CLI demo">
 </p>
 
 ### 🧩 Example in Python
@@ -106,12 +106,12 @@ Change the mode number (e.g. `opt = Options(mode=3)`) to change image processing
 
 Below is an example of results obtained using mode 5 with joint histogram equalization and spatial frequency normalization.
 <p>
-  <img src="./assets/demo_cli_mode5.png" width="600" alt="CLI demo">
+  <img src="https://raw.githubusercontent.com/Charestlab/shinier/main/assets/demo_cli_mode5.png" width="600" alt="CLI demo">
 </p>
 
 ---
 ## 🏛️ **Technical information**
-See the accompanying the paper: [The SHINIER the Better: An Adaptation of the SHINE Toolbox on Python](documentation/papers/SHINIER/paper.md)
+See the accompanying the paper: [The SHINIER the Better: An Adaptation of the SHINE Toolbox on Python](documentation/papers/SHINIER/paper/paper.md)
 
 And documentation:
 1. [Package Overview](documentation/documentation.md#overview)
@@ -150,5 +150,5 @@ See [LICENSE](documentation/license.md) for more information.
 ---
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-  <em>Version 0.1.3 - Complete technical documentation</em>
+  <em>Version 0.1.6 - Complete technical documentation</em>
 </p>
