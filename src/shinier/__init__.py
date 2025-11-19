@@ -16,7 +16,7 @@ References:
 
 # Metadata
 __author__ = "Nicolas Dupuis-Roy"
-__version__ = "0.1.4"
+__version__ = "0.1.7"
 __email__ = "nicolas.dupuis.roy@umontreal.ca"
 
 # For direct importation
