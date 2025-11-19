@@ -23,18 +23,17 @@ from traceback import format_exc
 import itertools
 import os
 import shutil
-from math import prod
+import random
 from pathlib import Path
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, get_origin, get_args, Literal
 import numpy as np
 import pytest
-from PIL import Image
 from tqdm.auto import tqdm
 
 from shinier import ImageDataset, Options, utils, ImageListIO, ImageProcessor
 from tests import utils as utils_test
-from shinier.color.Converter import REC_STANDARD, ColorTreatment
+from shinier.color.Converter import REC_STANDARD
 REC_STANDARD = [r for r in get_args(REC_STANDARD)]
 pytestmark = pytest.mark.validation_tests
 
@@ -48,9 +47,10 @@ SHARDS = int(os.getenv("SHARDS", "1"))
 SHARD_INDEX = int(os.getenv("SHARD_INDEX", "0"))
 SHOW_PROGRESS = os.getenv("SHOW_PROGRESS", "1") == "1"
 PERCENT_SAMPLED = float(os.getenv("PERCENT_SAMPLED", "1"))
+
 # SHARD_INDEX = 4
 # SHARDS = 8
-# START_AT = 2260
+# START_AT = 1180676
 
 
 def get_possible_values(field: str) -> Any:
@@ -80,9 +80,6 @@ def get_possible_values(field: str) -> Any:
 
 
 def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
-    # ----- reset combo registry -----
-    utils_test.reset_hash_registry(RESTART)  # if True, will redo all tests already completed
-
     # ----- dataset & targets -----
     src_images_path = utils_test.get_small_imgs_path(utils_test.IMAGE_PATH)
     images_buffers = utils_test.prepare_images(utils_test.IMAGE_PATH)
@@ -111,10 +108,20 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
     all_fields = list(choices.keys())
     total_combo = np.prod([len(v) for v in choices.values() if hasattr(v, '__len__') and not isinstance(v, str)])  # Some of which are not valid and duplicated
 
+    # Initialize the db
+    if RESTART:
+        utils_test.initialize_db(total_number_of_tests=total_combo)
+        if START_AT:
+            utils_test.mark_hash_range_done(start=0, end=START_AT)
+
     pbar = None
     if SHOW_PROGRESS and tqdm is not None:
         per_shard = total_combo // SHARDS + (1 if SHARD_INDEX < (total_combo % SHARDS) else 0)
         pbar = tqdm(total=total_combo, initial=START_AT, desc=f"Shard {SHARD_INDEX+1}/{SHARDS}", ncols=0)
+
+    # Set PNRG seed for test sampling
+    rng = random.Random()  # independent state
+    rng.seed(int(f'98234987234{SHARD_INDEX}'))
 
     # Reset the iterator for the real loop
     cnt = -1
@@ -122,6 +129,7 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
         if pbar is not None:
             pbar.update(1)
 
+        combo_hash = str(i)
         kwargs = dict(zip(all_fields, combo))
 
         # if `i` within this SHARD_INDEX, proceed else next `i`
@@ -134,20 +142,28 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
             continue
 
         # if combo never tested, proceed else next `i`
-        combo_hash = str(i)
         if utils_test.is_already_done(combo_hash):
             continue
 
         # if not randomly selected, proceed else next `i`
-        is_sampled = np.random.rand() >= (1 - PERCENT_SAMPLED)
+        is_sampled = rng.random() >= (1 - PERCENT_SAMPLED)
         if not is_sampled:
+            # Register that combo as invalid
+            utils_test.mark_hash_status(combo_hash, status='not_sampled')
             continue
 
         # Create target hist or spectrum if requested
+        if (kwargs['mode'] == 9 and kwargs['dithering'] == 0) or (kwargs['mode'] == 9 and kwargs['legacy_mode']):
+            # Register that combo as invalid
+            utils_test.mark_hash_status(combo_hash, status='invalid_option_combination')
+            continue
+
         try:
             opts = Options(**kwargs)
-        except:
-            utils_test.register_hash(combo_hash, status="invalid")
+        except Exception as e:
+            # Register that combo as invalid and set error as message from exception
+            error_msg = get_error_msg(e)
+            utils_test.mark_hash_status(combo_hash, status='invalid', error=error_msg)
             continue
 
         ag = True if kwargs['legacy_mode'] else kwargs['as_gray']
@@ -181,19 +197,16 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
         try:
             opts.output_folder = out_dir
             ag2, ct, rs = int(opts.as_gray), int(opts.linear_luminance), opts.rec_standard
-        except:
+        except Exception as e:
             if out_dir and out_dir.exists():
                 shutil.rmtree(out_dir, ignore_errors=True)
-
-            # Register that combo as invalide
-            utils_test.register_hash(combo_hash, status="invalide")
+            # Register that combo as invalid and set error as message from exception
+            error_msg = get_error_msg(e)
+            utils_test.mark_hash_status(combo_hash, status='invalid', error=error_msg)
             continue
 
         rand_selected_paths = None
         try:
-            # known impossible
-            if opts.mode == 9 and opts.dithering == 0:
-                continue
 
             # Options / pipeline
             rand_selected_images = utils_test.select_n_imgs(images_buffers['images'], n=2, seed=seed_iter)  # sRGB
@@ -288,8 +301,8 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
             # Cleanup safely
             if out_dir and out_dir.exists():
                 shutil.rmtree(out_dir, ignore_errors=True)
-            # Register that combo as valide
-            utils_test.register_hash(combo_hash, status="done")
+            # Register that combo as done
+            utils_test.mark_hash_status(combo_hash, status='done')
 
     if pbar is not None:
         pbar.close()
@@ -317,3 +330,14 @@ def _dump_and_fail(rec, opts_kwargs, seed, selected_paths, tmp_root):
         f"→ Log:\n{utils_test.strip_ansi(str(rec.get('log_result', '')))}\n"
         f"→ Dumped context: {dump_path}\n"
     )
+
+
+def get_error_msg(e):
+    exc_type = e.__class__.__name__
+    msg = str(e)
+    if msg:
+        error_msg = f"[{exc_type}]: {msg}"
+    else:
+        error_msg = f"[{exc_type}]"
+
+    return error_msg
