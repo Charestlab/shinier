@@ -39,7 +39,7 @@ By participating, you agree to uphold a standard of professional, inclusive, and
 
 ## Development Setup
 
-> **Python:** 3.9+  
+> **Python:** >=3.9, <3.13  
 > **OS:** macOS / Linux / Windows  
 > **Optional:** C/C++ toolchain for the Cython-compiled `_cconvolve` extension (speeds up convolution)
 
@@ -69,6 +69,15 @@ pytest -m unit_tests
 ```
 
 ## Coding Standards
+### Git rules
+- No one has push permissions on `main`. 
+- PR requires 2 approvals + all tests to pass before merging. 
+- Official working developpement branch is dev_X, where X is the subversion of the last Pypi release (e.g. if release is 0.1.7, then branch is dev_1.7). 
+
+### To do before a PR
+- Merge main on dev_X branch (not the other way around).
+- Make sure all status checks are green.
+- Initiate PR
 
 ### Language & typing
 - Use **type hints everywhere** (functions, methods, Pydantic models, tests).
