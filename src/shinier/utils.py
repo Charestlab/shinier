@@ -355,9 +355,7 @@ def imhist_plot(
         gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3.5, 1.4], hspace=0.12)
         ax_img = fig.add_subplot(gs[0])
         ax_hist = fig.add_subplot(gs[1])
-
-        ax_img.imshow(arr, interpolation='nearest')
-        ax_img.axis('off')
+        _ = imshow(arr, ax=ax_img)
         if title:
             ax_img.set_title(title, fontsize=11, fontname=fontname)
 
@@ -499,6 +497,31 @@ def rotational_avg(spectrum: np.ndarray, radius: np.ndarray) -> np.ndarray:
 
     sums = np.bincount(r, weights=weights)
     return sums / counts
+
+
+def imshow(image: np.ndarray, ax: Optional[plt.Axes] = None) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Show an image with matplotlib axes.
+    Args:
+        image: An image
+        ax: Optional[plt.Axes], default = None. An axe to display the image on.
+
+    Returns:
+
+    """
+    if ax is None:
+        fig, ax = plt.subplots()
+    else:
+        fig = ax.figure
+
+    image = im3D(image)
+    if image.shape[2] == 1:
+        image = np.repeat(image, 3, axis=-1)
+
+    ax.imshow(image)
+    ax.axis('off')
+
+    return fig, ax
 
 
 def sf_profile(
