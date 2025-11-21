@@ -298,7 +298,7 @@ def imhist_plot(
     descriptives: bool = False,
     ax: Optional[plt.Axes] = None,
     show_normalized_rmse: bool = False,
-) -> Tuple[plt.Figure, plt.Axes]:
+) -> Tuple[plt.Figure, Tuple[Any, Any, Any]]:
 
     """Displays an image with its histogram and optional descriptive statistics.
 
@@ -316,8 +316,6 @@ def imhist_plot(
         bins (int, optional): Number of histogram bins in [0, 255]. Defaults to 256.
         figsize (tuple, optional): Matplotlib figure size. Defaults to (8, 6).
         dpi (int, optional): Matplotlib figure DPI. Defaults to 100.
-        normalize (bool, optional): If True, plots density (area = 1). If False, plots
-            counts. Defaults to False.
         title (str | None, optional): Optional title for the image. Defaults to None.
         target_hist (np.ndarray | None, optional): If provided, overlays a
             target histogram. Defaults to None.
@@ -325,6 +323,7 @@ def imhist_plot(
             to image for computing histogram. Defaults to None.
         descriptives (bool, optional): If True, overlays mean (μ) and ±1σ on the
             histogram (per-channel for RGB). Defaults to False.
+        ax (plt.Axes, optional): Axes on which to display the image. Defaults to None.
         show_normalized_rmse (bool, False): If True, shows normalized RMSE.
 
     Returns:
@@ -333,12 +332,6 @@ def imhist_plot(
             (ax_img, ax_bar, ax_hist): Tuple of matplotlib.axes.Axes for the image,
             gradient bar, and histogram, respectively.
     """
-
-    if plt is None:
-        raise RuntimeError(
-            "Matplotlib is not installed. "
-            "Install with: pip install shinier[viz]"
-        )
 
     # --- normalize input image to uint8; drop alpha if present ---
     arr = im3D(img)
@@ -355,6 +348,8 @@ def imhist_plot(
 
     # --- figure & axes ---
     fontname = 'Arial'
+    ax_img = None
+    ax_hist = None
     if ax is None:
         fig = plt.figure(figsize=figsize, dpi=dpi, constrained_layout=True)
         gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3.5, 1.4], hspace=0.12)
@@ -370,6 +365,7 @@ def imhist_plot(
         fig.canvas.draw()
         img_pos = ax_img.get_position()
     else:
+        fig = ax.figure
         ax_hist = ax
 
     hist_pos = ax_hist.get_position()
@@ -456,17 +452,13 @@ def imhist_plot(
 
     # Ensure layout is updated
     if ax is None:
-        fig.tight_layout()
         fig.show()
 
     # Enforce font for any ticks that might be enabled later
     for label in ax_hist.get_xticklabels() + ax_hist.get_yticklabels():
         label.set_fontname(fontname)
 
-    if ax is None:
-        return fig, (ax_img, ax_bar, ax_hist)
-    else:
-        return ax_hist, ax_bar
+    return fig, (ax_img, ax_bar, ax_hist)
 
 
 def freq_axis(n: int) -> np.ndarray:
@@ -571,8 +563,8 @@ def sf_profile(
 
 def sf_plot(
         image: np.ndarray,
-        sf_p: Optional[np.ndarray],
-        target_sf: Optional[np.ndarray],
+        sf_p: Optional[np.ndarray] = None,
+        target_sf: Optional[np.ndarray] = None,
         ax: Optional[plt.axis] = None,
         show_normalized_rmse: bool = False,
 ) -> Union[plt.Figure, plt.Axes]:
@@ -582,7 +574,6 @@ def sf_plot(
     Args:
         image : np.ndarray
             Image array of shape (H, W) or (H, W, 3). Can be uint8 or float.
-            RGB is converted to luminance (ITU-R BT.601).
         sf_p : np.ndarray, default None
             If not None, uses sf_p (spatial frequency profile) instead of generating a new spectrum.
         target_sf : np.ndarray, default None
@@ -596,11 +587,7 @@ def sf_plot(
         fig, ax : plt.Figure, plt.Axes
     """
     from shinier.color.Converter import rgb2gray
-    if plt is None:
-        raise RuntimeError(
-            "Matplotlib is not installed. "
-            "Install with: pip install shinier[viz]"
-        )
+
     image = im3D(image)
     xs, ys, channels = image.shape
     R = int(np.floor(min(xs, ys) / 2.0))
@@ -613,32 +600,28 @@ def sf_plot(
 
     if ax is None:
         fig = plt.figure()
+        ax = fig.axes[0]
     else:
-        fig = ax
+        fig = ax.figure
 
     colors = ['red', 'green', 'blue'] if is_rgb else ['black']
     labels = ['R', 'G', 'B'] if is_rgb else ['Image']
     for ch in range(channels):
-        fig.loglog(radii[:, ch], rot_avg[:, ch], color=colors[ch], label=labels[ch])
+        ax.loglog(radii[:, ch], rot_avg[:, ch], color=colors[ch], label=labels[ch])
         # ----------------- optional TARGET histogram overlay -----------------
         if target_sf is not None:
-            fig.loglog(radii[:, ch], target_sf[:, ch], ls='--', lw=1, color=colors[ch], label=f'Target {labels[ch]}')
+            ax.loglog(radii[:, ch], target_sf[:, ch], ls='--', lw=1, color=colors[ch], label=f'Target {labels[ch]}')
 
     # --- Normalized RMSE computation and display ---
     if show_normalized_rmse:
         if target_sf is not None:
             nrmse = normalized_rmse(target_sf, rot_avg, mode="actual range")
             rmse_text = "NRMSE = {:1.2e}".format(nrmse)
-            fig.text(0.5, 0.98, rmse_text, transform=fig.transAxes, ha="center", va="top", fontsize=9)
+            ax.text(0.5, 0.98, rmse_text, transform=ax.transAxes, ha="center", va="top", fontsize=9)
 
-    if ax is None:
-        fig.xlabel('Spatial frequency (cycles/image)')
-        fig.ylabel('Energy')
-        fig.tight_layout()
-    else:
-        fig.legend(frameon = False)
-        fig.set_xlabel('Spatial frequency (cycles/image)')
-        fig.set_ylabel('Energy')
+    ax.legend(frameon=False)
+    ax.set_xlabel('Spatial frequency (cycles/image)')
+    ax.set_ylabel('Energy')
 
     return fig
 
@@ -684,6 +667,8 @@ def spectrum_plot(
         fig, ax = plt.subplots()
         ax.set_xscale("linear")
         ax.set_yscale("linear")
+    else:
+        fig = ax.figure
 
     implot = ax.imshow(
         spec, cmap=cmap,
@@ -721,7 +706,7 @@ def im_power_spectrum_plot(im: np.ndarray, with_colorbar: bool = True):
         im : np.ndarray
             Image array of shape (H, W) or (H, W, 3). Can be uint8 or float.
             RGB is converted to luminance (ITU-R BT.601).
-        with_colorbarlot : bool, default True
+        with_colorbar : bool, default True
             If True, show the colorbar on the right side.
 
     Returns:
@@ -1510,11 +1495,6 @@ def separate(mask: np.ndarray, background: Union[int, float] = 0, background_ope
             define the background in the original image
 
     """
-    if plt is None:
-        raise RuntimeError(
-            "Matplotlib is not installed. "
-            "Install with: pip install shinier[viz]"
-        )
 
     mask = im3D(mask)
     mask = mask.astype(np.float64)/255 if np.max(mask) > 1 else mask
@@ -2014,11 +1994,6 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
     Returns:
         matplotlib.figure.Figure: Composite figure summarizing the image transformations.
     """
-    if plt is None:
-        raise RuntimeError(
-            "Matplotlib is not installed. "
-            "Install with: pip install shinier[viz]"
-        )
 
     import os, matplotlib
     if os.environ.get("DISPLAY", "") == "":

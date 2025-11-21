@@ -465,9 +465,10 @@ def imhist_plot(
     binary_mask: Optional[np.ndarray] = None,
     descriptives: bool = False,
     ax: Optional[plt.Axes] = None,
-) -> Tuple[plt.Figure, plt.Axes]:
-    """Image histogram plotting"""
-    
+    show_normalized_rmse: bool = False,
+) -> Tuple[plt.Figure, Tuple[Any, Any, Any]]:
+    """Displays an image with its histogram and optional descriptive statistics."""
+
 def spectrum_plot(
         spectrum: np.ndarray,
         cmap: str = "gray",
