@@ -600,7 +600,7 @@ def sf_plot(
 
     if ax is None:
         fig = plt.figure()
-        ax = fig.axes[0]
+        ax = fig.gca()
     else:
         fig = ax.figure
 
