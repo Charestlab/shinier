@@ -206,8 +206,8 @@ class MatlabOperators:
     @staticmethod
     def rgb2gray(image):
         """Replicates MATLAB's rgb2gray function (ITU-R rec601)."""
-        if image.ndim == 3:
-            return rgb2gray(image=image, conversion_type='rec601')
+        if image.ndim >= 3:
+            return rgb2gray(image=image[..., :3], conversion_type='rec601', matlab_601=True)
         else:
             return image
 

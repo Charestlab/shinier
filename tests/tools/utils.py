@@ -522,14 +522,9 @@ def prepare_images(path_img: Path) -> Dict[str, Any]:
 
                 # Convert them into xyY color space
                 rec_stardard = rec_standards[rs - 1]
-                output = ColorTreatment.forward_color_treatment(
-                    rec_standard=rec_stardard,
-                    input_images=buffers,
-                    output_images=buffers,
-                    output_other=buffers_other,
-                    linear_luminance=bool(ct),
-                    as_gray=ag,
-                )
+                output = ColorTreatment.forward_color_treatment(rec_standard=rec_stardard, input_images=buffers,
+                                                                output_images=buffers, linear_luminance=bool(ct),
+                                                                as_gray=ag, output_other=buffers_other)
                 _buffers, _buffers_other = output if isinstance(output, tuple) else (output, None)
                 out["buffers"][ag][ct][rs] = _buffers
                 out["buffers_other"][ag][ct][rs] = _buffers_other

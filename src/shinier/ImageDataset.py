@@ -1,9 +1,8 @@
 from __future__ import annotations
 from typing import Optional, List, Literal, Union, Any
-from datetime import datetime
 import numpy as np
 from pathlib import Path
-from pydantic import Field, model_validator, ConfigDict
+from pydantic import Field, ConfigDict
 
 # Local imports
 from shinier import Options
@@ -172,8 +171,8 @@ class ImageDataset(InformativeBaseModel):
         - At least one image to process
         - Number of masks should be either 1 or equal to the number of images.
         """
-        if self.n_images is None or self.n_images <= 1:
-            raise ValueError(f"Invalid dataset: {self.n_images} images found. At least two are required.")
+        if self.n_images is None or self.n_images < 1:
+            raise ValueError(f"Invalid dataset: {self.n_images} images found. At least one images is required.")
 
         if self.options.whole_image == 3 and self.options.masks_folder:
             if self.n_masks not in (1, self.n_images):

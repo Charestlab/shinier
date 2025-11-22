@@ -22,7 +22,7 @@ Validation tests: /tests/validation_tests/Converter_validation_tests.py
 from __future__ import annotations
 
 import numpy as np
-from typing import Literal, Union, Optional, TYPE_CHECKING
+from typing import Literal, Union, Optional, TYPE_CHECKING, Tuple
 from pydantic import Field, ConfigDict, model_validator
 from PIL import Image
 from shinier.utils import im3D
@@ -48,10 +48,10 @@ COLOR_STANDARDS = {
 REC_STANDARD = Literal["rec601", "rec709", "rec2020"]
 RGB_STANDARD = Literal["equal", "rec601", "rec709", "rec2020"]
 RGB2GRAY_WEIGHTS = {
-    'equal': [1 / 3, 1 / 3, 1 / 3],
-    'rec601': [0.299, 0.587, 0.114],
-    'rec709': [0.2125, 0.7154, 0.0721],
-    'rec2020': [0.2627, 0.6780, 0.0593],
+    'equal': [1/3, 1/3, 1/3],
+    'rec601': M_RGB2XYZ_601[1, :],
+    'rec709': M_RGB2XYZ_709[1, :],
+    'rec2020': M_RGB2XYZ_2020[1, :],
 }
 for k, v in RGB2GRAY_WEIGHTS.items():
     RGB2GRAY_WEIGHTS[k] /= np.sum(v)
@@ -205,7 +205,9 @@ class ColorTreatment(ColorConverter):
             linear_luminance: bool,
             as_gray: bool,
             output_other: Optional[ImageListIO] = None,
-            conversion_type: Literal['sRGB_to_xyY', 'sRGB_to_lab'] = 'sRGB_to_xyY') -> Tuple[ImageListIO, Optional[ImageListIO]]:
+            conversion_type: Literal['sRGB_to_xyY', 'sRGB_to_lab'] = 'sRGB_to_xyY',
+            legacy_mode: bool = False,
+) -> Tuple[ImageListIO, Optional[ImageListIO]]:
         """
         Processes a list of images with an optional color treatment conversion or transformation.
 
@@ -226,6 +228,7 @@ class ColorTreatment(ColorConverter):
                 image (True) or a color image (False).
             conversion_type (Literal['sRGB_to_xyY', 'sRGB_to_lab']): Specifies the type of color space
                 conversion to apply. Defaults to 'sRGB_to_xyY'.
+            legacy_mode (bool): If True, uses matlab rgb2gray converter.
 
         Returns:
             ImageListType: Processed set of images after the selected transformation or treatment. If
@@ -241,9 +244,9 @@ class ColorTreatment(ColorConverter):
         converter = ColorConverter(standard=rec_standard)
 
         # Promote grayscale (H, W) → (H, W, 3)
-        if input_images.n_dims != 3:
+        if input_images.n_dims < 3:
             for idx, image in enumerate(input_images):
-                output_images[idx] = np.repeat(image[..., None], 3, axis=-1)
+                output_images[idx] = gray2rgb(image)
 
         # --- CASE 1: No color treatment ----------------------------------------
         if linear_luminance:
@@ -251,7 +254,7 @@ class ColorTreatment(ColorConverter):
             if as_gray:
                 # Convert to grayscale using simple mean
                 for idx, image in enumerate(input_images):
-                    output_images[idx] = rgb2gray(image, conversion_type="equal")
+                    output_images[idx] = rgb2gray(image, conversion_type="equal", matlab_601=legacy_mode)
             else:
                 for idx, image in enumerate(input_images):
                     if np.issubdtype(image.dtype, np.uint8):
@@ -374,7 +377,7 @@ class ColorTreatment(ColorConverter):
         return output_images
 
 
-def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: RGB_STANDARD = 'equal') -> np.ndarray:
+def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: RGB_STANDARD = 'equal', matlab_601: bool = False) -> np.ndarray:
     """
     Convert an R'G'B' image to grayscale (luma, Y′) using ITU luma coefficients.
 
@@ -388,6 +391,7 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: RGB_STANDAR
               - "rec601" → Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′
               - "rec709" → Y′ = 0.2125 R′ + 0.7154 G′ + 0.0721 B′
               - "rec2020" → Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′
+        matlab_601 (bool, optional): If true, uses weights for Matlab's rgb2gray Rec.ITU-R BT.601-7 version.
 
     Returns:
         gray : np.ndarray
@@ -408,7 +412,12 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: RGB_STANDAR
         raise ValueError('Conversion type must be either rec709, rec601, rec2020 or equal')
 
     if image.ndim > 2:
-        return np.dot(image[..., :3].astype(np.float64), RGB2GRAY_WEIGHTS[conversion_type])
+        if conversion_type == "equal":
+            return np.mean(image[..., :3], axis=-1)
+        else:
+            weights = np.array([0.298936021293775, 0.587043074451121, 0.114020904255103]) if conversion_type == "rec601" and matlab_601 else RGB2GRAY_WEIGHTS[conversion_type]
+            weights /= np.sum(weights)
+            return image[..., 0] * weights[0] + image[..., 1] * weights[1] + image[..., 2] * weights[2]
     elif image.ndim == 2:
         return image
     else:

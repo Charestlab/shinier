@@ -378,14 +378,15 @@ class ImageProcessor(InformativeBaseModel):
 
         # Apply relevant color treatment
         buffer_other = self.dataset.buffer_other if not self.options.linear_luminance else None
-        self.dataset.buffer, buffer_other = ColorTreatment.forward_color_treatment(
-            rec_standard=self._rec_standard,
-            input_images=self.dataset.buffer,
-            output_images=self.dataset.buffer,
-            output_other=buffer_other,
-            linear_luminance=self.options.linear_luminance,
-            as_gray=self.options.as_gray,
-            conversion_type='sRGB_to_xyY')
+        self.dataset.buffer, buffer_other = ColorTreatment.forward_color_treatment(rec_standard=self._rec_standard,
+                                                                                   input_images=self.dataset.buffer,
+                                                                                   output_images=self.dataset.buffer,
+                                                                                   linear_luminance=self.options.linear_luminance,
+                                                                                   as_gray=self.options.as_gray,
+                                                                                   output_other=buffer_other,
+                                                                                   conversion_type='sRGB_to_xyY',
+                                                                                   legacy_mode=self.options.legacy_mode)
+
         if buffer_other is not None:
             self.dataset.buffer_other = buffer_other
 
