@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 import numpy as np
-from typing import Any, Optional, Tuple, Union, List, Iterator, Literal, ClassVar, Annotated, get_args
+from typing import Any, Optional, Tuple, Union, List, Iterator, Literal, ClassVar, Annotated, get_args, Dict
 from PIL import Image
 import atexit, shutil, tempfile, weakref, os, time, sys, copy
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, BeforeValidator
@@ -502,20 +502,44 @@ class ImageListIO(InformativeBaseModel):
             #   2) else reuse current store name
             #   3) else synthesize
             base_name = (
-                    (self.src_paths[idx].name if self.src_paths[idx] is not None else None)
-                    or (self.store_paths[idx].name if idx < len(self.store_paths) else None)
-                    or f"image_{idx}.npy"
+                (self.src_paths[idx].name if self.src_paths[idx] is not None else None)
+                or (self.store_paths[idx].name if idx < len(self.store_paths) else None)
+                or f"image_{idx}.npy"
             )
             # base_name = self.store_paths[idx].name
             image_path = save_dir / base_name
             file_format = self.get_file_format(image_path)
-            self.store_paths[idx] = image_path # Update file path
+            self.store_paths[idx] = image_path  # Update file path
             try:
                 if file_format == '.npy':
                     np.save(image_path, image.squeeze())
                 else:
-                    image = Image.fromarray(image.squeeze())
-                    image.save(image_path, format=file_format)
+                    arr = np.asarray(image).squeeze()
+                    pil_image = Image.fromarray(arr)
+
+                    # Choose format-specific, as-lossless-as-possible parameters.
+                    save_kwargs = {}
+                    if file_format == "JPEG":
+                        # JPEG is inherently lossy. These settings minimise loss but cannot make it truly lossless.
+                        # If you need strictly histogram-preserving behaviour, avoid JPEG and use PNG/TIFF/NPY instead.
+                        save_kwargs.update(
+                            {
+                                "quality": 100,      # max quality
+                                "subsampling": 0,    # 4:4:4 chroma
+                                "optimize": False,   # deterministic, no extra heuristics
+                            }
+                        )
+                    elif file_format == "PNG":
+                        # PNG is lossless; compression only affects size, not pixel values.
+                        pass
+                    elif file_format == "TIFF":
+                        # Use a lossless TIFF compression scheme.
+                        # "raw" = no compression; "tiff_lzw" is also lossless smaller files is required.
+                        save_kwargs.update({"compression": "raw"})
+                    elif file_format == "BMP":
+                        # BMP is uncompressed by design; nothing to add.
+                        pass
+                    pil_image.save(image_path, format=file_format, **save_kwargs)
             except (IOError, TypeError) as e:
                 raise IOError(f"Failed to save image at index {idx} to {image_path}: {e}")
         except AttributeError as e:
