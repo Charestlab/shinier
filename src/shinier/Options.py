@@ -113,7 +113,7 @@ class Options(InformativeBaseModel):
             3 = Rec.2020 (UHDTV, wide-gamut HDR)
 
     --------------------------------------------------Dithering / Memory------------------------------------------------------
-        dithering (Literal[0-2]): Dithering applied before final conversion to uint8 (default = 1).
+        dithering (Literal[0-2]): Dithering applied before final conversion to uint8 (default = 0).
             0 = No dithering
             1 = Noisy bit dithering (Allard R. & Faubert J., 2008)
             2 = Floyd-Steinberg dithering (Floyd R.W. & Steinberg L., 1976)
@@ -216,7 +216,7 @@ class Options(InformativeBaseModel):
     rec_standard: Literal[1, 2, 3] = 2
 
     # --- Dithering / Memory ---
-    dithering: Literal[0, 1, 2] = 1
+    dithering: Literal[0, 1, 2] = 0
     conserve_memory: bool = True
 
     # --- Luminance ---

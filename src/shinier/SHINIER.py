@@ -163,6 +163,7 @@ def prompt(
 
     return val
 
+
 def options_display(opts):
     """Display the options after images are processed.
 
@@ -287,7 +288,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
         # Dithering
         dith_choices = ["No dithering", "Noisy-bit dithering", "Floyd–Steinberg dithering"]
         if mode != 9:
-            dith = prompt("Apply dithering before final uint8 cast?", default=2,
+            dith = prompt("Apply dithering before final uint8 cast?", default=1,
                           kind="choice", choices=dith_choices)
             opts.dithering = dith - 1
         else:

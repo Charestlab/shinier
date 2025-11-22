@@ -23,10 +23,8 @@ from __future__ import annotations
 
 import numpy as np
 from typing import Literal, Union, Optional, TYPE_CHECKING
-from pathlib import Path
 from pydantic import Field, ConfigDict, model_validator
 from PIL import Image
-import re
 from shinier.utils import im3D
 from shinier.base import InformativeBaseModel
 from shinier import REPO_ROOT
@@ -237,8 +235,8 @@ class ColorTreatment(ColorConverter):
         Raises:
             ValueError: If `linear_luminance` is False and `output_other` is not provided.
         """
-        if not linear_luminance and as_gray == 0 and output_other is None:
-            raise ValueError("output_other cannot be None when linear_luminance == 1 and as_gray is false")
+        if not linear_luminance and not as_gray and output_other is None:
+            raise ValueError("output_other cannot be None when linear_luminance is False and as_gray is false")
 
         converter = ColorConverter(standard=rec_standard)
 
@@ -250,7 +248,7 @@ class ColorTreatment(ColorConverter):
         # --- CASE 1: No color treatment ----------------------------------------
         if linear_luminance:
             # Linear-per-channel mode (no perceptual conversion)
-            if as_gray == 1:
+            if as_gray:
                 # Convert to grayscale using simple mean
                 for idx, image in enumerate(input_images):
                     output_images[idx] = rgb2gray(image, conversion_type="equal")
@@ -343,7 +341,7 @@ class ColorTreatment(ColorConverter):
             return input_images
 
         # --- CASE 2: Color treatment branch -----------------------------------
-        if not linear_luminance and as_gray == 0 and (input_other is None or input_other.n_channels != 2):
+        if not linear_luminance and not as_gray and (input_other is None or input_other.n_channels != 2):
             raise ValueError("input_other should be (H, W, 2) matrices when linear_luminance == 1 and as_gray is False")
 
         for idx, Y in enumerate(input_images):
@@ -351,7 +349,7 @@ class ColorTreatment(ColorConverter):
             # Safety: make sure Y is 2D float64
             Y = Y[..., 0]/255 if Y.ndim == 3 else Y/255
 
-            if as_gray == 0:
+            if not as_gray:
                 # Retrieve stored xy if available
                 other = input_other[idx]
 
