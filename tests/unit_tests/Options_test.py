@@ -9,6 +9,8 @@ Covers:
 from tqdm.auto import tqdm
 import itertools
 import pytest
+import os
+import random
 import numpy as np
 from pathlib import Path
 from pydantic import ValidationError
@@ -17,6 +19,12 @@ from tests.validation_tests.ImageProcessor_validation_test import get_possible_v
 from tests.tools import utils as utils_test
 # pytestmark = pytest.mark.unit_tests
 
+# -------------------- env --------------------
+START_AT = int(os.getenv("START_AT", "0"))
+SHARDS = int(os.getenv("SHARDS", "1"))
+SHARD_INDEX = int(os.getenv("SHARD_INDEX", "0"))
+SHOW_PROGRESS = os.getenv("SHOW_PROGRESS", "1") == "1"
+PERCENT_SAMPLED = float(os.getenv("PERCENT_SAMPLED", "1"))
 
 # =============================================================================
 # FIXTURES
@@ -265,13 +273,36 @@ def test_all_combo(tmp_dirs):
     choices['hist_iterations'] = [3]
     choices['verbose'] = [-1]
     total_combo = np.prod([len(v) for v in choices.values() if hasattr(v, '__len__') and not isinstance(v, str)])
-    start_at = 0
-    pbar = tqdm(total=total_combo, initial=start_at)
+
+    pbar = None
+    if SHOW_PROGRESS and tqdm is not None:
+        per_shard = total_combo // SHARDS + (1 if SHARD_INDEX < (total_combo % SHARDS) else 0)
+        pbar = tqdm(total=total_combo, initial=START_AT, desc=f"Shard {SHARD_INDEX+1}/{SHARDS}", ncols=0)
+
+    # Set PNRG seed for test sampling
+    rng = random.Random()  # independent state
+    rng.seed(int(f'98234987234{SHARD_INDEX}'))
+
     keys = list(choices)
     for i, combo in enumerate(itertools.product(*(choices[k] for k in keys))):
-        if i > start_at:
-            params = dict(zip(keys, combo))
-            if params['mode'] == 9 and params['dithering'] == 0:
-                params['dithering'] = 1
-            Options(**params)
+        if pbar is not None:
             pbar.update(1)
+
+        # if `i` within this SHARD_INDEX, proceed else next `i`
+        if i % SHARDS != SHARD_INDEX:
+            continue
+
+        # if `i` >= START_ITER, proceed else next `i`
+        if i < START_AT:
+            continue
+
+        # if not randomly selected, proceed else next `i`
+        is_sampled = rng.random() >= (1 - PERCENT_SAMPLED)
+        if not is_sampled:
+            continue
+
+        params = dict(zip(keys, combo))
+        if params['mode'] == 9 and params['dithering'] == 0:
+            params['dithering'] = 1
+        Options(**params)
+        pbar.update(1)

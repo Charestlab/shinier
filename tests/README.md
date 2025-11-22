@@ -34,11 +34,11 @@ All test files must either:
 
 Use markers to select subsets of tests:
 
-| Marker              | Description                             | Example Command               |
-|---------------------|-----------------------------------------|-------------------------------|
-| `unit_tests`        | Fast functional unit tests              | `pytest -m unit_tests`        |
-| `validation_tests`  | Exhaustive validation (slow)            | `pytest -m validation_tests`  |
-| `tests_all_options` | Exhaustive unit tests on Options (slow) | `pytest -m tests_all_options` |
+| Marker             | Description                             | Example Command               |
+|--------------------|-----------------------------------------|-------------------------------|
+| `unit_tests`       | Fast functional unit tests              | `pytest -m unit_tests`        |
+| `validation_tests` | Exhaustive validation (slow)            | `pytest -m validation_tests`  |
+| `test_all_options` | Exhaustive unit tests on Options (slow) | `pytest -m tests_all_options` |
 
 --- 
 

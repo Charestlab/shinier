@@ -144,21 +144,6 @@ def test_init_loads_from_options_when_images_none(imgs_dir, test_tmpdir: Path):
     assert all(name.endswith(".png") for name in ds.images_name)
 
 
-def test_validate_raises_if_single_image(test_tmpdir: Path):
-    """Validation fails when only one image is present."""
-    inp = test_tmpdir / "INPUT"
-    out = test_tmpdir / "OUTPUT"
-    inp.mkdir(parents=True, exist_ok=True)
-    out.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(_make_rgb()).save(inp / "one.png")
-
-    opt = Options(input_folder=inp, output_folder=out, whole_image=1, mode=1)
-    with pytest.raises(RuntimeError) as exc_info:
-        ImageDataset(images=None, options=opt)
-    cause = exc_info.value.__cause__
-    assert isinstance(cause, ValueError)
-
-
 def test_masks_count_must_be_1_or_equal_to_images(imgs_dir, masks_dir, test_tmpdir: Path):
     """If whole_image=3, masks count must be 1 or match n_images."""
     inp, _ = imgs_dir

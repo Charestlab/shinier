@@ -28,7 +28,6 @@ from . import _HAS_CYTHON
 if TYPE_CHECKING:
     from .ImageProcessor import ImageProcessor
     from .ImageListIO import ImageListIO
-    from shinier.color.Converter import rgb2gray
 
 if _HAS_CYTHON:
     from . import _cconvolve
@@ -207,6 +206,7 @@ class MatlabOperators:
     def rgb2gray(image):
         """Replicates MATLAB's rgb2gray function (ITU-R rec601)."""
         if image.ndim >= 3:
+            from shinier.color.Converter import rgb2gray
             return rgb2gray(image=image[..., :3], conversion_type='rec601', matlab_601=True)
         else:
             return image
@@ -332,6 +332,15 @@ def imhist_plot(
             (ax_img, ax_bar, ax_hist): Tuple of matplotlib.axes.Axes for the image,
             gradient bar, and histogram, respectively.
     """
+
+    # --- Make sure the image is in the [0, 255] range ---
+    if np.issubdtype(img.dtype, np.floating) and img.max() <= 1.0:
+        img *= 255
+
+    if img.ndim == 3:
+        if np.all(img[..., :3] == img[..., :1]):
+            # If grayscale image with 3 channels, remove redundancy
+            img = img[..., 0]
 
     # --- normalize input image to uint8; drop alpha if present ---
     arr = im3D(img)
@@ -516,7 +525,12 @@ def imshow(image: np.ndarray, ax: Optional[plt.Axes] = None) -> Tuple[plt.Figure
 
     image = im3D(image)
     if image.shape[2] == 1:
-        image = np.repeat(image, 3, axis=-1)
+        from shinier.color.Converter import gray2rgb
+        image = gray2rgb(image)
+
+    # If float with [0, 255] range, convert to [0, 1]
+    if np.issubdtype(image.dtype, np.floating) and image.max() > 2:
+        image /= 255
 
     ax.imshow(image)
     ax.axis('off')
@@ -609,7 +623,6 @@ def sf_plot(
     Returns:
         fig, ax : plt.Figure, plt.Axes
     """
-    from shinier.color.Converter import rgb2gray
 
     image = im3D(image)
     xs, ys, channels = image.shape
@@ -738,6 +751,7 @@ def im_power_spectrum_plot(im: np.ndarray, with_colorbar: bool = True):
     # --- to grayscale float64 ---
     arr = np.asarray(im)
     if arr.ndim == 3 and arr.shape[2] >= 3:
+        from shinier.color.Converter import rgb2gray
         # suppose rgb2gray dispo; sinon fais la combinaison manuelle
         gray = rgb2gray(arr, conversion_type='rec709').astype(np.float64, copy=False)
     else:
