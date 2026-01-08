@@ -7,9 +7,10 @@ name = "shinier"
 version = "0.1.8"
 description = "Python port of the SHINE toolbox with added options (color management, dithering, EHS), optimized for large image sets."
 readme = "README.md"
-license = { file = "LICENSE" }
+license = { text = "MIT" }
 authors = [
-    { name = "Nicolas Dupuis-Roy", email = "nicolas.dupuis.roy@umontreal.ca" }
+    { name = "Nicolas Dupuis-Roy", email = "nicolas.dupuis.roy@umontreal.ca" },
+    { name = "Mathias Salvas-Hébert", email = "mathias.salvas-hebert@umontreal.ca" }
 ]
 requires-python = ">=3.9,<3.13"
 dependencies = [
