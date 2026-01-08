@@ -444,7 +444,7 @@ class ImageProcessor(InformativeBaseModel):
 
                     # Get the processing function, check and call it
                     if self.verbose == 0:
-                        pbar.set_description(f'{Bcolors.ALMOST_WHITE}Applying {self._fct_name2process_name[self._processing_function]}... (iter={self._iter_num}, step={self._step}){Bcolors.ENDC}')
+                        pbar.set_description(f'{Bcolors.BOLD}Applying {self._fct_name2process_name[self._processing_function]}... (iter={self._iter_num}, step={self._step}){Bcolors.ENDC}')
 
                     exec_fct = getattr(self, self._processing_function, None)
                     if exec_fct is None:
