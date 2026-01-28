@@ -105,7 +105,7 @@ class Options(InformativeBaseModel):
                 - The modified image is then reconstructed via:
                       xyY → XYZ → linRGB → sRGB
                 - This mode preserves color gamuts and is highly recommended
-                  for operations on linear-to-luminance values like fourier matching and luminance matchning.
+                  for operations on linear-to-luminance values like fourier matching and luminance matching.
 
         rec_standard (Literal[1, 2, 3]): Specifies the Rec. color standard used for RGB ↔ XYZ conversion (default = 2).
             1 = Rec.601 (SDTV, legacy systems)

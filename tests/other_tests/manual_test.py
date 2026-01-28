@@ -4,7 +4,7 @@ try:
 except ImportError:
     plt = None
 
-from shinier.utils import imhist_plot
+from shinier.utils import imhist_plot, imhist
 
 from pathlib import Path
 import os
@@ -12,7 +12,25 @@ import numpy as np
 from PIL import Image
 
 # Define the input folder
-input_folder = "/Users/ndr/GIT_REPO/GITHUB/shine/shinier/INPUT/"
+input_folder = "/Users/ndr/GIT_REPO/GITHUB/shinier/src/shinier/data/INPUT/"
+output_folder = "/Users/ndr/GIT_REPO/GITHUB/shinier/src/shinier/data/OUTPUT/"
+images = ImageListIO(input_data=input_folder+"d*", conserve_memory=True)
+out = imhist_plot(images[0])
+opts = Options(
+    input_folder=input_folder,
+    output_folder=output_folder,
+    conserve_memory=True,
+    as_gray=True,
+    linear_luminance=True,
+    target_hist='equal',
+)
+
+ds = ImageDataset(images=images, options=opts)
+out = imhist_plot(ds.images[0])
+proc = ImageProcessor(dataset=ds, verbose=0)
+out = imhist_plot(ds.images[0])
+out = imhist_plot(proc._final_buffer[0])
+out = imhist_plot(proc.dataset.images[0])
 
 # Collect all .png files from the folder
 png_files = [f for f in os.listdir(input_folder) if f.lower().endswith(".png")]
