@@ -148,7 +148,7 @@ Mode 1 (lum_match): simple normalization for the grayscale values of one or
   multiple channel. It adjusts the mean grayscale value and standard-deviation
   for a desired (M, STD).
 
-Example use case: the "luminance" will be ajusted so that the mean values and the standard
+Example use case: the "luminance" will be adjusted so that the mean values and the standard
  deviation of the output images will be the average if the input images. The 
  "safe_lum_match" setting being off will cause some values to be clipped and 
  set to either 0 (< 0) or 255 (> 255).

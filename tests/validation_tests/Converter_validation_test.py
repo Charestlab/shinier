@@ -48,7 +48,7 @@ REC_MAP = {
 @pytest.mark.parametrize("rec_std", ["rec601", "rec709", "rec2020"])
 def test_color_converter_against_colour(rec_std):
     """Validate all color-space transformations against colour-science."""
-    conv = ColorConverter(standard=rec_std)
+    conv = ColorConverter(rec_standard=rec_std)
     cs = colour.RGB_COLOURSPACES[REC_MAP[rec_std]]
     cs_customized = copy.deepcopy(cs)
     if rec_std == "rec709":

@@ -17,13 +17,14 @@ from shinier.color import ColorConverter, WHITE_D65, COLOR_STANDARDS
 
 pytestmark = pytest.mark.unit_tests
 
+
 # -----------------------------------------------------------------------------
 # Fixtures
 # -----------------------------------------------------------------------------
 @pytest.fixture(params=["rec601", "rec709", "rec2020"])
 def converter(request) -> ColorConverter:
     """Fixture returning a configured ColorConverter for each Rec. standard."""
-    return ColorConverter(standard=request.param)
+    return ColorConverter(rec_standard=request.param)
 
 
 @pytest.fixture
@@ -38,7 +39,7 @@ def rgb_sample() -> np.ndarray:
 # -----------------------------------------------------------------------------
 def test_color_converter_pydantic_integration(converter: ColorConverter):
     """Ensure Pydantic correctly initializes dependent attributes."""
-    cfg = COLOR_STANDARDS[converter.standard]
+    cfg = COLOR_STANDARDS[converter.rec_standard]
 
     # Gamma and matrices must match the reference configuration
     assert np.isclose(converter.gamma, cfg["gamma"])
@@ -52,13 +53,13 @@ def test_color_converter_pydantic_integration(converter: ColorConverter):
 def test_invalid_standard_raises():
     """Ensure unsupported color standards raise validation errors."""
     with pytest.raises(ValueError):
-        ColorConverter(standard="invalid_std")
+        ColorConverter(rec_standard="invalid_std")
 
 
 def test_white_point_is_independent():
     """Ensure white_point is a copy, not a shared mutable array."""
-    c1 = ColorConverter(standard="rec709")
-    c2 = ColorConverter(standard="rec709")
+    c1 = ColorConverter(rec_standard="rec709")
+    c2 = ColorConverter(rec_standard="rec709")
     c1.white_point[0] += 0.1
     assert not np.allclose(c1.white_point, c2.white_point)
 
@@ -136,7 +137,7 @@ def test_lab_monotonicity(converter: ColorConverter, rgb_sample: np.ndarray):
 
 def test_repr_and_assignment_behavior():
     """Ensure assignment triggers Pydantic re-validation."""
-    c = ColorConverter(standard="rec709")
-    c.standard = "rec601"
+    c = ColorConverter(rec_standard="rec709")
+    c.rec_standard = "rec601"
     assert np.isclose(c.gamma, COLOR_STANDARDS["rec601"]["gamma"])
     assert np.allclose(c.M_RGB2XYZ, COLOR_STANDARDS["rec601"]["M_RGB2XYZ"])

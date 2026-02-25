@@ -1,7 +1,3 @@
-# TODO: Before V1 commit: Remove all revision comments (e.g. see round in MatlabOperators)
-# TODO: legacy_mode for SSIM optimization
-# TODO: should target_hist, target_spectrum and target_sf be fixed for composite modes
-
 # External package imports
 from __future__ import annotations
 
@@ -1454,7 +1450,9 @@ def soft_clip(arr: np.ndarray,
         return m + s_star * (arr - m)
 
     if max_percent == 0:
-        print(f'{Bcolors.WARNING}[soft_clip] Special case: 0% clipping allowed.{Bcolors.ENDC}')
+        console_log(
+            msg=f'{Bcolors.WARNING}[soft_clip] Special case: 0% clipping allowed.{Bcolors.ENDC}',
+            indent_level=1, verbose=True)
         return _zero_clip_mean_preserving(arr, min_value, max_value)
 
     max_iter = 50
@@ -1469,8 +1467,9 @@ def soft_clip(arr: np.ndarray,
     clipped_fraction = (below + above) / total
 
     if verbose:
-        print(f"[soft_clip] Naive clipping would affect "
+        msg = (f"[soft_clip] Naive clipping would affect "
               f"{Bcolors.OKBLUE}{clipped_fraction*100:.3f}%{Bcolors.ENDC} of values")
+        console_log(msg=msg, indent_level=1, verbose=verbose)
 
     if clipped_fraction <= max_percent:
         return np.clip(arr, min_value, max_value)
@@ -1480,7 +1479,7 @@ def soft_clip(arr: np.ndarray,
     arr_range = arr_max - arr_min
     if arr_range == 0:
         if verbose:
-            print("[soft_clip] Constant array detected — nothing to clip.")
+            console_log(msg="[soft_clip] Constant array detected — nothing to clip.", indent_level=1, verbose=verbose)
         return np.clip(arr, min_value, max_value)
 
     target = max_percent
@@ -1496,10 +1495,6 @@ def soft_clip(arr: np.ndarray,
         above = np.sum(scaled_flat > max_value)
         frac = (below + above) / total
 
-        if verbose:
-            print(f"[soft_clip] Iter {i:02d}: scale={mid:.5f}, clipped="
-                  f"{Bcolors.OKBLUE}{frac*100:.3f}%{Bcolors.ENDC}")
-
         # Early stopping if we're close enough to target
         if abs(frac - target) <= tol:
             scaled = scaled_flat.reshape(arr.shape)
@@ -1510,6 +1505,11 @@ def soft_clip(arr: np.ndarray,
         else:
             lo = mid  # allow more
             scaled = scaled_flat.reshape(arr.shape)
+
+    if verbose:
+        msg = (f"[soft_clip] After {i:02d} iterations: scale={mid:.5f}, clipped="
+              f"{Bcolors.OKBLUE}{frac*100:.3f}%{Bcolors.ENDC}")
+        console_log(msg=msg, indent_level=1, verbose=verbose)
 
     return np.clip(scaled, min_value, max_value)
 
@@ -2148,6 +2148,7 @@ def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, ve
     Returns:
         str: The formatted message as a string with any ANSI color codes stripped.
     """
+    # TODO: Convert into a class to improve object-oriented logging and storage.
 
     def _set_indent_and_color(text, lev: int, col: Optional[str] = None):
         indent_str = '\t' * lev

@@ -17,11 +17,18 @@ from shinier.utils import console_log, Bcolors
 from shinier.base import InformativeBaseModel
 from shinier import REPO_ROOT
 ACCEPTED_IMAGE_FORMATS = Literal["png", "tif", "tiff", "jpg", "jpeg", "npy"]
+GAMUT_STRATEGY_TYPE = Literal[
+    'constrain_dataset_luminance',
+    'constrain_dataset_chrominance',
+    'constrain_image_chrominance',
+    'constrain_image_luminance',
+    'clip'
+]
 OPTION_TYPES = {
     'io':               ['input_folder', 'output_folder'],
     'mask':             ['masks_folder', 'background', 'whole_image'],
     'mode':             ['mode', 'legacy_mode', 'seed', 'iterations'],
-    'color':            ['as_gray', 'linear_luminance', 'rec_standard'],
+    'color':            ['as_gray', 'linear_luminance', 'rec_standard', 'gamut_strategy'],
     'dithering_memory': ['dithering', 'conserve_memory'],
     'luminance':        ['safe_lum_match', 'target_lum'],
     'histogram':        ['hist_optim', 'hist_specification', 'hist_iterations', 'target_hist'],
@@ -111,6 +118,20 @@ class Options(InformativeBaseModel):
             1 = Rec.601 (SDTV, legacy systems)
             2 = Rec.709 (HDTV, sRGB default). Shinier assumes display-referred Rec. 709 with sRGB-like transfer.
             3 = Rec.2020 (UHDTV, wide-gamut HDR)
+
+        gamut_strategy (Literal['constrain_dataset_luminance', 'constrain_dataset_chrominance', 'constrain_image_chrominance', 'constrain_image_luminance', clip']):
+            Specify the strategy to deal with out-of-gamut problem (Requires linear_luminance=True).
+
+            Global constraints (applies the same transform to the whole dataset): Best for dataset consistency.
+            - 'constrain_dataset_luminance': Scales the luminance of ALL images down so the most saturated pixel fits.
+              (Preserves: Hue, Saturation. Compresses: Contrast/Luminance).
+            - 'constrain_dataset_chrominance': Scales the saturation of ALL images down so the brightest pixel fits.
+              (Preserves: Contrast/Luminance. Compresses: Saturation).
+
+            Local Repairs (applies a single transform to all pixels of a given image): Best to maximize image contrast.
+            - 'constrain_image_chrominance': Darkens all pixels so that there are no  out-of-gamut pixels.
+            - 'constrain_image_luminance': Desaturates all pixels so that there are not out-of-gamut pixels.
+            - 'clip': Default color convertion behavior: numpy safe_mode (not recommended unless you know what are you doing).
 
     --------------------------------------------------Dithering / Memory------------------------------------------------------
         dithering (Literal[0-2]): Dithering applied before final conversion to uint8 (default = 0).
@@ -214,13 +235,14 @@ class Options(InformativeBaseModel):
     as_gray: bool = False
     linear_luminance: bool = False
     rec_standard: Literal[1, 2, 3] = 2
+    gamut_strategy: GAMUT_STRATEGY_TYPE = Field(default='constrain_image_chrominance')
 
     # --- Dithering / Memory ---
     dithering: Literal[0, 1, 2] = 0
     conserve_memory: bool = True
 
     # --- Luminance ---
-    safe_lum_match: bool = False
+    safe_lum_match: bool = True
     target_lum: Tuple[conint(ge=0, le=255), confloat(ge=0)] = (0, 0)
 
     # --- Histogram ---
@@ -318,6 +340,18 @@ class Options(InformativeBaseModel):
         if self.iterations > 1 and self.mode not in (5, 6, 7, 8):
             object.__setattr__(self, "iterations", 1)
             console_log(msg="Iterations > 1 ignored outside composite modes (5–8). iterations → 1", color=Bcolors.WARNING, verbose=self.verbose > 0)
+
+        # Gamut Strategy requires convertion to linear RGB
+        if not self.as_gray:
+            if self.gamut_strategy != 'clip' and self.linear_luminance:
+                if self.verbose > 0:
+                    console_log(msg="Gamut strategy requires linear luminance. Set gamut_strategy to 'clip' or change enable linear_luminance ", color=Bcolors.WARNING)
+
+        if self.gamut_strategy != 'clip' and self.as_gray:
+            object.__setattr__(self, "gamut_strategy", 'clip')
+            if self.verbose > 0:
+                console_log(msg="Gamut strategy ignored for grayscale images. gamut_strategy -> 'clip'",
+                            color=Bcolors.WARNING)
 
         # Legacy overrides
         if self.legacy_mode:
