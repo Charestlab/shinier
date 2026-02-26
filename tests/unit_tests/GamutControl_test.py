@@ -5,6 +5,8 @@ import pytest
 
 from shinier.color import ColorConverter, GamutControl
 
+pytestmark = pytest.mark.unit_tests
+
 
 # ---------------------------------------------------------
 # Fixtures
