@@ -35,21 +35,26 @@ Safeguards
 ----------
 All non-trivial strategies include additional safeguards to make the estimated scaling factors robust:
 
-- Low-luminance preventive desaturation (optional):
-  In xyY, chromaticity estimates are unstable near Y≈0. When enabled, pixels below `low_Y_threshold` are
-  desaturated toward the white-point before the main processing pipeline to prevent chroma-noise amplification.
+- [S1] Low-luminance preventive desaturation (optional):
+  In xyY, chromaticity becomes ill-conditioned near Y≈0: because x,y are normalized by (X+Y+Z), small numerical
+  noise can produce unstable colours. Low-luminance pixels are therefore gently desaturated toward the white-point 
+  chromaticity (Y unchanged).
+    Implemented in: `apply_low_Y_desaturation`.
 
-- Chroma validity mask (`chroma_ok`):
+- [S2] Chroma validity mask (`chroma_ok`):
   Excludes ill-conditioned or physically implausible chromaticities (e.g., y near 0 or x+y slightly above 1)
   from driving the constraint estimation. These pixels may still be repaired later via clipping/safeguards.
 
-- Reliability weighting by luminance:
+- [S3] Reliability weighting by luminance:
   Pixels near Y≈0 and Y≈1 are down-weighted when estimating global factors because tiny xy noise at the
   luminance extremes can produce unrealistically large RGB excursions. Mid-tones therefore dominate the estimate.
 
-- Allowed outlier clipping (`prc_clipping`):
+- [S4] Allowed outlier clipping (`prc_clipping`):
   Optionally use a lower-quantile instead of the strict minimum when reducing per-pixel headroom ratios.
   This prevents a tiny fraction of extreme pixels from dictating aggressive global compression.
+
+TODO : Quantify the impact of these strategies and safeguards on the final image statistics and on the order accuracy metrics.
+    - i.e., the trade-off between gamut safety and distortion of the original statistics.
 """
 
 from __future__ import annotations
@@ -71,11 +76,16 @@ class GamutControl(InformativeBaseModel):
     Manages gamut constraints and repairs for image datasets.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    # Safeguard IDs used in comments below:
+    # [S1] low-luminance preventive desaturation
+    # [S2] chroma validity mask
+    # [S3] reliability weighting by luminance
+    # [S4] outlier clipping (quantile/min reduction)
     color_space: Literal['xyY'] = 'xyY'
     strategy: GAMUT_STRATEGY_TYPE = 'constrain_dataset_chrominance'
     rec_standard: str = 'rec709'
     warning_threshold: float = 1.0
-    prc_clipping: float = 0.5  # 0.1  # Let the most extreme outliers clip (must be less than 1%).
+    prc_clipping: float = 0.5  # (%) Let the most extreme outliers clip (must be less than 1%).
 
     low_Y_desaturate: bool = False
     low_Y_threshold: float = 0.01  # Y in [0,1]
@@ -213,7 +223,7 @@ class GamutControl(InformativeBaseModel):
         if xy.ndim != 3 or xy.shape[-1] != 2:
             raise ValueError(f"xy must be shape (H,W,2), got {xy.shape}")
 
-        # White-point expressed as xy
+        # Obtain white-point chromaticity in the xy color from XYZ coordinates
         W = self._converter.white_point
         W_sum = float(np.sum(W))
         xw, yw = float(W[0] / W_sum), float(W[1] / W_sum)
@@ -221,8 +231,8 @@ class GamutControl(InformativeBaseModel):
         s = np.asarray(strength, dtype=np.float64)
         if s.shape != xy.shape[:2]:
             raise ValueError(f"strength must be shape (H,W), got {s.shape} for xy {xy.shape}")
-
-        # (1-s)*xy + s*white
+        
+        # Linear chromatic desaturation toward white-point: xy_out = (1-s)*xy + s*white
         out = np.empty_like(xy, dtype=np.float64)
         out[..., 0] = (1.0 - s) * xy[..., 0] + s * xw
         out[..., 1] = (1.0 - s) * xy[..., 1] + s * yw
@@ -234,7 +244,7 @@ class GamutControl(InformativeBaseModel):
         other: np.ndarray,
         idx: int | None = None,
         verbose: bool = False) -> Tuple[np.ndarray, np.ndarray]:
-        """Optionally desaturate chroma for low-luminance pixels.
+        """[S1] Optionally desaturate chroma for low-luminance pixels.
 
         Intended as a *preventive* step before luminance manipulation.
         Only modifies `other` (xy). Returns Y unchanged.
@@ -255,10 +265,12 @@ class GamutControl(InformativeBaseModel):
         if np.nanmax(Y01) > 1.5:
             Y01 = Y01 / 255.0
 
+        # Calculate low-luminance desaturation strength.
         strength = self._low_Y_strength(Y01, threshold=self.low_Y_threshold, fade_width=self.low_Y_fade_width)
         if np.all(strength <= 0.0):
             return Y, other
 
+        # Apply preventive desaturation toward white-point (Y unchanged).
         prc = float(np.mean(strength > 0.0))
         other_out = self._desaturate_xy_toward_white(other, strength=strength)
 
@@ -347,43 +359,49 @@ class GamutControl(InformativeBaseModel):
             Y_norm = Y / 255.0
             x, y = buffer_other[idx][..., 0], buffer_other[idx][..., 1]
 
-            # Theoretical maximum luminance coordinate for this chroma (xyY only)
+            # --- 1. Compute raw luminance scaling to stay in gamut. ---
+            # Compute the maximum in-gamut luminance for each chromaticity.
+            # If Y exceeds this limit, the reconstructed RGB would clip.
             Y_max_map = self.get_max_luminance_map(x, y)
-
             with np.errstate(divide='ignore', invalid='ignore'):
-                # ratio_raw: How much we need to dim (e.g. 0.1)
+                # How much we need to dim (e.g., 0.1 means dim by 90%).
                 ratio_raw = Y_max_map / (Y_norm + 1e-9)
-
-            # --- RELIABILITY WEIGHTING ---
-            # 1. Calculate Weight 'w' based on luminance
-            #    Trust mid-tones (w=1). Distrust deep blacks/whites (w=0).
+            
+            # --- 2. [S3] Compute luminance reliability weights. ---
+            # Mid-tones are trusted (w≈1); near-black/near-white pixels are down-weighted (w≈0).
             dist_to_edge = np.minimum(Y_norm, 1.0 - Y_norm)
             fade_width = 0.05
             w = np.clip(dist_to_edge / fade_width, 0.0, 1.0)
 
-            # 2. Blend Ratio
-            #    If w=1 (reliable), use ratio_raw.
-            #    If w=0 (unreliable), use 1.0 (no dimming).
-
-            # Chroma validity mask (xy must be physically plausible & not near singular)
+            # --- 3. [S2] Mask of the valid chromaticities (physically plausible and numerically stable). ---
             chroma_ok = self._mask_chroma_ok_xy(x, y, eps_y=eps_y, eps_sum_xy=eps_sum_xy)
 
-            # Combine: if chroma is not OK, treat as unreliable no matter luminance
+            # --- 4. [S2][S3] Build a reliability-adjusted per-pixel scaling ratio. ---
+            # Invalid chromaticities are forced to zero reliability.
             w = w * chroma_ok.astype(w.dtype)
+
+            # Interpolate between the raw scaling ratio and 1.0 (no correction)
+            # according to luminance/chroma reliability:
+            #   w=1 -> full correction
+            #   w=0 -> no correction
+            #   0<w<1 -> partial correction
             ratio_safe = ratio_raw * w + 1.0 * (1.0 - w)
 
-            # 3. Apply standard mask for sanity (still useful for speed)
+            # --- 5. Apply standard luminance masking for sanity (still useful for speed). ---
             mask = Y_norm > 0.001
             if np.any(mask):
-                # Find the strongest requirement in this image
+                # --- 6. Create a single global scaling factor for this image. ---
+                # Use either:
+                #  - Minimum: satisfy the most constraining pixel (conservative but hugely affected by outliers)
+                #  - [S4] Quantile: satisfy most pixels except a small fraction of outliers (more robust, less aggressive).
                 if quantile_threshold is not None:
                     local_min = np.quantile(ratio_safe[mask], quantile_threshold)
                 else:
                     local_min = np.min(ratio_safe[mask])
 
-                # Logging
                 self._log_image_overflow('luminance', idx, float(local_min), quantile_threshold, verbose)
 
+                # --- 7. Keep the most restrictive image-level scaling ratio across the dataset. ---
                 if local_min < min_headroom:
                     min_headroom = local_min
 
@@ -412,7 +430,8 @@ class GamutControl(InformativeBaseModel):
         eps_sum_xy = 1e-6
         eps_delta = 1e-9
 
-        # Achromatic reference point (xy)
+        # --- 1. Build achromatic reference point in xy. ---
+        # White-point toward which chromacities will be desaturated.
         W = self._converter.white_point
         W_sum = float(np.sum(W))
         xw, yw = float(W[0] / W_sum), float(W[1] / W_sum)
@@ -421,20 +440,32 @@ class GamutControl(InformativeBaseModel):
             Y_norm = Y / 255.0
             x, y = buffer_other[idx][..., 0], buffer_other[idx][..., 1]
 
-            # Convert to raw linear RGB to detect out-of-gamut (values may be <0 or >1)
+            # --- 2. Compute raw chroma overflow evidence in linear RGB. ---
+            # Values <0 or >1 indicate that the current chromaticity is out of gamut.
             xyz = self._converter_raw.xyY_to_xyz(np.dstack([x, y, Y_norm]))
             rgb = self._converter_raw.xyz_to_linRGB(xyz)
 
-            # Neutral gray in linear RGB derived from white-point at same luminance
+            # --- 3. Build achromatic gray reference at same luminance as the white point. ---
+            # Chroma scaling is measured relative to the achromatic color with the same Y.
             gray_rgb = self._neutral_rgb_for_Y(Y_norm)
 
-            # Reliability weighting (down-weight near Y=0/1)
+            # --- 4. [S3] Compute luminance reliability weights. ---
             w = self._reliability_from_Y01(Y_norm, fade_width=0.05)
+        
+            # --- 5. [S2] Mask of valid chromaticities. ---
             chroma_ok = self._mask_chroma_ok_xy(x, y, eps_y=eps_y, eps_sum_xy=eps_sum_xy)
+        
+            # --- 6. [S2][S3] Build a reliability-adjusted per-pixel chroma scaling candidate. ---
+            # Invalid chromaticities are forced to zero reliability.
             w3 = (w * chroma_ok.astype(w.dtype))[..., None]  # (H,W,1)
 
-            # Vectorized per-pixel k-map across 3 channels
+            # --- 7. Compute per-channel safe chroma scaling factors. ---
+            # delta is a 3-channel array storing the chromatic offset from neutral gray for each pixel.
             delta = rgb - gray_rgb
+
+            # Desaturation needed to bring each channel back into gamut if it exceeds the bounds 
+            #     k_high: Desaturation factor needed to bring channels above 1 back to 1.
+            #     k_low: Desaturation factor needed to bring channels below 0 back to 0.
             with np.errstate(divide='ignore', invalid='ignore'):
                 k_high = np.where(
                     (rgb > 1.0) & (delta > eps_delta),
@@ -446,21 +477,29 @@ class GamutControl(InformativeBaseModel):
                     gray_rgb / (-delta),
                     1.0,
                 )
-
+            
+            # --- 8. Build a safe per-pixel chroma scaling factor. ---
+            # Minimum desaturation needed across channels to bring the pixel back in gamut.
             k_raw = np.minimum(k_high, k_low)
             # Reliability blend: w=0 -> k=1, w=1 -> k=k_raw
             k_safe = k_raw * w3 + (1.0 - w3)
-            # Keep reductions well-defined
+            # Keep reductions well-defined and reduce to a single scalar per pixel by taking the minimum across channels.
             k_safe = np.where(np.isfinite(k_safe), k_safe, 1.0)
             k_map = np.min(k_safe, axis=-1)
 
-            # Reduction mask: ignore deep blacks and invalid chroma
+            # --- 9. Apply standard masking before image-level reduction. ---
             mask = (Y_norm > 0.001) & chroma_ok & np.isfinite(k_map)
+            
+            # --- 10. Create a single global scaling factor for this image. ---
+            # Use either:
+            #  - Minimum: satisfy the most constraining pixel (conservative but hugely affected by outliers)
+            #  - [S4] Quantile: satisfy most pixels except a small fraction of outliers (more robust, less aggressive).
             local_min_k = self._min_or_quantile(k_map[mask], quantile_threshold)
 
             # Per-image logging
             self._log_image_overflow('chrominance', idx, float(local_min_k), quantile_threshold, verbose)
-
+            
+            # --- 11. Keep the most restrictive image-level chroma scaling ratio across the dataset. ---
             if local_min_k < min_sat_ratio:
                 min_sat_ratio = local_min_k
 
@@ -478,7 +517,7 @@ class GamutControl(InformativeBaseModel):
                 buffer_other[idx] = np.dstack([x_new, y_new])
 
         return buffer, buffer_other
-
+        
     def _apply_constrain_image_luminance(self, Y: np.ndarray, other: np.ndarray, idx: int = None, verbose: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """Per-image scaling along Y with the same protections as the dataset method.
 
@@ -494,20 +533,27 @@ class GamutControl(InformativeBaseModel):
             raise ValueError(f"other must be shape (H,W,2), got {other.shape}")
         x, y = other[..., 0], other[..., 1]
 
+        # --- 1. Compute raw luminance scaling to stay in gamut. ---
         Y_max_map = self.get_max_luminance_map(x, y)
         with np.errstate(divide='ignore', invalid='ignore'):
             ratio_raw = Y_max_map / (Y_norm + 1e-9)
 
+        # --- 2. [S3] Compute luminance reliability weights. ---
         w = self._reliability_from_Y01(Y_norm, fade_width=0.05)
+
+        # --- 3. [S2] Mask of valid chromaticities. ---
         chroma_ok = self._mask_chroma_ok_xy(x, y, eps_y=eps_y, eps_sum_xy=eps_sum_xy)
+
+        # --- 4. [S2][S3] Build reliability-adjusted per-pixel scaling ratio. ---
         w = w * chroma_ok.astype(w.dtype)
         ratio_safe = ratio_raw * w + 1.0 * (1.0 - w)
 
+        # --- 5. Apply standard masking + [S4] robust reduction for the image-level ratio. ---
         mask = (Y_norm > 0.001) & chroma_ok & np.isfinite(ratio_safe)
         local_min = self._min_or_quantile(ratio_safe[mask], quantile_threshold)
-
         self._log_image_overflow('luminance', idx, float(local_min), quantile_threshold, verbose)
-
+        
+        # --- 6. Apply final per-image scaling factor. ---
         scaling_factor = min(1.0, float(local_min))
         if scaling_factor >= 1.0:
             return Y, other
@@ -528,19 +574,28 @@ class GamutControl(InformativeBaseModel):
             raise ValueError(f"other must be shape (H,W,2), got {other.shape}")
         x, y = other[..., 0], other[..., 1]
 
-        # Achromatic reference point (xy)
+        # --- 1. Build achromatic reference point in xy. ---
         W = self._converter.white_point
         W_sum = float(np.sum(W))
         xw, yw = float(W[0] / W_sum), float(W[1] / W_sum)
 
+        # --- 2. Compute raw chroma overflow evidence in linear RGB. ---
         xyz = self._converter_raw.xyY_to_xyz(np.dstack([x, y, Y_norm]))
         rgb = self._converter_raw.xyz_to_linRGB(xyz)
 
+        # --- 3. Build achromatic gray reference at same luminance as the white point. ---
         gray_rgb = self._neutral_rgb_for_Y(Y_norm)
+
+        # --- 4. [S3] Compute luminance reliability weights. ---
         w = self._reliability_from_Y01(Y_norm, fade_width=0.05)
+
+        # --- 5. [S2] Mask of valid chromaticities. ---
         chroma_ok = self._mask_chroma_ok_xy(x, y, eps_y=eps_y, eps_sum_xy=eps_sum_xy)
+
+        # --- 6. [S2][S3] Build a reliability-adjusted per-pixel chroma scaling candidate. ---
         w3 = (w * chroma_ok.astype(w.dtype))[..., None]
 
+        # --- 7. Compute per-channel safe chroma scaling factors. ---
         delta = rgb - gray_rgb
         with np.errstate(divide='ignore', invalid='ignore'):
             k_high = np.where(
@@ -554,16 +609,21 @@ class GamutControl(InformativeBaseModel):
                 1.0,
             )
 
+        # --- 8. Build a safe per-pixel chroma scaling factor. ---
         k_raw = np.minimum(k_high, k_low)
         k_safe = k_raw * w3 + (1.0 - w3)
         k_safe = np.where(np.isfinite(k_safe), k_safe, 1.0)
         k_map = np.min(k_safe, axis=-1)
 
+        # --- 9. Apply standard masking before image-level reduction. ---
         mask = (Y_norm > 0.001) & chroma_ok & np.isfinite(k_map)
+
+        # --- 10. [S4] Create a single image-level chroma scaling factor. ---
         local_min_k = self._min_or_quantile(k_map[mask], quantile_threshold)
 
         self._log_image_overflow('chrominance', idx, float(local_min_k), quantile_threshold, verbose)
 
+        # --- 11. Apply final per-image chroma scaling factor. ---
         scaling_factor = min(1.0, float(local_min_k))
         if scaling_factor >= 1.0:
             return Y, other
@@ -599,17 +659,34 @@ class GamutControl(InformativeBaseModel):
         xyz_gray = self._converter_raw.xyY_to_xyz(xyY_gray)
         rgb_gray = self._converter_raw.xyz_to_linRGB(xyz_gray)
         return rgb_gray
-
+    
     def get_max_luminance_map(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """
+        Calculates the maximum luminance Y_max for each pixel that keeps the color defined by chromaticity (x, y).
+
+        Arguments:
+            x, y (ndarray): Chromaticity x and y coordinates.
+
+        Returns:
+            Y_max (ndarray): Maximum luminance before RGB clipping for the
+            chromaticity (x, y) at each pixel. Same shape as the input arrays.
+        """
+        # Avoid division instability when converting xyY to XYZ
         y_safe = np.where(y <= 1e-9, 1e-9, y)
+
+        # Reconstruct XYZ at unit luminance (Y = 1) for the given chromaticity
         X_test = x / y_safe
         Y_test = np.ones_like(x)
         Z_test = (1.0 - x - y) / y_safe
-
         xyz = np.stack([X_test, Y_test, Z_test], axis=-1)
+
+        # Convert to linear RGB
         rgb_test = self._converter_raw.xyz_to_linRGB(xyz)
 
+        # Find limiting RGB channel
         max_channel = np.max(rgb_test, axis=-1)
+
+        # Compute luminance scaling
         Y_max = np.ones_like(x)
         mask = max_channel > 0
         Y_max[mask] = 1.0 / max_channel[mask]

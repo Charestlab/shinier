@@ -120,7 +120,7 @@ class Options(InformativeBaseModel):
             3 = Rec.2020 (UHDTV, wide-gamut HDR)
 
         gamut_strategy (Literal['constrain_dataset_luminance', 'constrain_dataset_chrominance', 'constrain_image_chrominance', 'constrain_image_luminance', clip']):
-            Specify the strategy to deal with out-of-gamut problem (Requires linear_luminance=True).
+            Specify the strategy to deal with out-of-gamut problem (Requires linear_luminance=False).
 
             Global constraints (applies the same transform to the whole dataset): Best for dataset consistency.
             - 'constrain_dataset_luminance': Scales the luminance of ALL images down so the most saturated pixel fits.
@@ -131,7 +131,7 @@ class Options(InformativeBaseModel):
             Local Repairs (applies a single transform to all pixels of a given image): Best to maximize image contrast.
             - 'constrain_image_chrominance': Darkens all pixels so that there are no  out-of-gamut pixels.
             - 'constrain_image_luminance': Desaturates all pixels so that there are not out-of-gamut pixels.
-            - 'clip': Default color convertion behavior: numpy safe_mode (not recommended unless you know what are you doing).
+            - 'clip': Default color conversion behavior: numpy safe_mode (not recommended unless you know what are you doing).
 
     --------------------------------------------------Dithering / Memory------------------------------------------------------
         dithering (Literal[0-2]): Dithering applied before final conversion to uint8 (default = 0).
@@ -341,11 +341,12 @@ class Options(InformativeBaseModel):
             object.__setattr__(self, "iterations", 1)
             console_log(msg="Iterations > 1 ignored outside composite modes (5–8). iterations → 1", color=Bcolors.WARNING, verbose=self.verbose > 0)
 
-        # Gamut Strategy requires convertion to linear RGB
+        # Gamut strategy constraints are only supported in xyY conversion mode (linear_luminance=False)
         if not self.as_gray:
             if self.gamut_strategy != 'clip' and self.linear_luminance:
+                object.__setattr__(self, "gamut_strategy", 'clip')
                 if self.verbose > 0:
-                    console_log(msg="Gamut strategy requires linear luminance. Set gamut_strategy to 'clip' or change enable linear_luminance ", color=Bcolors.WARNING)
+                    console_log(msg="Gamut constraints require xyY conversion mode (linear_luminance=False). gamut_strategy -> 'clip'", color=Bcolors.WARNING)
 
         if self.gamut_strategy != 'clip' and self.as_gray:
             object.__setattr__(self, "gamut_strategy", 'clip')

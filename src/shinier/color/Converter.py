@@ -32,7 +32,7 @@ from shinier import REPO_ROOT
 if TYPE_CHECKING:
     from shinier.ImageListIO import ImageListIO
 
-# D65 white point normalized to Y=1.0
+# D65 white point normalized to Y=1.0 (XYZ)
 WHITE_D65 = np.array([0.95047, 1.00000, 1.08883])
 
 # RGB → XYZ conversion matrices for D65
@@ -99,6 +99,19 @@ class ColorConverter(InformativeBaseModel):
     # sRGB ↔ linRGB
     # ------------------------------------------------------------------
     def sRGB_to_linRGB(self, rgb: np.ndarray) -> np.ndarray:
+        """
+            Convert non-linear R'G'B' into linear RGB.
+
+            Transfer functions:
+            - "rec2020": ITU-R BT.2020 inverse OETF.
+            - "rec709": IEC 61966-2-1 sRGB transfer function.
+            - "rec601": sRGB-style piecewise transfer function (γ ≈ 2.2),
+                        chosen to replicate MATLAB's rgb2gray behaviour
+                        in modern digital workflows.
+            Resources :
+            - http://www.color.org/sRGB.pdf
+            - https://colour.readthedocs.io/
+        """
         rgb = np.clip(rgb, 0, 1) if self.safe_mode else rgb
         if self.rec_standard == "rec2020":
             alpha, beta = 1.0993, 0.0181
@@ -107,6 +120,15 @@ class ColorConverter(InformativeBaseModel):
             return np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** self.gamma)
 
     def linRGB_to_sRGB(self, linRGB: np.ndarray) -> np.ndarray:
+        """
+            Convert linear RGB into non-linear R'G'B'.
+
+            Transfer functions:
+            - "rec2020": ITU-R BT.2020 OETF.
+            - "rec709": IEC 61966-2-1 sRGB transfer function.
+            - "rec601": sRGB-style piecewise transfer function (γ ≈ 2.2),
+                        used for consistency with MATLAB and common SDR pipelines.
+        """
         linRGB = np.clip(linRGB, 0, 1) if self.safe_mode else linRGB
         if self.rec_standard == "rec2020":
             alpha, beta = 1.0993, 0.0181
@@ -118,11 +140,17 @@ class ColorConverter(InformativeBaseModel):
     # linRGB ↔ XYZ
     # ------------------------------------------------------------------
     def linRGB_to_xyz(self, linRGB: np.ndarray) -> np.ndarray:
+        """
+            Convert linear RGB into CIE XYZ (device-independent tristimulus space).
+
+            XYZ is the standard CIE “reference” colour space (CIE 1931).
+        """
         out = np.empty_like(linRGB)
         np.matmul(linRGB.reshape(-1, 3), self.M_RGB2XYZ.T, out=out.reshape(-1, 3))  # linRGB @ self.M_RGB2XYZ.T
         return out
 
     def xyz_to_linRGB(self, xyz: np.ndarray) -> np.ndarray:
+        """Convert CIE XYZ  into linear RGB."""
         out = np.empty_like(xyz)
         np.matmul(xyz.reshape(-1, 3), self.M_XYZ2RGB.T, out=out.reshape(-1, 3))  # xyz @ self.M_XYZ2RGB.T
         return np.clip(out, 0, 1, out=out) if self.safe_mode else out
@@ -132,6 +160,11 @@ class ColorConverter(InformativeBaseModel):
     # ------------------------------------------------------------------
     @staticmethod
     def xyz_to_xyY(xyz: np.ndarray) -> np.ndarray:
+        """
+            Convert CIE XYZ into CIE xyY.
+
+            The x and y encode chromaticity, while Y encode ONLY the luminance information.        
+        """
         X, Y, Z = xyz[..., 0], xyz[..., 1], xyz[..., 2]
         denom = X + Y + Z
         denom_safe = np.where(denom == 0, 1.0, denom)
@@ -140,6 +173,20 @@ class ColorConverter(InformativeBaseModel):
 
     @staticmethod
     def xyY_to_xyz(xyY: np.ndarray, safe_mode: bool = True) -> np.ndarray:
+        """
+            Convert CIE xyY into CIE 1931 XYZ. 
+            X = xY / y 
+            Z = (1-x-y)Y / y
+            
+            Safe mode : bool, default=True
+            ---------
+                Standard Conversion (True):
+                    Prevents numerical instability when y ≈ 0 by substituting y = 1.
+                    This avoids X/Z explosion for near-black or noisy pixels.
+                Gamut Control (False):
+                    very small y values are preserved (≈1e-9), allowing large
+                    XYZ values to appear, which can help detect gamut violations.
+            """
         x, y, Y = xyY[..., 0], xyY[..., 1], xyY[..., 2]
         if safe_mode:
             # Safe Mode: Standard conversion
