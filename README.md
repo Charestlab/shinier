@@ -124,6 +124,7 @@ And documentation:
 8. [Memory Management and Performance](documentation/documentation.md#memory-management-and-performance)
 9. [Testing and Validation](documentation/documentation.md#testing-and-validation)
 10. [Usage Demonstrations](documentation/demos.md)
+11. [Additional Resources](documentation/documentation.md#additional-resources)
 
 ---
 ## 📚 Citing
@@ -150,5 +151,5 @@ See [LICENSE](documentation/license.md) for more information.
 ---
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-  <em>Version 0.1.8 - Complete technical documentation</em>
+  <em>Version 0.1.9 - Complete technical documentation</em>
 </p>

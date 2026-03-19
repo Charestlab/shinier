@@ -72,7 +72,7 @@ pytest -m unit_tests
 ### Git rules
 - No one has push permissions on `main`. 
 - PR requires 2 approvals + all tests to pass before merging. 
-- The official working development branch is dev_X, where X is the subversion of the last Pypi release (e.g. if release is 0.1.7, then branch is dev_1.7). 
+- The official working development branch is `dev_X`, where X is the subversion number of the *next* planned PyPI release (e.g., if the current release is `0.1.7`, use `dev_1.8` for the next development branch).
 
 ### To do before a PR
 - Merge main on dev_X branch (not the other way around).

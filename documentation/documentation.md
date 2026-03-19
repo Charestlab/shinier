@@ -485,7 +485,7 @@ class ImageProcessor:
 ```
 
 
-## Where to find more information
+## Additional Resources
 
 - For a detailed description of the available options, see the `Options` class in `Options.py`; each parameter lists its purpose, allowed values, and default.
 - For algorithmic details and a walkthrough of processing steps, see the `ImageProcessor` class in `ImageProcessor.py`.
@@ -720,5 +720,5 @@ Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum m
 
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-  <em>Version 0.1.0 - Complete technical documentation</em>
+    <em>Version 0.1.9 - Complete technical documentation</em>
 </p>
