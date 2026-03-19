@@ -120,7 +120,7 @@ class Options(InformativeBaseModel):
             3 = Rec.2020 (UHDTV, wide-gamut HDR)
 
         gamut_strategy (Literal['constrain_dataset_luminance', 'constrain_dataset_chrominance', 'constrain_image_chrominance', 'constrain_image_luminance', clip']):
-            Specify the strategy to deal with out-of-gamut problem (Requires linear_luminance=False).
+            Specify the strategy to deal with out-of-gamut problem (Requires linear_luminance=False ; default = 'constrain_image_chrominance').
 
             Global constraints (applies the same transform to the whole dataset): Best for dataset consistency.
             - 'constrain_dataset_luminance': Scales the luminance of ALL images down so the most saturated pixel fits.

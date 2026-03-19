@@ -388,6 +388,38 @@ opts = Options(
 
 ---
 
+### Example 11 – Preserve colors with `constrain_image_chrominance`
+
+```python
+"""
+Example 11: Show how to preserve image colors while modifying histogram.
+
+Use-case: perform spectrum + histogram matching but avoid hue shifts or
+out-of-gamut repairs that change perceived colors by applying
+`gamut_strategy='constrain_image_chrominance'`.
+
+Notes:
+- `linear_luminance=False` enables xyY pipelines (required for gamut strategies).
+- `as_gray=False` keeps processing in color (luminance-only transforms applied to Y).
+"""
+opts = Options(
+  input_folder=INPUT_FOLDER,
+  output_folder=OUTPUT_FOLDER,
+  mode=2,                                      # spec_match -> hist_match
+  as_gray=False,                               # keep color
+  linear_luminance=False,                      # use xyY conversions
+  rec_standard=2,                              # Rec.709 (sRGB-like)
+  gamut_strategy='constrain_image_chrominance',# preserve chroma, repair per-image
+  dithering=0,                                 # no dithering for diagnostics
+  conserve_memory=True,                        # stream-friendly for large datasets
+  verbose=2
+)
+```
+
+
+
+---
+
 ### 2) Create the Dataset
 
 #### (i) Recommended: from folders
@@ -422,8 +454,7 @@ from shinier.utils import show_processing_overview
 fig = show_processing_overview(results)
 plt.show()
 ```
-
----
+--- 
 
 ## Thank you
 
