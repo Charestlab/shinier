@@ -275,6 +275,47 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             f"{Bcolors.DEFAULT_TEXT}No [default]{Bcolors.ENDC}:\n\t- Assumes input images are regular sRGB images, i.e. gamma-encoded.\n\t- Images will first be converted into CIE xyY color-space\n\t- All transformations will be applied on the luminance channel (Y) of the CIE xyY color space.\n\t- Images are then reconverted into sRGB using transformed luminance channel (Y) and original chromatic channels (x, y),\n\t- This mode should preserves color gamuts",
         ])
         opts.linear_luminance = linear_luminance == 1
+
+        if not opts.as_gray and not opts.linear_luminance:
+            gamut_mode = prompt(
+                "Out-of-gamut control strategy: how to handle pixel values falling outside the valid RGB range after transformation?",
+                default=2,
+                kind="choice",
+                choices=[
+                    "Clipping (clip to nearest valid RGB value)",
+                    "Constrain the chrominance of the images (desaturates colors)",
+                    "Constrain the luminance of the images (reduces luminance)",
+                ],
+            )
+
+            if gamut_mode == 1:
+                opts.gamut_strategy = "clip"
+            else:
+                scope = prompt(
+                    "Should this strategy be applied at the dataset level or per image?",
+                    default=2,
+                    kind="choice",
+                    choices=[
+                        "Dataset (same transform for all images)",
+                        "Image (one transform per image)",
+                    ],
+                )
+
+                if gamut_mode == 2:  # Constrain chrominance
+                    opts.gamut_strategy = (
+                        "constrain_dataset_chrominance"
+                        if scope == 1 else
+                        "constrain_image_chrominance"
+                    )
+                else:  # Constrain luminance
+                    opts.gamut_strategy = (
+                        "constrain_dataset_luminance"
+                        if scope == 1 else
+                        "constrain_image_luminance"
+                    )
+        else:
+            opts.gamut_strategy = "clip"
+
         if not opts.linear_luminance:
             rec_standard = prompt("Specifies the Rec. color standard used for RGB ↔ XYZ conversion (default = 2)", default=2, kind='choice', choices=[
                 f"Rec.601 (SDTV) [{Bcolors.CHOICE_VALUE}legacy mode]{Bcolors.ENDC}",

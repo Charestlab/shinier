@@ -22,17 +22,17 @@ Validation tests: /tests/validation_tests/Converter_validation_tests.py
 from __future__ import annotations
 
 import numpy as np
-from typing import Literal, Union, Optional, TYPE_CHECKING, Tuple
+from typing import Literal, Union, Optional, TYPE_CHECKING, Tuple, ClassVar, Any, get_args
 from pydantic import Field, ConfigDict, model_validator
 from PIL import Image
-from shinier.utils import im3D
+from shinier.utils import im3D, console_log, Bcolors
 from shinier.base import InformativeBaseModel
 from shinier import REPO_ROOT
 
 if TYPE_CHECKING:
     from shinier.ImageListIO import ImageListIO
 
-# D65 white point normalized to Y=1.0
+# D65 white point normalized to Y=1.0 (XYZ)
 WHITE_D65 = np.array([0.95047, 1.00000, 1.08883])
 
 # RGB → XYZ conversion matrices for D65
@@ -47,6 +47,7 @@ COLOR_STANDARDS = {
 }
 REC_STANDARD = Literal["rec601", "rec709", "rec2020"]
 RGB_STANDARD = Literal["equal", "rec601", "rec709", "rec2020"]
+
 RGB2GRAY_WEIGHTS = {
     'equal': [1/3, 1/3, 1/3],
     'rec601': M_RGB2XYZ_601[1, :],
@@ -64,7 +65,7 @@ class ColorConverter(InformativeBaseModel):
     """Encapsulates color-space conversions for Rec.601/709/2020 systems.
 
     Attributes:
-        standard (str): Rec. standard ("rec601", "rec709", or "rec2020").
+        rec_standard (str): Rec. standard ("rec601", "rec709", or "rec2020").
         gamma (float): Transfer-function exponent (≈2.2–2.4).
         white_point (np.ndarray): Reference white (default: D65).
         M_RGB2XYZ (np.ndarray): Forward RGB→XYZ matrix.
@@ -77,16 +78,17 @@ class ColorConverter(InformativeBaseModel):
         validate_assignment=True,
     )
 
-    standard: Literal["rec601", "rec709", "rec2020"] = "rec709"
+    rec_standard: Literal["rec601", "rec709", "rec2020"] = "rec709"
     gamma: float = 2.4
+    safe_mode: bool = True
     white_point: np.ndarray = Field(default_factory=lambda: WHITE_D65.copy())
     M_RGB2XYZ: np.ndarray = Field(default_factory=lambda: M_RGB2XYZ_709.copy())
     M_XYZ2RGB: np.ndarray = Field(default_factory=lambda: np.linalg.inv(M_RGB2XYZ_709))
 
-    # --- Pydantic-setting of attributes as a function of standard ---
+    # --- Pydantic-setting of attributes as a function of rec_standard ---
     @model_validator(mode="after")
     def apply_standard_config(self) -> "ColorConverter":
-        cfg = COLOR_STANDARDS[self.standard]
+        cfg = COLOR_STANDARDS[self.rec_standard]
         object.__setattr__(self, "gamma", cfg["gamma"])
         object.__setattr__(self, "white_point", cfg["white"].copy())
         object.__setattr__(self, "M_RGB2XYZ", cfg["M_RGB2XYZ"].copy())
@@ -97,16 +99,38 @@ class ColorConverter(InformativeBaseModel):
     # sRGB ↔ linRGB
     # ------------------------------------------------------------------
     def sRGB_to_linRGB(self, rgb: np.ndarray) -> np.ndarray:
-        rgb = np.clip(rgb, 0, 1)
-        if self.standard == "rec2020":
+        """
+            Convert non-linear R'G'B' into linear RGB.
+
+            Transfer functions:
+            - "rec2020": ITU-R BT.2020 inverse OETF.
+            - "rec709": IEC 61966-2-1 sRGB transfer function.
+            - "rec601": sRGB-style piecewise transfer function (γ ≈ 2.2),
+                        chosen to replicate MATLAB's rgb2gray behaviour
+                        in modern digital workflows.
+            Resources :
+            - http://www.color.org/sRGB.pdf
+            - https://colour.readthedocs.io/
+        """
+        rgb = np.clip(rgb, 0, 1) if self.safe_mode else rgb
+        if self.rec_standard == "rec2020":
             alpha, beta = 1.0993, 0.0181
             return np.where(rgb < beta * 4.5, rgb / 4.5, ((rgb + (alpha - 1)) / alpha) ** (1 / 0.45))
         else:
             return np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** self.gamma)
 
     def linRGB_to_sRGB(self, linRGB: np.ndarray) -> np.ndarray:
-        linRGB = np.clip(linRGB, 0, 1)
-        if self.standard == "rec2020":
+        """
+            Convert linear RGB into non-linear R'G'B'.
+
+            Transfer functions:
+            - "rec2020": ITU-R BT.2020 OETF.
+            - "rec709": IEC 61966-2-1 sRGB transfer function.
+            - "rec601": sRGB-style piecewise transfer function (γ ≈ 2.2),
+                        used for consistency with MATLAB and common SDR pipelines.
+        """
+        linRGB = np.clip(linRGB, 0, 1) if self.safe_mode else linRGB
+        if self.rec_standard == "rec2020":
             alpha, beta = 1.0993, 0.0181
             return np.where(linRGB < beta, 4.5 * linRGB, alpha * np.power(linRGB, 0.45) - (alpha - 1))
         else:
@@ -116,20 +140,31 @@ class ColorConverter(InformativeBaseModel):
     # linRGB ↔ XYZ
     # ------------------------------------------------------------------
     def linRGB_to_xyz(self, linRGB: np.ndarray) -> np.ndarray:
+        """
+            Convert linear RGB into CIE XYZ (device-independent tristimulus space).
+
+            XYZ is the standard CIE “reference” colour space (CIE 1931).
+        """
         out = np.empty_like(linRGB)
         np.matmul(linRGB.reshape(-1, 3), self.M_RGB2XYZ.T, out=out.reshape(-1, 3))  # linRGB @ self.M_RGB2XYZ.T
         return out
 
     def xyz_to_linRGB(self, xyz: np.ndarray) -> np.ndarray:
+        """Convert CIE XYZ  into linear RGB."""
         out = np.empty_like(xyz)
         np.matmul(xyz.reshape(-1, 3), self.M_XYZ2RGB.T, out=out.reshape(-1, 3))  # xyz @ self.M_XYZ2RGB.T
-        return np.clip(out, 0, 1, out=out)
+        return np.clip(out, 0, 1, out=out) if self.safe_mode else out
 
     # ------------------------------------------------------------------
     # XYZ ↔ xyY
     # ------------------------------------------------------------------
     @staticmethod
     def xyz_to_xyY(xyz: np.ndarray) -> np.ndarray:
+        """
+            Convert CIE XYZ into CIE xyY.
+
+            The x and y encode chromaticity, while Y encode ONLY the luminance information.        
+        """
         X, Y, Z = xyz[..., 0], xyz[..., 1], xyz[..., 2]
         denom = X + Y + Z
         denom_safe = np.where(denom == 0, 1.0, denom)
@@ -137,9 +172,31 @@ class ColorConverter(InformativeBaseModel):
         return np.stack([x, y, Y], axis=-1)
 
     @staticmethod
-    def xyY_to_xyz(xyY: np.ndarray) -> np.ndarray:
+    def xyY_to_xyz(xyY: np.ndarray, safe_mode: bool = True) -> np.ndarray:
+        """
+            Convert CIE xyY into CIE 1931 XYZ. 
+            X = xY / y 
+            Z = (1-x-y)Y / y
+            
+            Safe mode : bool, default=True
+            ---------
+                Standard Conversion (True):
+                    Prevents numerical instability when y ≈ 0 by substituting y = 1.
+                    This avoids X/Z explosion for near-black or noisy pixels.
+                Gamut Control (False):
+                    very small y values are preserved (≈1e-9), allowing large
+                    XYZ values to appear, which can help detect gamut violations.
+            """
         x, y, Y = xyY[..., 0], xyY[..., 1], xyY[..., 2]
-        y_safe = np.where(y == 0, 1.0, y)
+        if safe_mode:
+            # Safe Mode: Standard conversion
+            # If y ~ 0 (invalid), assume y=1 (Neutral/Luminance only).
+            # This prevents X/Z explosion for noisy black pixels.
+            y_safe = np.where(y <= 1e-9, 1.0, y)
+        else:
+            # Raw Mode: Gamut Control
+            # If y ~ 0, we WANT explosion to detect the gamut violation.
+            y_safe = np.where(y <= 1e-9, 1e-9, y)
         X = x * Y / y_safe
         Z = (1 - x - y) * Y / y_safe
         return np.stack([X, Y, Z], axis=-1)
@@ -197,6 +254,13 @@ class ColorConverter(InformativeBaseModel):
 
 class ColorTreatment(ColorConverter):
 
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        extra="forbid",
+        validate_assignment=True,
+    )
+    Y_desaturation_threshold: ClassVar[float] = 0.01
+
     @staticmethod
     def forward_color_treatment(
             rec_standard: REC_STANDARD,
@@ -206,8 +270,9 @@ class ColorTreatment(ColorConverter):
             as_gray: bool,
             output_other: Optional[ImageListIO] = None,
             conversion_type: Literal['sRGB_to_xyY', 'sRGB_to_lab'] = 'sRGB_to_xyY',
+            desaturate_chroma_on_low_luminance: bool = False,
             legacy_mode: bool = False,
-) -> Tuple[ImageListIO, Optional[ImageListIO]]:
+            verbose: bool = False) -> Tuple[ImageListIO, Optional[ImageListIO]]:
         """
         Processes a list of images with an optional color treatment conversion or transformation.
 
@@ -228,7 +293,10 @@ class ColorTreatment(ColorConverter):
                 image (True) or a color image (False).
             conversion_type (Literal['sRGB_to_xyY', 'sRGB_to_lab']): Specifies the type of color space
                 conversion to apply. Defaults to 'sRGB_to_xyY'.
+            desaturate_chroma_on_low_luminance (bool): When true, it will desaturate chroma on low-luminance in order to
+                prevent chromatic noise being inflated by luminance manipulation.
             legacy_mode (bool): If True, uses matlab rgb2gray converter.
+            verbose (bool): If True, prints out messages.
 
         Returns:
             ImageListType: Processed set of images after the selected transformation or treatment. If
@@ -238,10 +306,22 @@ class ColorTreatment(ColorConverter):
         Raises:
             ValueError: If `linear_luminance` is False and `output_other` is not provided.
         """
+        if as_gray == 0 and desaturate_chroma_on_low_luminance:
+            from shinier.color.GamutControl import GamutControl  # local import avoids circularity
+            gamut_control = GamutControl(
+                strategy='clip',
+                rec_standard=rec_standard,
+                color_space='xyY',
+                low_Y_desaturate=True,
+                low_Y_threshold=ColorTreatment.Y_desaturation_threshold,
+                low_Y_fade_width=0.0,
+                log_low_Y_chroma_loss=verbose,
+            )
+
         if not linear_luminance and not as_gray and output_other is None:
             raise ValueError("output_other cannot be None when linear_luminance is False and as_gray is false")
 
-        converter = ColorConverter(standard=rec_standard)
+        converter = ColorConverter(rec_standard=rec_standard)
 
         # Promote grayscale (H, W) → (H, W, 3)
         if input_images.n_dims < 3:
@@ -266,7 +346,10 @@ class ColorTreatment(ColorConverter):
             for idx, image in enumerate(output_images):
                 if conversion_type == "sRGB_to_xyY":
                     # Convert from sRGB → xyY (internally handles gamma decoding)
-                    _image = converter.sRGB_to_xyY(image / 255)
+                    srgb_before = image / 255.0
+                    _image = converter.sRGB_to_xyY(srgb_before)
+                    Y_orig = _image[:, :, 2]
+                    xy_before = _image[:, :, :2]
 
                     # Extract luminance (Y) channel — for processing
                     output_images[idx] = _image[:, :, 2] * 255
@@ -275,14 +358,24 @@ class ColorTreatment(ColorConverter):
                     if as_gray == 0:
                         output_other[idx] = _image[:, :, :2]
 
+                    # Optionally desaturate x and y based on original Y
+                    if as_gray == 0 and desaturate_chroma_on_low_luminance:
+                        _, xy_after = gamut_control.apply_low_Y_desaturation(
+                            Y=Y_orig,
+                            other=output_other[idx],
+                            idx=idx,
+                            verbose=verbose,
+                        )
+                        output_other[idx] = xy_after
+
                 elif conversion_type == "sRGB_to_lab":
-                    # Convert from sRGB → xyY (internally handles gamma decoding)
+                    # Convert from sRGB → Lab (internally handles gamma decoding)
                     _image = converter.sRGB_to_lab(image / 255)
 
                     # Extract luminance (Y) channel — for processing
                     output_images[idx] = _image[:, :, 0]/100 * 255
 
-                    # Optionally store x and y for later reconstruction
+                    # Optionally store a and b for later reconstruction
                     if as_gray == 0:
                         output_other[idx] = _image[:, :, 1:]
                 else:
@@ -300,7 +393,9 @@ class ColorTreatment(ColorConverter):
             linear_luminance: bool,
             as_gray: bool,
             input_other: Optional[ImageListIO] = None,
-            conversion_type: Literal['xyY_to_sRGB', 'lab_to_sRGB'] = 'xyY_to_sRGB') -> ImageListIO:
+            conversion_type: Literal['xyY_to_sRGB', 'lab_to_sRGB'] = 'xyY_to_sRGB',
+            gamut_strategy: str = 'clip',
+            verbose: bool = False) -> ImageListIO:
         """
         Reverts color treatments applied previously to a set of images. This operation is
         performed based on the defined color treatment type and conversion method.
@@ -328,6 +423,9 @@ class ColorTreatment(ColorConverter):
             conversion_type (Literal['xyY_to_sRGB', 'lab_to_sRGB']): Specifies the method
                 for reconverting colors: either 'xyY_to_sRGB' to transform xyY to sRGB,
                 or 'lab_to_sRGB' to transform Lab to sRGB. Defaults to 'xyY_to_sRGB'.
+            gamut_strategy (str): Local strategy for handling out-of-gamut pixels during conversion.
+                ('constrain_image_chrominance', 'constrain_image_luminance', or 'clip'). For global strategies, see GamutControl.
+            verbose (bool): If True, prints out messages.
 
         Raises:
             ValueError: If `linear_luminance` is False and `input_other` is None.
@@ -336,7 +434,16 @@ class ColorTreatment(ColorConverter):
             ImageListType: The processed set of images converted back to their original
             color space or gamma-encoded representation.
         """
-        converter = ColorConverter(standard=rec_standard)
+        safe_mode = True
+        converter = ColorConverter(rec_standard=rec_standard, safe_mode=safe_mode)
+
+        from shinier.color.GamutControl import GamutControl  # local import avoids circularity
+        gamut_control = GamutControl(
+            strategy=gamut_strategy,
+            rec_standard=rec_standard,
+            verbose=verbose,
+            color_space='xyY',
+        )
 
         # --- CASE 1: No color treatment ----------------------------------------
         if linear_luminance:
@@ -345,7 +452,7 @@ class ColorTreatment(ColorConverter):
 
         # --- CASE 2: Color treatment branch -----------------------------------
         if not linear_luminance and not as_gray and (input_other is None or input_other.n_channels != 2):
-            raise ValueError("input_other should be (H, W, 2) matrices when linear_luminance == 1 and as_gray is False")
+            raise ValueError("input_other should be (H, W, 2) matrices when linear_luminance and as_gray are False")
 
         for idx, Y in enumerate(input_images):
 
@@ -358,10 +465,14 @@ class ColorTreatment(ColorConverter):
 
                 # Rebuild xyY or Lab: shape (H, W, 3)
                 if conversion_type == "xyY_to_sRGB":
-                    # Convert xyY → sRGB (includes linear→gamma)
-                    xyY = np.dstack([other, Y])
-                    output_images[idx] = converter.xyY_to_sRGB(xyY) * 255
-                if conversion_type == "lab_to_sRGB":
+                    # --- Out-of-gamut repair ---
+                    Y255, other = gamut_control.apply_image(Y=Y*255, other=other, idx=idx, verbose=verbose)
+                    Y = Y255/255.0
+
+                    # Gamma Encode to sRGB
+                    output_images[idx] = converter.xyY_to_sRGB(np.dstack((other, Y))) * 255
+
+                elif conversion_type == "lab_to_sRGB":
                     # Convert xyY → sRGB (includes linear→gamma)
                     lab = np.dstack([Y*100, other])
                     output_images[idx] = converter.lab_to_sRGB(lab) * 255

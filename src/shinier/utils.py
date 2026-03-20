@@ -1,7 +1,3 @@
-# TODO: Before V1 commit: Remove all revision comments (e.g. see round in MatlabOperators)
-# TODO: legacy_mode for SSIM optimization
-# TODO: should target_hist, target_spectrum and target_sf be fixed for composite modes
-
 # External package imports
 from __future__ import annotations
 
@@ -9,12 +5,13 @@ import re
 import warnings
 from pathlib import Path
 from unicodedata import is_normalized
+from dataclasses import dataclass
 
 import numpy as np
 from datetime import datetime
 from numpy.lib.stride_tricks import sliding_window_view
 from typing import (
-    Any, Optional, Tuple, Union, NewType, List, Iterable,
+    Any, Optional, Tuple, Union, NewType, List, Iterable, ClassVar,
     Callable, Literal, Dict, Annotated, TYPE_CHECKING, get_args, get_origin)
 from PIL import Image
 from itertools import chain
@@ -34,6 +31,7 @@ if _HAS_CYTHON:
 from shinier import __version__ as package_version
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+DiffusionTap = Tuple[int, int, float]  # (dy, dx, weight)
 
 
 class Bcolors:
@@ -62,6 +60,80 @@ class Bcolors:
     UNDERLINE = '\033[4m'
     SECTION = '\033[4m\033[1m'  # Image loop
     SECTION_BRIGHT = '\033[4m\033[1m\033[97m'  # Image loop
+
+
+@dataclass(frozen=True)
+class DiffusionMaps:
+    """Collection of standard error-diffusion maps (forward raster convention)."""
+
+    FLOYD_STEINBERG: ClassVar[List[DiffusionTap]] = [
+        (0, 1, 7.0 / 16.0),
+        (1, -1, 3.0 / 16.0),
+        (1, 0, 5.0 / 16.0),
+        (1, 1, 1.0 / 16.0),
+    ]
+
+    JARVIS_JUDICE_NINKE: ClassVar[List[DiffusionTap]] = [
+        (0, 1, 7.0 / 48.0), (0, 2, 5.0 / 48.0),
+        (1, -2, 3.0 / 48.0), (1, -1, 5.0 / 48.0), (1, 0, 7.0 / 48.0),
+        (1, 1, 5.0 / 48.0), (1, 2, 3.0 / 48.0),
+        (2, -2, 1.0 / 48.0), (2, -1, 3.0 / 48.0), (2, 0, 5.0 / 48.0),
+        (2, 1, 3.0 / 48.0), (2, 2, 1.0 / 48.0),
+    ]
+
+    STUCKI: ClassVar[List[DiffusionTap]] = [
+        (0, 1, 8.0 / 42.0), (0, 2, 4.0 / 42.0),
+        (1, -2, 2.0 / 42.0), (1, -1, 4.0 / 42.0), (1, 0, 8.0 / 42.0),
+        (1, 1, 4.0 / 42.0), (1, 2, 2.0 / 42.0),
+        (2, -2, 1.0 / 42.0), (2, -1, 2.0 / 42.0), (2, 0, 4.0 / 42.0),
+        (2, 1, 2.0 / 42.0), (2, 2, 1.0 / 42.0),
+    ]
+
+    BURKES: ClassVar[List[DiffusionTap]] = [
+        (0, 1, 8.0 / 32.0), (0, 2, 4.0 / 32.0),
+        (1, -2, 2.0 / 32.0), (1, -1, 4.0 / 32.0), (1, 0, 8.0 / 32.0),
+        (1, 1, 4.0 / 32.0), (1, 2, 2.0 / 32.0),
+    ]
+
+    SIERRA_3: ClassVar[List[DiffusionTap]] = [
+        (0, 1, 5.0 / 32.0), (0, 2, 3.0 / 32.0),
+        (1, -2, 2.0 / 32.0), (1, -1, 4.0 / 32.0), (1, 0, 5.0 / 32.0),
+        (1, 1, 4.0 / 32.0), (1, 2, 2.0 / 32.0),
+        (2, -1, 2.0 / 32.0), (2, 0, 3.0 / 32.0), (2, 1, 2.0 / 32.0),
+    ]
+
+    SIERRA_2ROW: ClassVar[List[DiffusionTap]] = [
+        (0, 1, 4.0 / 16.0), (0, 2, 3.0 / 16.0),
+        (1, -2, 1.0 / 16.0), (1, -1, 2.0 / 16.0), (1, 0, 3.0 / 16.0),
+        (1, 1, 2.0 / 16.0), (1, 2, 1.0 / 16.0),
+    ]
+
+    SIERRA_LITE: ClassVar[List[DiffusionTap]] = [
+        (0, 1, 2.0 / 4.0),
+        (1, -1, 1.0 / 4.0),
+        (1, 0, 1.0 / 4.0),
+    ]
+
+    ATKINSON: ClassVar[List[DiffusionTap]] = [
+        (0, 1, 1.0 / 8.0),
+        (0, 2, 1.0 / 8.0),
+        (1, -1, 1.0 / 8.0),
+        (1, 0, 1.0 / 8.0),
+        (1, 1, 1.0 / 8.0),
+        (2, 0, 1.0 / 8.0),
+    ]
+
+    # Optional registry for programmatic access
+    ALL: ClassVar[Dict[str, List[DiffusionTap]]] = {
+        "floyd_steinberg": FLOYD_STEINBERG,
+        "jarvis_judice_ninke": JARVIS_JUDICE_NINKE,
+        "stucki": STUCKI,
+        "burkes": BURKES,
+        "sierra_3": SIERRA_3,
+        "sierra_2row": SIERRA_2ROW,
+        "sierra_lite": SIERRA_LITE,
+        "atkinson": ATKINSON,
+    }
 
 
 def print_shinier_header(is_tty: bool = True, version: str = package_version):
@@ -621,7 +693,7 @@ def sf_plot(
             If True, show normalized RMSE on graph.
 
     Returns:
-        fig, ax : plt.Figure, plt.Axes
+        fig : plt.Figure
     """
 
     image = im3D(image)
@@ -1204,28 +1276,139 @@ def floyd_steinberg_dithering(image: np.ndarray, depth: int = 256, legacy_mode: 
         processed_image (np.ndarray): image matrix containing integer values [1, depth], indicating which luminance value should be used for every pixel.
             Output uses the smallest integer dtype that fits all values.
     """
+    if not isinstance(image, np.ndarray):
+        raise TypeError("image must be a np.ndarray")
+
+    if np.issubdtype(image.dtype, np.integer):
+        image = uint_to_float01(image, apply_clipping=True)
+    elif image.max() > 1:
+        raise TypeError("image must be a float np.ndarray with values in [0, 1].")
+
+    return error_diffusion_dither(
+        image,
+        diffusion_map=DiffusionMaps.FLOYD_STEINBERG,
+        n_levels=depth,
+        scan_order="serpentine",
+        normalize_map=True,
+        legacy_mode=legacy_mode,
+    )
+
+
+def error_diffusion_dither(
+    image: np.ndarray,
+    n_levels: int = 256,
+    *,
+    diffusion_map: Sequence[DiffusionTap],
+    legacy_mode: bool = False,
+    scan_order: Literal["raster", "serpentine"] = "raster",
+    normalize_map: bool = False,
+) -> np.ndarray:
+    """
+    Generic error-diffusion dithering (channel-by-channel) with an arbitrary diffusion_map.
+
+    Args:
+        image: Float image in [0, 1], shape (H,W) or (H,W,C).
+        n_levels: Number of quantization levels per channel (>=2). Output in [0, n_levels-1].
+        diffusion_map: Sequence of taps (dy, dx, w). Recommended convention: dy>=0; if dy==0 then dx>0.
+            Weights may be provided either already-normalized (sum≈1) or as integer tap weights (e.g., 7,3,5,1);
+            set `normalize_map=True` to normalize them by their sum.
+        legacy_mode: If True, uses MatlabOperators.round; else np.round.
+        scan_order: "raster" or "serpentine".
+        normalize_map: If True, normalize weights by their sum (when sum != 0).
+
+    Returns:
+        Quantized uint image in [0, n_levels-1], squeezed back if input was 2D.
+    """
     if not isinstance(image, np.ndarray) or np.issubdtype(image.dtype, np.integer):
-        raise TypeError('image should be a np.ndarray of floats ranging from 0 to 1')
-    if not isinstance(depth, int):
-        raise TypeError('depth should be an integer')
+        raise TypeError("image must be a float np.ndarray with values in [0, 1].")
+    if not isinstance(n_levels, int) or n_levels < 2:
+        raise ValueError("n_levels must be an int >= 2.")
+    if scan_order not in ("raster", "serpentine"):
+        raise ValueError('scan_order must be "raster" or "serpentine".')
+    if not np.isfinite(image).all():
+        raise ValueError("image contains NaN/inf.")
+    if image.min() < 0.0 or image.max() > 1.0:
+        raise ValueError("image values must be within [0, 1].")
 
-    tim = image * (depth - 1.0)
-    for xx in np.arange(1,image.shape[1]-1,1):
-        for yy in np.arange(1,image.shape[0]-1,1):  # exchange with the following
-            old_pixel = tim[yy,xx]
-            new_pixel = MatlabOperators.round(tim[yy,xx]) if legacy_mode else np.round(tim[yy,xx])
-            quant_error = old_pixel - new_pixel
-            tim[yy,xx+1] = tim[yy,xx+1] + 7/16 * quant_error
-            tim[yy+1,xx-1] = tim[yy+1,xx-1] + 3/16 * quant_error
-            tim[yy+1,xx] = tim[yy+1,xx] + 5/16 * quant_error
-            tim[yy+1,xx+1] = tim[yy+1,xx+1] + 1/16 * quant_error
+    im = im3D(image)
+    if im.ndim != 3:
+        raise ValueError(f"im3D(image) must return (H,W,C). Got {im.shape}.")
 
-    c_tim = np.clip(tim, 0, depth-1)
+    dm = np.asarray(diffusion_map, dtype=np.float64)
+    if dm.ndim != 2 or dm.shape[1] != 3 or dm.shape[0] == 0 or not np.isfinite(dm).all():
+        raise ValueError("diffusion_map must be a non-empty sequence of finite (dy, dx, w) taps.")
 
-    r_tim = MatlabOperators.round(tim) if legacy_mode else np.round(tim)
-    rc_tim = np.rint(np.clip(r_tim, 0, depth-1))
-    uint_image = rc_tim.astype(np.min_scalar_type(int(rc_tim.max()))).squeeze()
-    return uint_image
+    dy_f, dx_f, wt = dm[:, 0], dm[:, 1], dm[:, 2]
+    if not (np.all(dy_f == np.floor(dy_f)) and np.all(dx_f == np.floor(dx_f))):
+        raise TypeError("diffusion_map dy/dx must be integers.")
+    dy = dy_f.astype(np.int64, copy=False)
+    dx = dx_f.astype(np.int64, copy=False)
+
+    if np.any(dy < 0) or np.any((dy == 0) & (dx == 0)):
+        raise ValueError("diffusion_map requires dy>=0 and excludes (0,0).")
+    if np.any((dy == 0) & (dx < 0)):
+        raise ValueError('diffusion_map has dy=0 with dx<0; use scan_order="serpentine" or change convention.')
+
+    if normalize_map:
+        s = float(wt.sum())
+        if s == 0.0:
+            raise ValueError("normalize_map=True but diffusion_map weight sum is 0.")
+        wt = wt / s
+
+    max_dy = int(dy.max())
+    min_dx = int(dx.min())
+    max_dx = int(dx.max())
+
+    pad_bottom = max_dy
+    pad_left = -min_dx if min_dx < 0 else 0
+    pad_right = max_dx if max_dx > 0 else 0
+
+    # Precompile raster vs mirrored taps
+    # raster: (dy, +dx)
+    # mirrored: (dy, -dx)
+    taps_y = dy
+    taps_x_raster = dx
+    taps_x_mirror = -dx
+    taps_w = wt
+
+    round_fn = MatlabOperators.round if legacy_mode else np.round
+    serp = (scan_order == "serpentine")
+
+    scale = float(n_levels - 1)
+    h, w, c = im.shape
+
+    maxv = n_levels - 1
+    dtype_out = np.uint8 if maxv <= 255 else (np.uint16 if maxv <= 65535 else (np.uint32 if maxv <= 4294967295 else np.uint64))
+    out = np.empty((h, w, c), dtype=dtype_out)
+
+    for ch in range(c):
+        buf = np.zeros((h + pad_bottom, w + pad_left + pad_right), dtype=np.float64)
+        buf[:h, pad_left : pad_left + w] = im[..., ch].astype(np.float64, copy=False) * scale
+
+        for yi in range(h):
+            rev = serp and (yi % 2 == 1)
+            x_iter = range(w - 1, -1, -1) if rev else range(w)
+            taps_x = taps_x_mirror if rev else taps_x_raster
+
+            yb = yi
+            for xi in x_iter:
+                xb = pad_left + xi
+
+                old = buf[yb, xb]
+                new = round_fn(old)
+                buf[yb, xb] = new
+
+                err = old - new
+                if err == 0.0:
+                    continue
+
+                # Apply all taps (vector indices already prepared)
+                for k in range(taps_y.size):
+                    buf[yb + taps_y[k], xb + taps_x[k]] += taps_w[k] * err
+
+        out[..., ch] = np.clip(buf[:h, pad_left : pad_left + w], 0.0, scale).astype(dtype_out, copy=False)
+
+    return out.squeeze()
 
 
 def soft_clip(arr: np.ndarray,
@@ -1267,7 +1450,9 @@ def soft_clip(arr: np.ndarray,
         return m + s_star * (arr - m)
 
     if max_percent == 0:
-        print(f'{Bcolors.WARNING}[soft_clip] Special case: 0% clipping allowed.{Bcolors.ENDC}')
+        console_log(
+            msg=f'{Bcolors.WARNING}[soft_clip] Special case: 0% clipping allowed.{Bcolors.ENDC}',
+            indent_level=1, verbose=True)
         return _zero_clip_mean_preserving(arr, min_value, max_value)
 
     max_iter = 50
@@ -1282,8 +1467,9 @@ def soft_clip(arr: np.ndarray,
     clipped_fraction = (below + above) / total
 
     if verbose:
-        print(f"[soft_clip] Naive clipping would affect "
+        msg = (f"[soft_clip] Naive clipping would affect "
               f"{Bcolors.OKBLUE}{clipped_fraction*100:.3f}%{Bcolors.ENDC} of values")
+        console_log(msg=msg, indent_level=1, verbose=verbose)
 
     if clipped_fraction <= max_percent:
         return np.clip(arr, min_value, max_value)
@@ -1293,7 +1479,7 @@ def soft_clip(arr: np.ndarray,
     arr_range = arr_max - arr_min
     if arr_range == 0:
         if verbose:
-            print("[soft_clip] Constant array detected — nothing to clip.")
+            console_log(msg="[soft_clip] Constant array detected — nothing to clip.", indent_level=1, verbose=verbose)
         return np.clip(arr, min_value, max_value)
 
     target = max_percent
@@ -1309,10 +1495,6 @@ def soft_clip(arr: np.ndarray,
         above = np.sum(scaled_flat > max_value)
         frac = (below + above) / total
 
-        if verbose:
-            print(f"[soft_clip] Iter {i:02d}: scale={mid:.5f}, clipped="
-                  f"{Bcolors.OKBLUE}{frac*100:.3f}%{Bcolors.ENDC}")
-
         # Early stopping if we're close enough to target
         if abs(frac - target) <= tol:
             scaled = scaled_flat.reshape(arr.shape)
@@ -1323,6 +1505,11 @@ def soft_clip(arr: np.ndarray,
         else:
             lo = mid  # allow more
             scaled = scaled_flat.reshape(arr.shape)
+
+    if verbose:
+        msg = (f"[soft_clip] After {i:02d} iterations: scale={mid:.5f}, clipped="
+              f"{Bcolors.OKBLUE}{frac*100:.3f}%{Bcolors.ENDC}")
+        console_log(msg=msg, indent_level=1, verbose=verbose)
 
     return np.clip(scaled, min_value, max_value)
 
@@ -1961,6 +2148,7 @@ def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, ve
     Returns:
         str: The formatted message as a string with any ANSI color codes stripped.
     """
+    # TODO: Convert into a class to improve object-oriented logging and storage.
 
     def _set_indent_and_color(text, lev: int, col: Optional[str] = None):
         indent_str = '\t' * lev

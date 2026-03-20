@@ -51,6 +51,8 @@
 ```
 shinier/src
 ├── color                # Color-space conversion
+│   ├── Converter.py     # Color conversion and transfer functions
+│   └── GamutControl.py  # Gamut management and repairs
 │   └── ...
 ├── __init__.py          # Package entry point
 ├── base.py              # Customized Pydantic base-model
@@ -59,7 +61,8 @@ shinier/src
 ├── ImageProcessor.py    # Main image processing
 ├── Options.py           # Parameter configuration
 ├── SHINIER.py          # Command-line interface
-└── utils.py            # Utility functions and MATLAB operators
+├── utils.py            # Utility functions and MATLAB operators
+└── ...
 ```
 
 ### Processing Flow
@@ -325,15 +328,37 @@ mode = 9  # only dithering
 
 <a id="main-classes"></a>
 ## 🏛️ Main Classes
-### `ColorConverter`
-Encapsulates color-space conversions for Rec.601/709/2020 systems.
+### `Converter`
+Encapsulates color-space conversions and transfer functions for Rec.601/709/2020.
 ```python
-class ColorConverter:
-    standard: Literal["rec601", "rec709", "rec2020"] = "rec709"
+class Converter:
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", validate_assignment=True)
+    rec_standard: Literal["rec601", "rec709", "rec2020"] = "rec709"
     gamma: float = 2.4
+    safe_mode: bool = True
     white_point: np.ndarray = Field(default_factory=lambda: WHITE_D65.copy())
     M_RGB2XYZ: np.ndarray = Field(default_factory=lambda: M_RGB2XYZ_709.copy())
     M_XYZ2RGB: np.ndarray = Field(default_factory=lambda: np.linalg.inv(M_RGB2XYZ_709))
+
+```
+
+### `GamutControl` (Color gamut management)
+Manages gamut repairs and dataset- or image-level constraints after luminance/chroma manipulations.
+```python
+class GamutControl:
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    color_space: Literal['xyY'] = 'xyY'
+    strategy: GAMUT_STRATEGY_TYPE = 'constrain_dataset_chrominance'
+    rec_standard: str = 'rec709'
+    warning_threshold: float = 1.0
+    prc_clipping: float = 0.5
+    low_Y_desaturate: bool = False
+    low_Y_threshold: float = 0.01
+    low_Y_fade_width: float = 0.0
+    log_low_Y_chroma_loss: bool = False
+    _converter: ColorConverter = PrivateAttr(default_factory=ColorConverter)
+    _converter_raw: ColorConverter = PrivateAttr(default_factory=ColorConverter)
+    # methods: apply_image, apply_dataset, apply_low_Y_desaturation, helpers for chroma masking and reliability
 ```
 
 ### `Options`
@@ -351,22 +376,23 @@ class Options:
     background: Union[conint(ge=0, le=255), Literal[300]] = 300
 
     # --- Mode ---
-    mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 8
+    mode: Literal[1, 2, 3, 4, 5, 6, 7, 8, 9] = 2
     seed: Optional[int] = None
     legacy_mode: bool = False
-    iterations: conint(ge=1) = 2
+    iterations: conint(ge=1) = 5
 
     # --- Color ---
     as_gray: bool = False
     linear_luminance: bool = False
     rec_standard: Literal[1, 2, 3] = 2
+    gamut_strategy: GAMUT_STRATEGY_TYPE = Field(default='constrain_image_chrominance')
 
     # --- Dithering / Memory ---
-    dithering: Literal[0, 1, 2] = 1
+    dithering: Literal[0, 1, 2] = 0
     conserve_memory: bool = True
 
     # --- Luminance ---
-    safe_lum_match: bool = False
+    safe_lum_match: bool = True
     target_lum: Tuple[conint(ge=0, le=255), confloat(ge=0)] = (0, 0)
 
     # --- Histogram ---
@@ -388,6 +414,7 @@ Management of image and mask collections with state tracking.
 
 ```python
 class ImageDataset:
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", validate_assignment=True)
     # --- User-provided / externally settable attributes ---
     images: Optional[Union[ImageListIO, ImageListType]] = None
     masks: Optional[Union[ImageListIO, ImageListType]] = None
@@ -411,48 +438,64 @@ Main image processing class.
 
 ```python
 class ImageProcessor:
+    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=False)
     # --- Public attributes ---
-    dataset: ImageDataset
-    options: Optional[Options] = None
-    verbose: Literal[-1, 0, 1, 2, 3] = 0
-    log: List[str] = Field(default_factory=list)
-    validation: List[dict] = Field(default_factory=list)
-    ssim_results: List[dict] = Field(default_factory=list)
-    ssim_data: List[dict] = Field(default_factory=list)
-    seed: Optional[int] = None
     bool_masks: List = Field(default_factory=list)
+    dataset: ImageDataset
+    desaturate_chroma_on_low_luminance: bool = Field(default=True)
     from_cli: bool = Field(default=False)
     from_unit_test: bool = Field(default=False)
     from_validation_test: bool = Field(default=False)
+    log: List[str] = Field(default_factory=list)
+    options: Optional[Options] = None
+    seed: Optional[int] = None
+    ssim_data: List[dict] = Field(default_factory=list)
+    ssim_results: List[dict] = Field(default_factory=list)
+    validation: List[dict] = Field(default_factory=list)
+    verbose: Literal[-1, 0, 1, 2, 3] = 0
 
     # --- Private attributes ---
-    _dataset_map: dict = PrivateAttr(default_factory=dict)
-    _mode2processing_steps: dict = PrivateAttr(default_factory=dict)
-    _fct_name2process_name: dict = PrivateAttr(default_factory=dict)
-    _iter_num: int = PrivateAttr(default=0)
-    _processing_steps: List[str] = PrivateAttr(default_factory=list)
-    _n_steps: int = PrivateAttr(default=0)
-    _step: int = PrivateAttr(default=0)
-    _processing_function: Optional[str] = PrivateAttr(default=None)
-    _processed_image: Optional[str] = PrivateAttr(default=None)
-    _processed_channel: Optional[int] = PrivateAttr(default=None)
-    _log_param: dict = PrivateAttr(default_factory=dict)
-    _is_last_operation: bool = PrivateAttr(default=False)
-    _sum_bool_masks: List = PrivateAttr(default_factory=list)
+    _backward_conversion_type: str = PrivateAttr(default=None)
+    _color_space: Literal['uvw01', 'xyY'] = PrivateAttr(default='xyY')
     _complete: bool = PrivateAttr(default=False)
-    _rec_standard: str = PrivateAttr(default="rec709")
-    _target_lum: Optional[List[Tuple[float, float]]] = PrivateAttr(default=None)
-    _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
-    _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
-    _target_sf: Optional[np.ndarray] = PrivateAttr(default=None)
+    _dataset_map: dict = PrivateAttr(default_factory=dict)
+    _fct_name2process_name: dict = PrivateAttr(default_factory=dict)
     _final_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
     _initial_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
+    _initial_targets: Optional[Dict[str, np.ndarray]] = PrivateAttr(default={})
+    _is_first_operation: bool = PrivateAttr(default=True)
+    _is_last_operation: bool = PrivateAttr(default=False)
+    _iter_num: int = PrivateAttr(default=0)
+    _log_param: dict = PrivateAttr(default_factory=dict)
+    _lum_stats: List[np.ndarray] = PrivateAttr(default_factory=list)
+    _mode2processing_steps: dict = PrivateAttr(default_factory=dict)
+    _n_steps: int = PrivateAttr(default=0)
+    _processed_channel: Optional[int] = PrivateAttr(default=None)
+    _processed_image: Optional[str] = PrivateAttr(default=None)
+    _processing_function: Optional[str] = PrivateAttr(default=None)
+    _processing_steps: List[str] = PrivateAttr(default_factory=list)
+    _radius_grid: Optional[np.ndarray] = PrivateAttr(default=None)
+    _rec_standard: str = PrivateAttr(default="rec709")
+    _step: int = PrivateAttr(default=0)
+    _sum_bool_masks: List = PrivateAttr(default_factory=list)
+    _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
+    _target_lum: Optional[List[Tuple[float, float]]] = PrivateAttr(default=None)
+    _target_sf: Optional[np.ndarray] = PrivateAttr(default=None)
+    _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
 ```
+
+
+## Additional Resources
+
+- For a detailed description of the available options, see the `Options` class in `Options.py`; each parameter lists its purpose, allowed values, and default.
+- For algorithmic details and a walkthrough of processing steps, see the `ImageProcessor` class in `ImageProcessor.py`.
+- For color management and gamut-control strategies, see the `GamutControl` class in `color/GamutControl.py`. Interactive visual examples are available at [shinier-web examples](https://charestlab.github.io/shinier-web/).
 
 ---
 
 <a id="visualization-functions"></a>
 ## Visualization Functions
+These helpers are implemented in `src/shinier/utils.py`.
 
 ```python
 def imhist_plot(
@@ -467,29 +510,58 @@ def imhist_plot(
     ax: Optional[plt.Axes] = None,
     show_normalized_rmse: bool = False,
 ) -> Tuple[plt.Figure, Tuple[Any, Any, Any]]:
-    """Displays an image with its histogram and optional descriptive statistics."""
+    """Display an image with a compact histogram and optional descriptives (μ, ±σ).
+
+    Returns the figure and a tuple of axes: (image_ax, gradient_bar_ax, hist_ax).
+    """
+
+def sf_plot(
+    image: np.ndarray,
+    sf_p: Optional[np.ndarray] = None,
+    target_sf: Optional[np.ndarray] = None,
+    ax: Optional[plt.axis] = None,
+    show_normalized_rmse: bool = False,
+) -> Union[plt.Figure, plt.Axes]:
+    """Plot the rotational average (spatial-frequency profile) with optional target overlay."""
 
 def spectrum_plot(
-        spectrum: np.ndarray,
-        cmap: str = "gray",
-        log: bool = True,
-        gamma: float = 1.0,
-        ax: Optional[plt.Axes] = None,
-        with_colorbar: bool = True,
-        colorbar_label: str = 'log(1 + |F|) (stretched)'
-    ) -> Union[plt.Figure, plt.Axes]:
-    """Display a Fourier magnitude spectrum with optional log and gamma scaling."""
-    
-def sf_plot(
-        image: np.ndarray, 
-        sf_p: Optional[np.ndarray], 
-        target_sf: Optional[np.ndarray], 
-        ax: Optional[plt.axis] = None
+    spectrum: np.ndarray,
+    cmap: str = "gray",
+    log: bool = True,
+    gamma: float = 1.0,
+    ax: Optional[plt.Axes] = None,
+    with_colorbar: bool = True,
+    colorbar_label: str = 'log(1 + |F|) (stretched)',
+    target_spectrum: Optional[np.ndarray] = None,
+    show_normalized_rmse: bool = False,
 ) -> Union[plt.Figure, plt.Axes]:
-    """Spatial frequency profile plotting"""
+    """Display a Fourier magnitude spectrum with optional log/gamma scaling and target comparison."""
 
-def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_figure: bool = True) -> plt.Figure:
+def im_power_spectrum_plot(im: np.ndarray, with_colorbar: bool = True) -> plt.Figure:
+        """Display the centered 2D log-scaled Fourier power spectrum (grayscale/luminance).
+
+        - Converts RGB input to luminance (Rec.709) when needed and computes the power
+            spectrum |F|^2, then delegates rendering to `spectrum_plot`.
+        - Useful to visualize energy distribution across frequencies and orientations.
+        """
+
+def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_figure: bool = True, show_initial_target: bool = False) -> plt.Figure:
     """Display before/after images and diagnostics for all processing steps in one figure.
+
+    The figure layout adapts to the active SHINIER mode:
+        • Row 1: before/after images.
+        • Subsequent rows: one row per processing step (e.g., luminance, histogram, spectrum).
+          Each diagnostic row shows "before" (left) and "after" (right) panels side by side.
+
+    Args:
+        processor (ImageProcessor): The SHINIER ImageProcessor instance.
+        img_idx (int, optional): Index of the image to visualize. Defaults to 0.
+        show_figure (bool): If False, return the fig object without showing it (i.e. plt.show())
+        show_initial_target (bool): If True, plots the initial target in composite modes.
+
+    Returns:
+        matplotlib.figure.Figure: Composite figure summarizing the image transformations.
+    """
 ```
 
 ---
@@ -571,6 +643,8 @@ class ImageListIO:
 - `ImageListIO`: Image loading/saving
 - `ImageDataset`: Collection management
 - `ImageProcessor`: Image processing
+- `Converter`: Luminance preservation and minimal chroma distortion.
+- `GamutControl`: Chroma-loss minimization.
 
 **Test Images:**
 - Noise-generated images for testing
@@ -646,5 +720,5 @@ Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum m
 
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-  <em>Version 0.1.0 - Complete technical documentation</em>
+    <em>Version 0.1.9 - Complete technical documentation</em>
 </p>

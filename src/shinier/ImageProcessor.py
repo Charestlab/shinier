@@ -13,13 +13,13 @@ import sys
 from shinier.base import InformativeBaseModel
 from shinier import ImageDataset, Options, ImageListIO
 from shinier.utils import (
-    beta_bounds_from_ssim, separate, imhist, im3D, cart2pol, pol2cart, soft_clip,
+    beta_bounds_from_ssim, separate, imhist, im3D, cart2pol, pol2cart, soft_clip, imshow,
     rescale_images255, get_images_spectra, ssim_sens, spectrum_plot, imhist_plot, sf_plot, avg_hist,
     uint8_plus, float01_to_uint, uint_to_float01, noisy_bit_dithering, floyd_steinberg_dithering,
     exact_histogram, Bcolors, MatlabOperators, compute_rmse, get_radius_grid, rotational_avg,
     has_duplicates, stretch, console_log, print_log, StepSizeController
 )
-from shinier.color import ColorConverter, ColorTreatment, rgb2gray, gray2rgb, RGB2GRAY_WEIGHTS, RGB_STANDARD
+from shinier.color import ColorConverter, ColorTreatment, rgb2gray, gray2rgb, RGB2GRAY_WEIGHTS, RGB_STANDARD, GamutControl
 
 RGB_STANDARD_LIST = [r for r in get_args(RGB_STANDARD)]
 Vector = Iterable[Union[float, int]]
@@ -64,47 +64,56 @@ class ImageProcessor(InformativeBaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=False)
 
     # --- Public attributes ---
-    dataset: ImageDataset
-    options: Optional[Options] = None
-    verbose: Literal[-1, 0, 1, 2, 3] = 0
-    log: List[str] = Field(default_factory=list)
-    validation: List[dict] = Field(default_factory=list)
-    ssim_results: List[dict] = Field(default_factory=list)
-    ssim_data: List[dict] = Field(default_factory=list)
-    seed: Optional[int] = None
     bool_masks: List = Field(default_factory=list)
+    dataset: ImageDataset
+    desaturate_chroma_on_low_luminance: bool = Field(default=True)
     from_cli: bool = Field(default=False)
     from_unit_test: bool = Field(default=False)
     from_validation_test: bool = Field(default=False)
+    log: List[str] = Field(default_factory=list)
+    options: Optional[Options] = None
+    seed: Optional[int] = None
+    ssim_data: List[dict] = Field(default_factory=list)
+    ssim_results: List[dict] = Field(default_factory=list)
+    validation: List[dict] = Field(default_factory=list)
+    verbose: Literal[-1, 0, 1, 2, 3] = 0
 
     # --- Private attributes ---
-    _dataset_map: dict = PrivateAttr(default_factory=dict)
-    _mode2processing_steps: dict = PrivateAttr(default_factory=dict)
-    _fct_name2process_name: dict = PrivateAttr(default_factory=dict)
-    _iter_num: int = PrivateAttr(default=0)
-    _processing_steps: List[str] = PrivateAttr(default_factory=list)
-    _n_steps: int = PrivateAttr(default=0)
-    _step: int = PrivateAttr(default=0)
-    _processing_function: Optional[str] = PrivateAttr(default=None)
-    _processed_image: Optional[str] = PrivateAttr(default=None)
-    _processed_channel: Optional[int] = PrivateAttr(default=None)
-    _log_param: dict = PrivateAttr(default_factory=dict)
-    _is_last_operation: bool = PrivateAttr(default=False)
-    _is_first_operation: bool = PrivateAttr(default=True)
-    _sum_bool_masks: List = PrivateAttr(default_factory=list)
+    _backward_conversion_type: str = PrivateAttr(default=None)
+    _color_space: Literal['uvw01', 'xyY'] = PrivateAttr(default='xyY')
     _complete: bool = PrivateAttr(default=False)
-    _rec_standard: str = PrivateAttr(default="rec709")
-    _target_lum: Optional[List[Tuple[float, float]]] = PrivateAttr(default=None)
-    _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
-    _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
-    _target_sf: Optional[np.ndarray] = PrivateAttr(default=None)
-    _initial_targets: Optional[Dict[str, np.ndarray]] = PrivateAttr(default={})
-    _radius_grid: Optional[np.ndarray] = PrivateAttr(default=None)
+    _dataset_map: dict = PrivateAttr(default_factory=dict)
+    _fct_name2process_name: dict = PrivateAttr(default_factory=dict)
     _final_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
+    _forward_conversion_type: str = PrivateAttr(default=None)
+    _gamut_control: Optional[GamutControl] = PrivateAttr(default=None)
     _initial_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
+    _initial_targets: Optional[Dict[str, np.ndarray]] = PrivateAttr(default={})
+    _is_first_operation: bool = PrivateAttr(default=True)
+    _is_last_operation: bool = PrivateAttr(default=False)
+    _iter_num: int = PrivateAttr(default=0)
+    _log_param: dict = PrivateAttr(default_factory=dict)
+    _lum_stats: List[np.ndarray] = PrivateAttr(default_factory=list)
+    _mode2processing_steps: dict = PrivateAttr(default_factory=dict)
+    _n_steps: int = PrivateAttr(default=0)
+    _processed_channel: Optional[int] = PrivateAttr(default=None)
+    _processed_image: Optional[str] = PrivateAttr(default=None)
+    _processing_function: Optional[str] = PrivateAttr(default=None)
+    _processing_steps: List[str] = PrivateAttr(default_factory=list)
+    _radius_grid: Optional[np.ndarray] = PrivateAttr(default=None)
+    _rec_standard: str = PrivateAttr(default="rec709")
+    _step: int = PrivateAttr(default=0)
+    _sum_bool_masks: List = PrivateAttr(default_factory=list)
+    _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
+    _target_lum: Optional[List[Tuple[float, float]]] = PrivateAttr(default=None)
+    _target_sf: Optional[np.ndarray] = PrivateAttr(default=None)
+    _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
 
     def post_init(self, __context: Any) -> None:
         """Run initialization logic after Pydantic validation and only once at instantiation."""
+        self._forward_conversion_type = f"sRGB_to_{self._color_space}" if self._color_space is not None else None
+        self._backward_conversion_type= f"{self._color_space}_to_sRGB" if self._color_space is not None else None
+
         if self.options is None:
             self.options = getattr(self.dataset, "options", None)
 
@@ -115,6 +124,14 @@ class ImageProcessor(InformativeBaseModel):
         self._dataset_map = {id(self.dataset.images): "images"}
         if hasattr(self.dataset, "buffer"):
             self._dataset_map[id(self.dataset.buffer)] = "buffer"
+
+        # Initialize GamutControl
+        self._gamut_control = GamutControl(
+            strategy=self.options.gamut_strategy,
+            rec_standard=RGB_STANDARD_LIST[self.options.rec_standard],
+            verbose=self.verbose,
+            color_space=self._color_space,
+        )
 
         self._mode2processing_steps = {
             1: ["lum_match"],
@@ -373,31 +390,53 @@ class ImageProcessor(InformativeBaseModel):
         and logged for replicability.
         """
 
+        # Set a seed for the random generator used in exact histogram specification
+        if self.seed is None:
+            now = datetime.now()
+            self.seed = int(now.timestamp())
+        np.random.seed(self.seed)
+        self.log.append(f'seed={self.seed}')
+        console_log(msg=f'\n\nUse this seed for reproducibility: {self.seed}', color=Bcolors.WARNING, indent_level=0, verbose=self.verbose>=1 and not self.from_cli)
+
         # Put input images into buffer dataset and convert to float [0, 255]
         self.dataset.buffer = self.uint8_to_float255(self.dataset.images, self.dataset.buffer)
 
         # Apply relevant color treatment
-        buffer_other = self.dataset.buffer_other if not self.options.linear_luminance else None
-        self.dataset.buffer, buffer_other = ColorTreatment.forward_color_treatment(
+        if self.options.as_gray == False or self.options.linear_luminance == False:
+            msg = f'\nApplying pre-processing color treatment'
+            if self.desaturate_chroma_on_low_luminance:
+                msg = msg + f' and desaturation on low luminance (Y < {ColorTreatment.Y_desaturation_threshold}) chroma'
+            msg = msg + '...'
+            console_log(
+                msg=msg,
+                indent_level=0,
+                color=Bcolors.SECTION,
+                verbose=self.verbose >= 1
+            )
+        self.dataset.buffer, self.dataset.buffer_other = ColorTreatment.forward_color_treatment(
             rec_standard=self._rec_standard,
             input_images=self.dataset.buffer,
             output_images=self.dataset.buffer,
             linear_luminance=self.options.linear_luminance,
             as_gray=self.options.as_gray,
-            output_other=buffer_other,
-            conversion_type='sRGB_to_xyY',
-            legacy_mode=self.options.legacy_mode)
-
-        if buffer_other is not None:
-            self.dataset.buffer_other = buffer_other
+            output_other=self.dataset.buffer_other,
+            conversion_type=self._forward_conversion_type,
+            desaturate_chroma_on_low_luminance=True,
+            legacy_mode=self.options.legacy_mode,
+            verbose=self.verbose>=2)
 
         # Copy of the original buffer
         self._initial_buffer = self.dataset.buffer.new_copy(to_list=False)
 
         # Compute target histogram if required
         if self.options.mode in [2, 5, 6, 7, 8]:
+            # Prepare masks
+            if self.options.mode == 2:
+                for idx in range(self.dataset.images.n_images):
+                    self._get_mask(idx)
             self._compute_initial_target_histogram()
             self._initial_targets['hist'] = self._target_hist.copy()
+
 
         # Compute Fourier spectra and target spectrum if required
         if self.options.mode in [3, 4, 5, 6, 7, 8]:
@@ -409,14 +448,6 @@ class ImageProcessor(InformativeBaseModel):
         if self.options.mode in [3, 5, 7]:
             self._compute_initial_target_sf()
             self._initial_targets['sf'] = self._target_sf.copy()
-
-        # Set a seed for the random generator used in exact histogram specification
-        if self.seed is None:
-            now = datetime.now()
-            self.seed = int(now.timestamp())
-        np.random.seed(self.seed)
-        self.log.append(f'seed={self.seed}')
-        console_log(msg=f'Use this seed for reproducibility: {self.seed}', color=Bcolors.WARNING, indent_level=0, verbose=self.verbose>=1 and not self.from_cli)
 
         # Set tqdm
         if self.verbose == 0:
@@ -430,8 +461,8 @@ class ImageProcessor(InformativeBaseModel):
                 file=sys.stdout
             )
 
-        # A first loop runs n times the processing steps associated with given mode.
-        # A second loop is for modes associated with multiple steps will run more
+        # The outter loop runs n times, one time per processing steps associated with given mode.
+        # The inner loop is for modes which have multiple steps (e.g. multiple iterations for optimization)
         mask_prepared = False
         cnt = 0
         for self._iter_num in range(self.options.iterations):
@@ -453,7 +484,7 @@ class ImageProcessor(InformativeBaseModel):
                         raise RuntimeError(f'Function {self._processing_function} does not exist in ImageProcessor class')
 
                     console_log(
-                        msg=f'Applying {self._fct_name2process_name[self._processing_function]}... (iter={self._iter_num}, step={self._step})',
+                        msg=f'\nApplying {self._fct_name2process_name[self._processing_function]}... (iter={self._iter_num}, step={self._step})',
                         indent_level=0,
                         color=Bcolors.SECTION,
                         verbose=self.verbose >= 1
@@ -469,16 +500,29 @@ class ImageProcessor(InformativeBaseModel):
         # Copy of the final buffer (before
         self._final_buffer = self.dataset.buffer.new_copy(to_list=False)
 
+        # Apply relevant global gamut control strategy
+        if self.dataset.buffer_other is not None and self.options.gamut_strategy in ['constrain_dataset_luminance', 'constrain_dataset_chrominance']:
+            console_log(f'Applying gamut control strategy: {self.options.gamut_strategy}', indent_level=0, verbose=self.verbose >= 1, color=Bcolors.SECTION)
+            self.dataset.buffer, self.dataset.buffer_other = self._gamut_control.apply_dataset(self.dataset.buffer, self.dataset.buffer_other, verbose=self.verbose >= 1)
+
         # Apply relevant inverse color treatment
-        buffer_other = self.dataset.buffer_other if not self.options.linear_luminance else None
+        if self.options.as_gray == False or self.options.linear_luminance == False:
+            console_log(
+                msg=f'\n\nApplying post-processing color treatment...',
+                indent_level=0,
+                color=Bcolors.SECTION,
+                verbose=self.verbose >= 1)
+
         self.dataset.buffer = ColorTreatment.backward_color_treatment(
             rec_standard=self._rec_standard,
             input_images=self.dataset.buffer,
-            input_other=buffer_other,
+            input_other=self.dataset.buffer_other,
             output_images=self.dataset.buffer,
             linear_luminance=self.options.linear_luminance,
+            gamut_strategy=self.options.gamut_strategy,
             as_gray=self.options.as_gray,
-            conversion_type='xyY_to_sRGB')
+            conversion_type=self._backward_conversion_type,
+            verbose=self.verbose>=2)
 
         # Applies dithering or simply convert into uint8 if no dithering
         self.dataset.images = self.dithering(
@@ -660,7 +704,6 @@ class ImageProcessor(InformativeBaseModel):
         bit_size = 8
         n_bins = 2 ** bit_size
 
-        # TODO: Verify scientific rationale
         if not self._is_first_operation and self.options._is_moving_target and self.options.mode > 2:
             self._compute_initial_target_histogram()
 
@@ -671,7 +714,7 @@ class ImageProcessor(InformativeBaseModel):
         # Match the histogram
         self._processed_channel = None
         for idx, image in enumerate(buffer_collection):
-            original_image = self._initial_buffer[idx] if self.options._is_moving_target else image # TODO: Verify scientific rationale
+            original_image = self._initial_buffer[idx] if self.options._is_moving_target else image
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
             console_log(msg=f"\nImage {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
 
@@ -787,7 +830,6 @@ class ImageProcessor(InformativeBaseModel):
                 self._is_last_operation is True.
         """
 
-        # TODO: Verify scientific rationale
         if not self._is_first_operation and self.options._is_moving_target and self.options.mode > 3:
             self._compute_initial_spectra()
             self._compute_initial_target_spectrum()
@@ -854,7 +896,6 @@ class ImageProcessor(InformativeBaseModel):
         buffer_collection.drange = (0, 255)
 
         # buffer_collection dtype is np.float64 and drange is close but out of [0, 1] before rescaling of any sort
-        # TODO: NEEDS TO BE CHECKED
         if self.options.rescaling not in [0, None] and self._is_last_operation:
             buffer_collection = rescale_images255(buffer_collection, rescaling_option=self.options.rescaling)
             # If legacy mode is turned on, rescale_images255 will output uint8
@@ -884,7 +925,6 @@ class ImageProcessor(InformativeBaseModel):
         # compatible with the image dimensions, typically of shape
         # (H, W, C).
 
-        # TODO: Verify scientific rationale
         if not self._is_first_operation and self.options._is_moving_target and self.options.mode > 4:
             self._compute_initial_spectra()
             self._compute_initial_target_spectrum()
