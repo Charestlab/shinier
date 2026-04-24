@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Union, Optional, Literal, Tuple, Any
+from typing import Union, Optional, Literal, Tuple, Any, get_args
 import numpy as np
 import json
 from pydantic import (
@@ -176,8 +176,10 @@ class Options(InformativeBaseModel):
 
         hist_iterations (int): Number of iterations for SSIM optimization in hist_optim (default is 10).
 
-        target_hist (Optional[np.ndarray, Literal['equal']]): Target histogram counts (int) or weights (float) to use for histogram or fourier matching (default is None).
-            Should be a numpy array of shape (256,) for 8-bit images, or a string 'equal' for histogram equalization.
+        target_hist (Optional[Union[np.ndarray, Path, Literal['equal']]]): Target histogram counts (int), weights (float),
+            or image path used to derive a target histogram with the same preprocessing pipeline as the dataset (default is None).
+            Should be a numpy array of shape (256,) for 8-bit images, a path to an image of matching size, or a string 'equal'
+            for histogram equalization.
             If 'None', the target histogram is the average histogram of all the input images.
             E.g.,
                 from shinier.utils import imhist
@@ -191,15 +193,19 @@ class Options(InformativeBaseModel):
             3 = Rescaling average max/min.
             > Not allowed for modes 1 and 2.
 
-        target_spectrum: Optional[np.ndarray[float]]: Target magnitude spectrum (default = None).
-            Same size as the images of float values.
+        target_spectrum: Optional[Union[np.ndarray[float], Path]]: Target magnitude spectrum or image path (default = None).
+            If given as an array, it must be a float magnitude spectrum with the same size as the processed images.
+            If given as a path, the image is loaded and converted with the same preprocessing pipeline as the dataset,
+            then its target spectrum is computed automatically.
             If 'None', the target magnitude spectrum is the average spectrum of all the input images.
             Only for mode 3 and 4.
             E.g.,
-                from shinier.utils import cart2pol
-                fftim = np.fft.fftshift(np.fft.fft2(im))
-                rho, theta = cart2pol(np.real(fftim), np.imag(fftim))
-                target_spectrum = rho
+                from PIL import Image
+                from shinier.utils import image_spectrum
+                import numpy as np
+
+                im = np.array(Image.open("my_image.png").convert("L"), dtype=np.float64)
+                target_spectrum = image_spectrum(im)[0]
 
     --------------------------------------------------Misc--------------------------------------------------------
         verbose (Literal[-1, 0, 1, 2, 3]): Controls verbosity levels (default = 0).
@@ -249,11 +255,11 @@ class Options(InformativeBaseModel):
     hist_optim: bool = False
     hist_specification: Optional[Literal[1, 2, 3, 4]] = 4
     hist_iterations: conint(ge=1) = 10
-    target_hist: Optional[Union[np.ndarray, Literal["equal", "unit_test"]]] = Field(default=None)
+    target_hist: Optional[Union[np.ndarray, Path, Literal["equal", "unit_test"]]] = Field(default=None)
 
     # --- Fourier ---
     rescaling: Optional[Literal[0, 1, 2, 3]] = 2
-    target_spectrum: Optional[Union[np.ndarray, Literal["unit_test"]]] = Field(default=None)
+    target_spectrum: Optional[Union[np.ndarray, Path, Literal["unit_test"]]] = Field(default=None)
 
     # --- Misc ---
     verbose: Literal[-1, 0, 1, 2, 3] = 0
@@ -276,11 +282,23 @@ class Options(InformativeBaseModel):
     @field_validator("target_hist")
     @classmethod
     def validate_target_hist(cls, v):
-        """Validate that target_hist is 'equal' or an array of correct shape."""
+        """Validate that target_hist is 'equal', an array of correct shape, or a valid image path."""
         if v is None or (isinstance(v, str) and v in ["equal", 'unit_test']):
             return v
+        if isinstance(v, (str, Path)):
+            v = Path(v).resolve()
+            if not v.exists():
+                raise ValueError(f"target_hist image does not exist: {v}")
+            if not v.is_file():
+                raise ValueError(f"target_hist path must point to a file: {v}")
+            if v.suffix.lower().lstrip(".") not in get_args(ACCEPTED_IMAGE_FORMATS):
+                raise ValueError(
+                    f"target_hist image must use one of {get_args(ACCEPTED_IMAGE_FORMATS)}. "
+                    f"Got: {v.suffix}"
+                )
+            return v
         if not isinstance(v, np.ndarray):
-            raise TypeError("target_hist must be a numpy.ndarray or 'equal'.")
+            raise TypeError("target_hist must be a numpy.ndarray, an image path, or 'equal'.")
         if v.ndim not in (1, 2):
             raise ValueError("target_hist must be 1D (gray) or 2D (color).")
         if v.ndim == 1 and v.size != 256:
@@ -290,11 +308,23 @@ class Options(InformativeBaseModel):
     @field_validator("target_spectrum")
     @classmethod
     def validate_target_spectrum(cls, v):
-        """Ensure target_spectrum is float np.ndarray."""
+        """Ensure target_spectrum is a float np.ndarray, a valid image path, or 'unit_test'."""
         if v is None or (isinstance(v, str) and v in ['unit_test']):
             return v
+        if isinstance(v, (str, Path)):
+            v = Path(v).resolve()
+            if not v.exists():
+                raise ValueError(f"target_spectrum image does not exist: {v}")
+            if not v.is_file():
+                raise ValueError(f"target_spectrum path must point to a file: {v}")
+            if v.suffix.lower().lstrip(".") not in get_args(ACCEPTED_IMAGE_FORMATS):
+                raise ValueError(
+                    f"target_spectrum image must use one of {get_args(ACCEPTED_IMAGE_FORMATS)}. "
+                    f"Got: {v.suffix}"
+                )
+            return v
         if not isinstance(v, np.ndarray):
-            raise TypeError("target_spectrum must be a numpy.ndarray.")
+            raise TypeError("target_spectrum must be a numpy.ndarray or an image path.")
         if not np.issubdtype(v.dtype, np.floating):
             raise TypeError("target_spectrum dtype must be float.")
         return v
@@ -316,14 +346,14 @@ class Options(InformativeBaseModel):
             raise ValueError("Mode 9 requires dithering 1 or 2 (not 0).")
 
         # target_hist should match expected images size under as_gray and linear_luminance
-        if self.target_hist is not None and not isinstance(self.target_hist, str):
+        if self.target_hist is not None and not isinstance(self.target_hist, (str, Path)):
             if (not self.linear_luminance or self.as_gray) and self.target_hist.size != 256:
                 raise ValueError(f"target_hist must be (256, ) or (256, 1) when linear_luminance is False or as_gray is True. Current target_hist shape = {self.target_hist.shape}")
 
         # target_spectrum should match expected images size under as_gray and linear_luminance
         if self.target_spectrum is not None:
             if not self.linear_luminance or self.as_gray:
-                if not isinstance(self.target_spectrum, str) and self.target_spectrum.squeeze().ndim != 2:
+                if not isinstance(self.target_spectrum, (str, Path)) and self.target_spectrum.squeeze().ndim != 2:
                     raise ValueError(f"target_spectrum must be (W, H,) or (W, H, 1) when linear_luminance is False or as_gray is True. Current target_spectrum shape = {self.target_spectrum.shape}")
 
         # hist_specification ignored if hist_optim = True

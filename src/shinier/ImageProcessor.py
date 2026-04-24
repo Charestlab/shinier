@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 from typing import Optional, List, Union, Iterable, Tuple, Literal, Dict, ClassVar, get_args, Any
 from datetime import datetime
+from pathlib import Path
 import numpy as np
 from pydantic import Field, PrivateAttr, ConfigDict
 
@@ -17,7 +18,7 @@ from shinier.utils import (
     rescale_images255, get_images_spectra, ssim_sens, spectrum_plot, imhist_plot, sf_plot, avg_hist,
     uint8_plus, float01_to_uint, uint_to_float01, noisy_bit_dithering, floyd_steinberg_dithering,
     exact_histogram, Bcolors, MatlabOperators, compute_rmse, get_radius_grid, rotational_avg,
-    has_duplicates, stretch, console_log, print_log, StepSizeController
+    has_duplicates, stretch, console_log, print_log, StepSizeController, image_spectrum
 )
 from shinier.color import ColorConverter, ColorTreatment, rgb2gray, gray2rgb, RGB2GRAY_WEIGHTS, RGB_STANDARD, GamutControl
 
@@ -261,20 +262,78 @@ class ImageProcessor(InformativeBaseModel):
             for idx, mag in enumerate(self.dataset.magnitudes):
                 target_spectrum += mag
             target_spectrum /= len(self.dataset.magnitudes)
+        elif isinstance(target_spectrum, Path):
+            target_spectrum = self._compute_target_spectrum_from_image_path(target_spectrum)
         else:
             if target_spectrum.shape[:2] != self.dataset.buffer.reference_size:
                 raise TypeError('The target spectrum must have the same size as the images.')
         self._target_spectrum = im3D(target_spectrum)
+
+    def _compute_target_spectrum_from_image_path(self, image_path: Path) -> np.ndarray:
+        """Load a target image and compute its spectrum after the same preprocessing as dataset images."""
+        load_as_gray = 1 if self.options.as_gray and self.options.linear_luminance else 0
+        target_images = ImageListIO(
+            input_data=[image_path],
+            conserve_memory=True,
+            as_gray=load_as_gray,
+            save_dir=self.options.output_folder,
+        )
+
+        buffer_size = target_images[0].shape[:2] if not self.options.linear_luminance or self.options.as_gray else target_images[0].shape
+        target_buffer = ImageListIO(
+            input_data=[np.zeros(buffer_size, dtype=bool)],
+            conserve_memory=True,
+            as_gray=0,
+            save_dir=self.options.output_folder,
+        )
+        target_buffer_other = None
+        if not self.options.linear_luminance:
+            target_buffer_other = ImageListIO(
+                input_data=[np.zeros(buffer_size, dtype=bool)],
+                conserve_memory=True,
+                as_gray=0,
+                save_dir=self.options.output_folder,
+            )
+
+        target_buffer = self.uint8_to_float255(target_images, target_buffer)
+        target_buffer, _ = ColorTreatment.forward_color_treatment(
+            rec_standard=self._rec_standard,
+            input_images=target_buffer,
+            output_images=target_buffer,
+            linear_luminance=self.options.linear_luminance,
+            as_gray=self.options.as_gray,
+            output_other=target_buffer_other,
+            conversion_type=self._forward_conversion_type,
+            desaturate_chroma_on_low_luminance=True,
+            legacy_mode=self.options.legacy_mode,
+            verbose=False,
+        )
+
+        if target_buffer.reference_size != self.dataset.buffer.reference_size:
+            raise ValueError(
+                "The target spectrum image must have the same size as the processed images. "
+                f"Got {target_buffer.reference_size}, expected {self.dataset.buffer.reference_size}."
+            )
+
+        target_buffer = self.float255_to_float01(target_buffer)
+        target_spectrum, _ = image_spectrum(target_buffer[0], rescale=False)
+        target_images.close()
+        target_buffer.close()
+        if target_buffer_other is not None:
+            target_buffer_other.close()
+        return target_spectrum
 
     def _compute_initial_target_histogram(self, n_bins: int = 256):
         """Compute initial target histogram."""
 
         # Get target histogram
         target_hist = self.options.target_hist
-        if isinstance(target_hist, str):
+        if isinstance(target_hist, str) and target_hist in ["equal", "unit_test"]:
             target_hist = np.ones((n_bins, self.dataset.buffer.n_channels))/n_bins
         if target_hist is None:
             target_hist = avg_hist(self.dataset.buffer, binary_masks=self.bool_masks, n_bins=n_bins)
+        elif isinstance(target_hist, Path):
+            target_hist = self._compute_target_hist_from_image_path(target_hist, n_bins=n_bins)
         else:
             target_hist = target_hist[:, None] if target_hist.ndim == 1 else target_hist
             target_hist /= (target_hist.sum(axis=0, keepdims=True) + 1e-12)
@@ -283,6 +342,60 @@ class ImageProcessor(InformativeBaseModel):
         if target_hist.ndim > 1 and target_hist.shape[-1] != self.dataset.buffer.n_channels:
             raise ValueError(f"target_hist must have {self.dataset.buffer.n_channels} channels, ")
         self._target_hist = target_hist
+
+    def _compute_target_hist_from_image_path(self, image_path: Path, n_bins: int = 256) -> np.ndarray:
+        """Load a target image and compute its histogram after the same preprocessing as dataset images."""
+        load_as_gray = 1 if self.options.as_gray and self.options.linear_luminance else 0
+        target_images = ImageListIO(
+            input_data=[image_path],
+            conserve_memory=True,
+            as_gray=load_as_gray,
+            save_dir=self.options.output_folder,
+        )
+
+        buffer_size = target_images[0].shape[:2] if not self.options.linear_luminance or self.options.as_gray else target_images[0].shape
+        target_buffer = ImageListIO(
+            input_data=[np.zeros(buffer_size, dtype=bool)],
+            conserve_memory=True,
+            as_gray=0,
+            save_dir=self.options.output_folder,
+        )
+        target_buffer_other = None
+        if not self.options.linear_luminance:
+            target_buffer_other = ImageListIO(
+                input_data=[np.zeros(buffer_size, dtype=bool)],
+                conserve_memory=True,
+                as_gray=0,
+                save_dir=self.options.output_folder,
+            )
+
+        target_buffer = self.uint8_to_float255(target_images, target_buffer)
+        target_buffer, _ = ColorTreatment.forward_color_treatment(
+            rec_standard=self._rec_standard,
+            input_images=target_buffer,
+            output_images=target_buffer,
+            linear_luminance=self.options.linear_luminance,
+            as_gray=self.options.as_gray,
+            output_other=target_buffer_other,
+            conversion_type=self._forward_conversion_type,
+            desaturate_chroma_on_low_luminance=True,
+            legacy_mode=self.options.legacy_mode,
+            verbose=False,
+        )
+
+        if target_buffer.reference_size != self.dataset.buffer.reference_size:
+            raise ValueError(
+                "The target histogram image must have the same size as the processed images. "
+                f"Got {target_buffer.reference_size}, expected {self.dataset.buffer.reference_size}."
+            )
+
+        target_hist = imhist(target_buffer[0], n_bins=n_bins, normalized=True)
+        target_hist = target_hist[:, None] if target_hist.ndim == 1 else target_hist
+        target_images.close()
+        target_buffer.close()
+        if target_buffer_other is not None:
+            target_buffer_other.close()
+        return target_hist
 
     def _compute_initial_target_sf(self):
         """Compute initial target rotational average."""

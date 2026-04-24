@@ -155,31 +155,51 @@ def test_background_valid_values(tmp_dirs):
 
 @pytest.mark.unit_tests
 def test_target_hist_valid_and_invalid_shapes(tmp_dirs):
-    """Validate histogram array shape and dtype constraints."""
+    """Validate histogram array shape, dtype and path constraints."""
     in_dir, out_dir, _ = tmp_dirs
     valid_1d = np.zeros((256,))
     valid_3ch = np.zeros((256, 3))
+    valid_path = utils_test.get_small_imgs_path(utils_test.IMAGE_PATH)[0]
     _ = Options(input_folder=in_dir, output_folder=out_dir, target_hist=valid_1d)
     _ = Options(input_folder=in_dir, output_folder=out_dir, target_hist=valid_3ch, linear_luminance=True)
+    _ = Options(input_folder=in_dir, output_folder=out_dir, target_hist=valid_path)
 
     bad_shape = np.zeros((128,))
     with pytest.raises(ValueError):
         Options(input_folder=in_dir, output_folder=out_dir, target_hist=bad_shape)
 
-    bad_type = "notarray"
+    bad_type = 123
     with pytest.raises((TypeError, ValidationError)):
         Options(input_folder=in_dir, output_folder=out_dir, target_hist=bad_type)
+
+    bad_path = valid_path.parent / "this_is_a_bad_path.png"
+    with pytest.raises(ValueError):
+        Options(input_folder=in_dir, output_folder=out_dir, target_hist=bad_path)
+    
+    bad_path_type = valid_path.parent.parent / "README.md"
+    with pytest.raises(ValueError):
+        Options(input_folder=in_dir, output_folder=out_dir, target_hist=bad_path_type)
 
 
 @pytest.mark.unit_tests
 def test_target_spectrum_validation(tmp_dirs):
-    """Target spectrum must be float ndarray."""
+    """Target spectrum must be a float ndarray or a valid image path."""
     in_dir, out_dir, _ = tmp_dirs
     good = np.ones((16, 16), dtype=float)
+    good_path = utils_test.get_small_imgs_path(utils_test.IMAGE_PATH)[0]
     bad_type = np.ones((16, 16), dtype=int)
     _ = Options(input_folder=in_dir, output_folder=out_dir, target_spectrum=good)
+    _ = Options(input_folder=in_dir, output_folder=out_dir, target_spectrum=good_path)
     with pytest.raises(TypeError):
         Options(input_folder=in_dir, output_folder=out_dir, target_spectrum=bad_type)
+    
+    bad_path = good_path.parent / "this_is_a_bad_path.png"
+    with pytest.raises(ValueError):
+        Options(input_folder=in_dir, output_folder=out_dir, target_spectrum=bad_path)
+    
+    bad_path_type = good_path.parent.parent / "README.md"
+    with pytest.raises(ValueError):
+        Options(input_folder=in_dir, output_folder=out_dir, target_spectrum=bad_path_type)
 
 
 @pytest.mark.unit_tests

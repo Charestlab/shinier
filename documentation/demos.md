@@ -317,20 +317,13 @@ Example use case: Spectrum alignment is done with respect to a predefined
   histogram specification is applied with 'Hybrid' algorithm, and luminance 
   values are rescaled to global min/max.
 """
-from PIL import Image
-from shinier.utils import cart2pol, image_spectrum
-import numpy as np
-
-im = Image.open("mon_image.png").convert("L")
-im = np.array(im, dtype=np.float64)
-target_spectrum = image_spectrum(im)[0]
 
 opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 8,
     hist_specification = 4,  # Hybrid algorithm
-    target_spectrum = target_spectrum
+    target_spectrum = "img_path.png"
 )
 ```
 

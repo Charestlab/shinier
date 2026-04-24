@@ -390,13 +390,16 @@ def imhist_plot(
         dpi (int, optional): Matplotlib figure DPI. Defaults to 100.
         title (str | None, optional): Optional title for the image. Defaults to None.
         target_hist (np.ndarray | None, optional): If provided, overlays a
-            target histogram. Defaults to None.
+            target histogram already aligned with the displayed normalized
+            histogram. Defaults to None.
         binary_mask (np.ndarray | None, optional): Optional mask corresponding
             to image for computing histogram. Defaults to None.
         descriptives (bool, optional): If True, overlays mean (μ) and ±1σ on the
             histogram (per-channel for RGB). Defaults to False.
         ax (plt.Axes, optional): Axes on which to display the image. Defaults to None.
-        show_normalized_rmse (bool, False): If True, shows normalized RMSE.
+        show_normalized_rmse (bool, False): If True, shows the normalized RMSE
+            between two normalized histograms. This value is therefore computed
+            directly on histogram weights in [0, 1].
 
     Returns:
         tuple:
@@ -462,10 +465,10 @@ def imhist_plot(
             # target_hist, initial_hist = _hist_match_target(target_images, target_masks, normalized=normalize)
             ax_hist.plot(centers, target_hist[:, ch], ls='--', lw=1, color=colors[ch], label=f'Target {labels[ch]}')
 
-    # --- Normalized RMSE computation and display ---
+    # --- Normalized RMSE on normalized histogram weights in [0, 1] ---
     if show_normalized_rmse:
         if target_hist is not None:
-            nrmse = normalized_rmse(hist_normalized, target_hist, mode="assume [0, 1]")
+            nrmse = normalized_rmse(hist_normalized, target_hist, mode="histogram")
             rmse_text = "NRMSE = {:1.2e}".format(nrmse)
             ax_hist.text(0.05, 0.98, rmse_text, transform=ax_hist.transAxes, ha="left", va="top", fontsize=9, fontname=fontname)
     ax_hist.set_xlim(0, 255)
@@ -2232,8 +2235,17 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
     name_map = getattr(processor, "_fct_name2process_name", {})
 
     mode = getattr(processor.options, "mode", None)
-    with Image.open(processor.dataset.images.src_paths[img_idx]) as im:
-        img_before = np.asarray(im)
+
+    def _load_overview_image(path: Optional[Path]) -> np.ndarray:
+        if path is None:
+            return np.asarray(processor._initial_buffer[img_idx])
+        path = Path(path)
+        if path.suffix.lower() == ".npy":
+            return np.load(path, allow_pickle=False)
+        with Image.open(path) as im:
+            return np.asarray(im)
+
+    img_before = _load_overview_image(processor.dataset.images.src_paths[img_idx])
     is_rgb_before = img_before.ndim == 3 and img_before.shape[2] == 3
     img_after = processor.dataset.images[img_idx]
     is_rgb_after = img_after.ndim == 3 and img_after.shape[2] == 3
@@ -2318,9 +2330,17 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
 
         # ---- Spatial frequency matching ----
         elif step == "sf_match":
-            final_target_sf = processor._target_sf ** 2
-            if 'sf' in processor._initial_targets.keys() and show_initial_target:
-                initial_target_sf = processor._initial_targets['sf'] ** 2
+            final_target_sf, _ = sf_profile(
+                processor._initial_buffer[img_idx],
+                spectrum=processor._target_spectrum,
+                legacy_mode=processor.options.legacy_mode,
+            )
+            if 'spectrum' in processor._initial_targets.keys() and show_initial_target:
+                initial_target_sf, _ = sf_profile(
+                    processor._initial_buffer[img_idx],
+                    spectrum=processor._initial_targets['spectrum'],
+                    legacy_mode=processor.options.legacy_mode,
+                )
             else:
                 initial_target_sf = final_target_sf
 
@@ -2713,7 +2733,9 @@ def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], t
             represent its histogram and dimensional attributes appropriately.
         binary_masks ([np.ndarray]). A list of binary masks with same size as image.
         target_hist (Optional[np.ndarray]). A target histogram to compare against.
-        normalize_rmse (bool): Return normalized RMSE using its actual range.
+        normalize_rmse (bool): If True, return the NRMSE computed directly on
+            normalized histogram weights in [0, 1]. If False, return the raw
+            RMSE between normalized histograms.
 
     Returns:
         Tuple[np.ndarray, np.ndarray]: A tuple where the first element is an array
@@ -2721,7 +2743,18 @@ def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], t
             values for all images compared against the target histogram.
     """
 
-    target_hist, initial_hist = avg_hist(images=images, binary_masks=binary_masks, normalized=True, n_bins=256, output_list_hist=True)
+    avg_target_hist, initial_hist = avg_hist(images=images, binary_masks=binary_masks, normalized=True, n_bins=256, output_list_hist=True)
+    if target_hist is None:
+        target_hist = avg_target_hist
+    else:
+        target_hist = np.asarray(target_hist, dtype=np.float64)
+        target_hist = target_hist[:, None] if target_hist.ndim == 1 else target_hist
+        if target_hist.shape != avg_target_hist.shape:
+            raise ValueError(
+                f"target_hist shape {target_hist.shape} does not match expected "
+                f"normalized histogram shape {avg_target_hist.shape}."
+            )
+        target_hist = target_hist / (target_hist.sum(axis=0, keepdims=True) + 1e-12)
 
     # Compute metric
     N = len(initial_hist)
@@ -2729,7 +2762,7 @@ def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], t
     for idx, a_hist in enumerate(initial_hist):
         corr[idx] = np.corrcoef(a_hist.ravel(), target_hist.ravel())[0, 1]
         if normalize_rmse:
-            rms[idx] = normalized_rmse(a_hist.ravel(), target_hist.ravel(), mode='actual range')
+            rms[idx] = normalized_rmse(a_hist.ravel(), target_hist.ravel(), mode='histogram')
         else:
             rms[idx] = compute_rmse(a_hist.ravel(), target_hist.ravel())
     return corr, rms
@@ -2847,7 +2880,7 @@ def spec_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndar
     return corr, rms
 
 
-def compute_rmse(image1: np.ndarray, image2: np.ndarray) -> float:
+def compute_rmse(image1: np.ndarray, image2: np.ndarray, log: bool = False) -> float:
     """ Compute the root-mean-square error between two images. """
     return np.sqrt(np.mean((image1 - image2) ** 2))
 
@@ -2855,7 +2888,7 @@ def compute_rmse(image1: np.ndarray, image2: np.ndarray) -> float:
 def normalized_rmse(
     y_true: np.ndarray,
     y_pred: np.ndarray,
-    mode: Literal["assume [0, 1]", "actual range", "expected range"] = "actual range",
+    mode: Literal["assume [0, 1]", "actual range", "expected range", "histogram"] = "actual range",
     expected_range: Optional[float] = None,
     eps: float = 1e-12,
     verbose: bool = False,
@@ -2872,6 +2905,9 @@ def normalized_rmse(
               (max(y_true) - min(y_true)).
             - "expected range": divides by a user-specified `expected_range`
               (e.g. 255 for 8-bit data or 1.0 for normalized floats).
+            - "histogram": for probability histograms. Divides by sqrt(2 / N). 
+              Normalization corresponds to the RMSE maximum between two 
+              histograms with N bins (i.e., two Dirac deltas on opposite bins).
         expected_range: Known dynamic range when using "expected range".
         eps: Small constant to avoid divide-by-zero.
         verbose: Out-of-range value warnings if True
@@ -2898,6 +2934,10 @@ def normalized_rmse(
         if expected_range is None:
             raise ValueError("`expected_range` must be provided for mode='expected range'.")
         norm_rmse = rmse / max(expected_range, eps)
+
+    if mode == "histogram":
+        N_bins = float(y_true.shape[0])
+        norm_rmse = rmse / max(np.sqrt(2.0 / N_bins), eps)
 
     if verbose and not (0.0 <= norm_rmse <= 1.0):
         warnings.warn(
@@ -3197,6 +3237,89 @@ def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins: int = 2
     return count
 
 
+def rounded_target_hist(target_hist: np.ndarray, n_pixels: int) -> np.ndarray:
+    """Convert an ideal target histogram into realizable probabilities.
+
+    The returned histogram is obtained by converting the target to integer bin
+    counts that sum exactly to `n_pixels`, then normalizing those counts back to
+    probabilities. This gives the closest target that an image with `n_pixels`
+    pixels can actually realize.
+
+    Args:
+        target_hist: One-channel target probabilities or weights, shape (n_bins,).
+        n_pixels: Number of pixels available.
+
+    Returns:
+        np.ndarray: Rounded one-channel target histogram, shape (n_bins,).
+    """
+    if n_pixels <= 0:
+        raise ValueError("n_pixels must be strictly positive.")
+
+    p = np.asarray(target_hist, dtype=np.float64)
+    if p.ndim != 1:
+        raise ValueError("target_hist must be one-dimensional.")
+    
+    if p.sum() <= 0:
+        raise ValueError("target_hist must have a positive sum.")
+
+    p = p / p.sum()
+    ideal = n_pixels * p
+    counts = np.floor(ideal).astype(np.int64)
+    k = n_pixels - int(counts.sum())
+    if k > 0:
+        counts[np.argsort(ideal - counts)[-k:]] += 1
+    return counts / n_pixels
+
+def compute_tvd_hist(
+    image_hist: np.ndarray,
+    target_hist: np.ndarray,
+    n_bins: int = 256,
+    round_target: bool = False,
+    n_pixels: Optional[int] = None,
+) -> float:
+    """Compute Total Variation Distance (TVD) between two histograms.
+
+    TVD is defined as 0.5 * sum(|p_i - q_i|) for two probability distributions p and q.
+
+    Args:
+        image_hist (np.ndarray): Histogram of the image.
+        target_hist (np.ndarray): Target histogram.
+        n_bins (int): Number of bins in the histograms (default is 256).
+        round_target (bool): Whether to round the target histogram to the nearest realizable histogram given n_pixels.
+        n_pixels (Optional[int]): Number of pixels in the image.
+
+    Returns:
+        float: Total Variation Distance between the two histograms.
+    """
+    def validate_hist(hist: np.ndarray, name: str) -> np.ndarray:
+        hist = np.asarray(hist, dtype=np.float64)
+
+        # Accept (n_bins,) or (n_bins,1)
+        if hist.ndim == 2 and hist.shape[1] == 1:
+            hist = hist[:, 0]
+
+        if hist.ndim != 1 or hist.shape[0] != n_bins:
+            raise ValueError(f"{name} must have shape ({n_bins},) or ({n_bins},1).")
+
+        if np.any(hist < 0) or np.any(hist > 1):
+            raise ValueError(f"{name} values must be in [0, 1].")
+
+        if not np.isclose(hist.sum(), 1.0, atol=1e-6):
+            raise ValueError(f"{name} must sum to 1 (probability distribution).")
+
+        return hist
+
+    image_hist = validate_hist(image_hist, "image_hist")
+    target_hist = validate_hist(target_hist, "target_hist")
+
+    if round_target:
+        if n_pixels is None:
+            raise ValueError("n_pixels must be provided when round_target=True.")
+        target_hist = rounded_target_hist(target_hist, n_pixels)
+
+    return float(0.5 * np.sum(np.abs(image_hist - target_hist)))
+
+
 def avg_hist(images: ImageListIO, binary_masks: List[np.ndarray], normalized: bool = True, n_bins: int = 256, output_list_hist: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, List[np.ndarray]]]:
     """Computes the average histogram of a set of images.
 
@@ -3236,4 +3359,3 @@ def avg_hist(images: ImageListIO, binary_masks: List[np.ndarray], normalized: bo
         return average, hist_list
     else:
         return average
-
