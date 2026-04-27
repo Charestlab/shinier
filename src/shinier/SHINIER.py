@@ -362,14 +362,19 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
                 ])
                 opts.hist_specification = hs - 1
 
-            thp1 = prompt("What should be the target histogram?", default=1, kind="choice", choices=[
-                'Average histogram of input images',
+            image_exts = "/".join(f".{ext}" for ext in ACCEPTED_FORMATS)
+            thp1 = prompt("How should the target histogram be defined?", default=1, kind="choice", choices=[
+                'Average histogram of input images [default]',
                 'Flat histogram a.k.a. `histogram equalization`',
-                'Custom: You provide one as a .npy file'
+                'Derive histogram from an input image file',
+                'Load histogram from a precomputed array (.npy)'
             ])
             th = [None, 'equal'][thp1-1] if thp1 in [1, 2] else 'custom'
-            if th == 'custom':
-                thp2 = prompt("Path to target histogram (.npy/.txt/.csv)?", kind="str")
+            if thp1 == 3:
+                console_log("The image will be processed using the same pipeline as the dataset images.", indent_level=1)
+                th = Path(prompt(f"Path to input image file for target histogram ({image_exts})?", kind="str")).expanduser().resolve()
+            elif thp1 == 4:
+                thp2 = prompt("Path to precomputed target histogram array (.npy)?", kind="str")
                 th = load_np_array(thp2)
             if th is not None:
                 opts.target_hist = th
@@ -378,15 +383,23 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             rsel = prompt("What type of rescaling after sf/spec?", default=2, kind="choice",
                           choices=["none", "min/max of all images", "avg min/max"])
             opts.rescaling = rsel - 1
-            ans = prompt("Use a specific target spectrum?", default='n', kind="bool")
-            if ans == 1:
-                tsp = prompt("Path to target spectrum (.npy/.txt/.csv)?", kind="str")
+            image_exts = "/".join(f".{ext}" for ext in ACCEPTED_FORMATS)
+            tsp_sel = prompt("How should the target spectrum be defined?", default=1, kind="choice", choices=[
+                'Average spectrum of input images [default]',
+                'Derive spectrum from an input image file',
+                'Load spectrum from a precomputed array (.npy)'
+            ])
+            ts = None
+            if tsp_sel == 2:
+                console_log("The image will be processed using the same pipeline as the dataset images.", indent_level=1)
+                ts = Path(prompt(f"Path to input image file for target spectrum ({image_exts})?", kind="str")).expanduser().resolve()
+            elif tsp_sel == 3:
+                tsp = prompt("Path to precomputed target spectrum array (.npy)?", kind="str")
                 ts = load_np_array(tsp)
-                if ts is not None:
-                    opts.target_spectrum = ts
-
-        if mode in (5, 6, 7, 8):
-            opts.iterations = prompt("How many composite iterations (hist/spec coupling)?", default=2, kind="int", min_v=1, max_v=1_000_000)
+            if ts is not None:
+                opts.target_spectrum = ts
+            if mode in (5, 6, 7, 8):
+                opts.iterations = prompt("How many composite iterations (hist/spec coupling)?", default=2, kind="int", min_v=1, max_v=1_000_000)
 
     # ---- Progress info ----
     if prof != 1:

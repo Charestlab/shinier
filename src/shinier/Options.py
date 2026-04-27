@@ -176,15 +176,22 @@ class Options(InformativeBaseModel):
 
         hist_iterations (int): Number of iterations for SSIM optimization in hist_optim (default is 10).
 
-        target_hist (Optional[Union[np.ndarray, Path, Literal['equal']]]): Target histogram counts (int), weights (float),
-            or image path used to derive a target histogram with the same preprocessing pipeline as the dataset (default is None).
-            Should be a numpy array of shape (256,) for 8-bit images, a path to an image of matching size, or a string 'equal'
-            for histogram equalization.
-            If 'None', the target histogram is the average histogram of all the input images.
-            E.g.,
-                from shinier.utils import imhist
-                target_hist = imhist(im)
-
+        target_hist (Optional[Union[np.ndarray, Path, Literal['equal']]]): Target histogram, image path, 'equal', or None (default=None).
+            Multiple input types allowed:
+            - 'Histogram array': Load from a precomputed array (np.ndarray):
+                    > Can contain histogram counts (int) or weights (float) (histograms are normalized internally before use).
+                    > Shape must be (256,) or (256, 1) for single-channel processing, or (256, C) for multi-channel processing
+                        (e.g., RGB with linear_luminance=True, as_gray=False).
+                    > See "imhist" in utils.py to compute a target histogram from an image.
+            - 'Input image file': Derive the histogram from an image file (Path):
+                    > Image is processed using the same pipeline as the dataset to compute the target histogram.
+                    > Spatial dimensions must match the processed images.
+            - 'equal':
+                    > Uses a flat histogram, i.e. histogram equalization.
+            - None:
+                    > Uses the average histogram of all input images.
+            Used in all modes involving histogram matching (modes 2, 5, 6, 7, and 8).
+                
     --------------------------------------------------FOURIER matching--------------------------------------------------------
         rescaling (Literal[0-3]): Post-processing applied after sf_match or spec_match only (default = 2).
             0 = no rescaling
@@ -193,19 +200,18 @@ class Options(InformativeBaseModel):
             3 = Rescaling average max/min.
             > Not allowed for modes 1 and 2.
 
-        target_spectrum: Optional[Union[np.ndarray[float], Path]]: Target magnitude spectrum or image path (default = None).
-            If given as an array, it must be a float magnitude spectrum with the same size as the processed images.
-            If given as a path, the image is loaded and converted with the same preprocessing pipeline as the dataset,
-            then its target spectrum is computed automatically.
-            If 'None', the target magnitude spectrum is the average spectrum of all the input images.
-            Only for mode 3 and 4.
-            E.g.,
-                from PIL import Image
-                from shinier.utils import image_spectrum
-                import numpy as np
-
-                im = np.array(Image.open("my_image.png").convert("L"), dtype=np.float64)
-                target_spectrum = image_spectrum(im)[0]
+        target_spectrum (Optional[Union[np.ndarray, Path]]): Target Fourier magnitude spectrum, image path, or None (default=None).
+            Multiple input types allowed:
+            - 'Magnitude spectrum array': Load from a precomputed array (np.ndarray, dtype must be float):
+                    > Spatial shape must match the processed images: (H, W), or (H, W, C) for multi-channel processing
+                        (e.g., RGB with linear_luminance=True, as_gray=False).
+                    > See "image_spectrum" in utils.py to compute a target spectrum from an image.
+            - 'Input image file': Derive the spectrum from an image file (Path):
+                    > Image is processed using the same pipeline as the dataset to compute the target spectrum.
+                    > Spatial dimensions must match the processed images.
+            - None:
+                    > Uses the average spectrum of all input images.
+            Used in all modes involving Fourier matching (modes 3, 4, 5, 6, 7, and 8).
 
     --------------------------------------------------Misc--------------------------------------------------------
         verbose (Literal[-1, 0, 1, 2, 3]): Controls verbosity levels (default = 0).
