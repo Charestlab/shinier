@@ -2221,6 +2221,13 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
 
     Returns:
         matplotlib.figure.Figure: Composite figure summarizing the image transformations.
+    
+    Example usage:
+        from shinier import ImageProcessor, ImageDataset, Options
+        from shinier.utils import show_processing_overview
+            processor = ImageProcessor(dataset=ImageDataset(options=Options(mode=2)))
+            fig = show_processing_overview(processor, img_idx=0, show_figure=False)
+            fig.savefig("processing_overview.svg", format="svg")
     """
 
     import os, matplotlib
