@@ -211,7 +211,11 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
 
     # --------- General I/O ---------
     if images is None:
-        in_dir = prompt(f"Input folder (directory path)? Accepted formats: {ACCEPTED_FORMATS}", default=str(opts.input_folder), kind="str")
+        in_dir = prompt(
+            f"Input folder (directory path)? Files inside may use: {ACCEPTED_FORMATS}",
+            default=str(opts.input_folder),
+            kind="str",
+        )
         opts.input_folder = Path(in_dir).expanduser().resolve()
         image_paths = get_image_list(opts.input_folder)
         color = Bcolors.OKGREEN if len(image_paths) > 0 else Bcolors.FAIL
@@ -236,7 +240,11 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
 
         if whole == 4:
             if masks is None:
-                mdir = prompt(f"Masks folder (directory path)? Accepted formats: {ACCEPTED_FORMATS}. Will use ", default=str(REPO_ROOT / "data/MASK"), kind="str")
+                mdir = prompt(
+                    f"Masks folder (directory path)? Files inside may use: {ACCEPTED_FORMATS}. Will use ",
+                    default=str(REPO_ROOT / "data/MASK"),
+                    kind="str",
+                )
                 opts.masks_folder = Path(mdir).expanduser().resolve()
                 mask_paths = get_image_list(opts.masks_folder)
                 color = Bcolors.OKGREEN if len(mask_paths) > 0 else Bcolors.FAIL
