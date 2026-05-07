@@ -359,6 +359,207 @@ def generate_pydantic_key_value_dict(model_cls):
     return possible_values, default_values
 
 
+def hist_plot(
+    hist: np.ndarray,
+    bins: int = 256,
+    figsize: Optional[tuple] = None,
+    dpi=100,
+    title: Optional[str] = None,
+    target_hist: Optional[np.ndarray] = None,
+    descriptives: bool = False,
+    ax: Optional[plt.Axes] = None,
+    show_normalized_rmse: bool = False,
+) -> Tuple[plt.Figure, Tuple[Any, Any]]:
+
+    """Displays a histogram with its optional target histogram and descriptive statistics.
+
+    The histogram is displayed as a compact horizontal plot.
+    A grayscale gradient bar (0–255) is placed directly under the histogram.
+    When `descriptives=True`, the histogram includes:
+      * A vertical line indicating the mean (μ)
+      * A translucent band spanning [μ − σ, μ + σ]
+    For RGB histograms, μ and σ are computed and displayed per channel.
+
+    Args:
+        hist (np.ndarray): Input histogram. Accepts ``(n_bins,)`` grayscale or
+            ``(n_bins, 3)`` RGB arrays. Histograms are normalized before
+            display.
+        bins (int, optional): Number of histogram bins in [0, 255]. Defaults to 256.
+        figsize (tuple | None, optional): Matplotlib figure size. Used only when
+            ``ax`` is None. If None, the standalone histogram footprint matches
+            the histogram-panel size used inside :func:`imhist_plot`.
+        dpi (int, optional): Matplotlib figure DPI. Used only when ``ax`` is None. Defaults to 100.
+        title (str | None, optional): Optional title for the histogram. Defaults to None.
+        target_hist (np.ndarray | None, optional): If provided, overlays a
+            target histogram already aligned with the displayed normalized
+            histogram. Defaults to None.
+        descriptives (bool, optional): If True, overlays mean (μ) and ±1σ on the
+            histogram (per-channel for RGB). Defaults to False.
+        ax (plt.Axes, optional): Axes on which to display the histogram. Defaults to None.
+        show_normalized_rmse (bool, optional): If True, shows the normalized RMSE
+            between two normalized histograms. This value is therefore computed
+            directly on histogram weights in [0, 1]. Defaults to False.
+
+    Returns:
+        tuple:
+            fig (matplotlib.figure.Figure): The created matplotlib figure.
+            (ax_bar, ax_hist): Tuple of matplotlib.axes.Axes for the gradient
+            bar and histogram, respectively.
+    """
+
+    # --- normalize input histogram; force a second dimension if needed ---
+    hist = np.asarray(hist, dtype=np.float64)
+    if hist.ndim == 1:
+        hist = hist[:, None]
+    elif hist.ndim != 2:
+        raise ValueError("hist must have shape (n_bins,) or (n_bins, n_channels).")
+
+    if hist.shape[0] != bins:
+        raise ValueError(f"hist first dimension should match bins={bins}. Current shape = {hist.shape}")
+
+    if hist.shape[1] not in [1, 3]:
+        raise ValueError(f"hist should have 1 or 3 channels. Current shape = {hist.shape}")
+
+    if target_hist is not None:
+        target_hist = np.asarray(target_hist, dtype=np.float64)
+        if target_hist.ndim == 1:
+            target_hist = target_hist[:, None]
+        elif target_hist.ndim != 2:
+            raise ValueError("target_hist must have shape (n_bins,) or (n_bins, n_channels).")
+
+        if target_hist.shape != hist.shape:
+            raise ValueError(
+                "target_hist should have the same shape as hist. "
+                f"Current shapes: hist={hist.shape}, target_hist={target_hist.shape}."
+            )
+
+    # --- normalize histogram(s) to sum to 1 per channel ---
+    hist_sums = hist.sum(axis=0, keepdims=True)
+    hist_sums[hist_sums == 0] = 1.0
+    hist = hist / hist_sums
+
+    if target_hist is not None:
+        target_hist_sums = target_hist.sum(axis=0, keepdims=True)
+        target_hist_sums[target_hist_sums == 0] = 1.0
+        target_hist = target_hist / target_hist_sums
+
+    # --- figure & axes ---
+    fontname = 'Arial'
+    ax_bar = None
+    ax_hist = None
+    if ax is None:
+        if figsize is None:
+            imhist_figsize = (8, 6)
+            imhist_height_ratios = (3.5, 1.4)
+            hist_panel_height = imhist_figsize[1] * (imhist_height_ratios[1] / sum(imhist_height_ratios))
+            figsize = (imhist_figsize[0], hist_panel_height * 1.04 / (1.0 - 0.18))
+        fig = plt.figure(figsize=figsize, dpi=dpi)
+        ax_hist = fig.add_subplot(111)
+    else:
+        fig = ax.figure
+        ax_hist = ax
+
+    if title:
+        ax_hist.set_title(title, fontsize=11, fontname=fontname)
+
+    # --- support values for the displayed histogram ---
+    edges = np.linspace(0, 256, bins + 1, dtype=np.float64)
+    centers = (edges[:-1] + edges[1:]) / 2.0
+    Hmax = hist.max()
+
+    # --- plot histogram(s) of displayed histogram ---
+    is_rgb = hist.shape[1] == 3
+    colors = ['red', 'green', 'blue'] if is_rgb else ['black']
+    labels = ['R', 'G', 'B'] if is_rgb else ['Image']
+    for ch in range(hist.shape[1]):
+        ax_hist.plot(centers, hist[:, ch], color=colors[ch], lw=1, label=labels[ch])
+        # ----------------- optional TARGET histogram overlay -----------------
+        if target_hist is not None:
+            # expects your helper to return target histogram aligned with `centers`
+            # target_hist, initial_hist = _hist_match_target(target_images, target_masks, normalized=normalize)
+            ax_hist.plot(centers, target_hist[:, ch], ls='--', lw=1, color=colors[ch], label=f'Target {labels[ch]}')
+
+    # --- Normalized RMSE on normalized histogram weights in [0, 1] ---
+    if show_normalized_rmse and target_hist is not None:
+        nrmse = normalized_rmse(hist, target_hist, mode="histogram")
+        rmse_text = "NRMSE = {:1.2e}".format(nrmse)
+        ax_hist.text(0.05, 0.98, rmse_text, transform=ax_hist.transAxes, ha="left", va="top", fontsize=9, fontname=fontname)
+    ax_hist.set_xlim(0, 255)
+    ax_hist.set_ylim(0, Hmax * 1.05 if Hmax > 0 else 1)
+    ax_hist.set_yticks([])
+    ax_hist.set_xticks([])  # no ticks on the histogram axis
+    ax_hist.set_ylabel("Frequency", fontname=fontname, labelpad=8)
+    for spine in ("top", "right"):
+        ax_hist.spines[spine].set_visible(False)
+
+    # --- grayscale gradient bar directly under the histogram axis ---
+    divider = make_axes_locatable(ax_hist)
+    ax_bar = divider.append_axes("bottom", size="4%", pad=0.0)  # pad=0.0 to stick to the axis
+    gradient = np.linspace(0, 1, 256, dtype=np.float64).reshape(1, -1)
+    ax_bar.imshow(gradient, cmap='gray', aspect='auto', extent=[0, 255, 0, 1])
+    ax_bar.set_xlim(ax_hist.get_xlim())
+    ax_bar.set_xticks([])
+    ax_bar.set_yticks([])
+    for spine in ax_bar.spines.values():
+        spine.set_visible(False)
+    xlabel_text = "Pixel intensity"
+    ax_bar.set_xlabel(xlabel_text, fontname=fontname, labelpad=2)
+    if ax is None:
+        fig.subplots_adjust(bottom=0.18)
+
+    # ----------------- descriptives overlay (μ and ±1σ) -----------------
+    if descriptives:
+        with plt.rc_context({"font.family": fontname}):
+            y_top = ax_hist.get_ylim()[1]
+            alpha_band = 0.15
+            text_kwargs = dict(fontsize=9, ha='left', va='top')
+            levels = np.arange(bins, dtype=np.float64)
+
+            if is_rgb:
+                # Per-channel stats
+                stats = [
+                    ("R", hist[:, 0], "red"),
+                    ("G", hist[:, 1], "green"),
+                    ("B", hist[:, 2], "blue"),
+                ]
+                # stagger text vertically
+                y_texts = np.linspace(y_top * 0.98, y_top * 0.86, num=3)
+                for (label, data, c), y_txt in zip(stats, y_texts):
+                    total = float(data.sum())
+                    mu = float(np.sum(levels * data) / total)
+                    sd = float(np.sqrt(np.sum(((levels - mu) ** 2) * data) / total))
+                    # band
+                    ax_hist.axvspan(mu - sd, mu + sd, color=c, alpha=alpha_band, lw=0)
+                    # mean line
+                    ax_hist.axvline(mu, color=c, lw=1.8)
+                    # text
+                    ax_hist.text(mu + 3, y_txt, f"{label}: μ={mu:.1f}, σ={sd:.1f}", color=c, **text_kwargs)
+            else:
+                data = hist[:, 0]
+                total = float(data.sum())
+                mu = float(np.sum(levels * data) / total)
+                sd = float(np.sqrt(np.sum(((levels - mu) ** 2) * data) / total))
+                ax_hist.axvspan(mu - sd, mu + sd, color='black', alpha=alpha_band, lw=0)
+                ax_hist.axvline(mu, color='black', lw=1.8)
+                ax_hist.text(mu + 3, y_top * 0.95, f"μ={mu:.1f}, σ={sd:.1f}", color='black', **text_kwargs)
+
+    # legend if anything was added (set font explicitly)
+    handles, labels = ax_hist.get_legend_handles_labels()
+    if handles:
+        leg = ax_hist.legend(frameon=False, fontsize=9, loc='upper right')
+        for text in leg.get_texts():
+            text.set_fontname(fontname)
+
+    # Enforce font for any ticks that might be enabled later
+    for label in ax_hist.get_xticklabels() + ax_hist.get_yticklabels():
+        label.set_fontname(fontname)
+
+    if ax is None:
+        fig.show()
+
+    return fig, (ax_bar, ax_hist)
+
+
 def imhist_plot(
     img: np.ndarray,
     bins: int = 256,
@@ -397,9 +598,9 @@ def imhist_plot(
         descriptives (bool, optional): If True, overlays mean (μ) and ±1σ on the
             histogram (per-channel for RGB). Defaults to False.
         ax (plt.Axes, optional): Axes on which to display the image. Defaults to None.
-        show_normalized_rmse (bool, False): If True, shows the normalized RMSE
+        show_normalized_rmse (bool, optional): If True, shows the normalized RMSE
             between two normalized histograms. This value is therefore computed
-            directly on histogram weights in [0, 1].
+            directly on histogram weights in [0, 1]. Defaults to False.
 
     Returns:
         tuple:
@@ -421,14 +622,20 @@ def imhist_plot(
     arr = im3D(img)
     is_rgb = arr.shape[2] == 3
     arr = arr[..., :min(3, arr.shape[2])]
-    if target_hist is not None and target_hist.shape[1] != arr.shape[2]:
-        raise ValueError("target_hist 2nd dimension should match image's third dimension.")
+    if target_hist is not None:
+        target_hist_arr = np.asarray(target_hist)
+        if target_hist_arr.ndim == 1:
+            n_target_channels = 1
+        elif target_hist_arr.ndim == 2:
+            n_target_channels = target_hist_arr.shape[1]
+        else:
+            raise ValueError("target_hist must have shape (n_bins,) or (n_bins, n_channels).")
+
+        if n_target_channels != arr.shape[2]:
+            raise ValueError("target_hist channel count should match image's third dimension.")
 
     # --- histograms for displayed image ---
-    hist_normalized = imhist(image=arr, mask=binary_mask, n_bins=256, normalized=True)
-    Hmax = hist_normalized.max()
-    edges = np.linspace(0, 256, bins + 1, dtype=np.float64)
-    centers = (edges[:-1] + edges[1:]) / 2.0
+    hist_normalized = imhist(image=arr, mask=binary_mask, n_bins=bins, normalized=True)
 
     # --- figure & axes ---
     fontname = 'Arial'
@@ -454,83 +661,14 @@ def imhist_plot(
     if ax is None:
         ax_hist.set_position([img_pos.x0, hist_pos.y0, img_pos.width, hist_pos.height])
 
-    # --- plot histogram(s) of displayed image ---
-    colors = ['red', 'green', 'blue'] if is_rgb else ['black']
-    labels = ['R', 'G', 'B'] if is_rgb else ['Image']
-    for ch in range(arr.shape[2]):
-        ax_hist.plot(centers, hist_normalized[:, ch], color=colors[ch], lw=1, label=labels[ch])
-        # ----------------- optional TARGET histogram overlay -----------------
-        if target_hist is not None:
-            # expects your helper to return target histogram aligned with `centers`
-            # target_hist, initial_hist = _hist_match_target(target_images, target_masks, normalized=normalize)
-            ax_hist.plot(centers, target_hist[:, ch], ls='--', lw=1, color=colors[ch], label=f'Target {labels[ch]}')
-
-    # --- Normalized RMSE on normalized histogram weights in [0, 1] ---
-    if show_normalized_rmse:
-        if target_hist is not None:
-            nrmse = normalized_rmse(hist_normalized, target_hist, mode="histogram")
-            rmse_text = "NRMSE = {:1.2e}".format(nrmse)
-            ax_hist.text(0.05, 0.98, rmse_text, transform=ax_hist.transAxes, ha="left", va="top", fontsize=9, fontname=fontname)
-    ax_hist.set_xlim(0, 255)
-    ax_hist.set_ylim(0, Hmax * 1.05 if Hmax > 0 else 1)
-    ax_hist.set_yticks([])
-    ax_hist.set_xticks([])  # no ticks on the histogram axis
-    ax_hist.set_ylabel("Frequency", fontname=fontname, labelpad=8)
-    for spine in ("top", "right"):
-        ax_hist.spines[spine].set_visible(False)
-
-    # --- grayscale gradient bar directly under the histogram axis ---
-    divider = make_axes_locatable(ax_hist)
-    ax_bar = divider.append_axes("bottom", size="4%", pad=0.0)  # pad=0.0 to stick to the axis
-    gradient = np.linspace(0, 1, 256, dtype=np.float64).reshape(1, -1)
-    ax_bar.imshow(gradient, cmap='gray', aspect='auto', extent=[0, 255, 0, 1])
-    ax_bar.set_xlim(ax_hist.get_xlim())
-    ax_bar.set_xticks([])
-    ax_bar.set_yticks([])
-    for spine in ax_bar.spines.values():
-        spine.set_visible(False)
-    xlabel_text = "Pixel intensity"
-    ax_bar.set_xlabel(xlabel_text, fontname=fontname, labelpad=2)
-
-    # ----------------- descriptives overlay (μ and ±1σ) -----------------
-    if descriptives:
-        with plt.rc_context({"font.family": fontname}):
-            y_top = ax_hist.get_ylim()[1]
-            alpha_band = 0.15
-            text_kwargs = dict(fontsize=9, ha='left', va='top')
-
-            if is_rgb:
-                # Per-channel stats
-                stats = [
-                    ("R", arr[..., 0].ravel(), "red"),
-                    ("G", arr[..., 1].ravel(), "green"),
-                    ("B", arr[..., 2].ravel(), "blue"),
-                ]
-                # stagger text vertically
-                y_texts = np.linspace(y_top * 0.98, y_top * 0.86, num=3)
-                for (label, data, c), y_txt in zip(stats, y_texts):
-                    mu = float(np.mean(data))
-                    sd = float(np.std(data, ddof=0))
-                    # band
-                    ax_hist.axvspan(mu - sd, mu + sd, color=c, alpha=alpha_band, lw=0)
-                    # mean line
-                    ax_hist.axvline(mu, color=c, lw=1.8)
-                    # text
-                    ax_hist.text(mu + 3, y_txt, f"{label}: μ={mu:.1f}, σ={sd:.1f}", color=c, **text_kwargs)
-            else:
-                data = arr.ravel()
-                mu = float(np.mean(data))
-                sd = float(np.std(data, ddof=0))
-                ax_hist.axvspan(mu - sd, mu + sd, color='black', alpha=alpha_band, lw=0)
-                ax_hist.axvline(mu, color='black', lw=1.8)
-                ax_hist.text(mu + 3, y_top * 0.95, f"μ={mu:.1f}, σ={sd:.1f}", color='black', **text_kwargs)
-
-    # legend if anything was added (set font explicitly)
-    handles, labels = ax_hist.get_legend_handles_labels()
-    if handles:
-        leg = ax_hist.legend(frameon=False, fontsize=9, loc='upper right')
-        for text in leg.get_texts():
-            text.set_fontname(fontname)
+    ax_bar, ax_hist = hist_plot(
+        hist=hist_normalized,
+        bins=bins,
+        target_hist=target_hist,
+        descriptives=descriptives,
+        ax=ax_hist,
+        show_normalized_rmse=show_normalized_rmse,
+    )[1]
 
     # Ensure layout is updated
     if ax is None:
