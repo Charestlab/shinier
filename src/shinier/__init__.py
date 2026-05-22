@@ -41,6 +41,7 @@ __all__ = [
     "ImageProcessor",
     "convolve2d_direct",
     "convolve2d_separable",
+    "StimulusMasker",
     "_HAS_CYTHON",
     "color",
     "SHINIER_CLI",
@@ -54,4 +55,5 @@ from .ImageDataset import ImageDataset
 from .ImageListIO import ImageListIO
 from .ImageProcessor import ImageProcessor
 from .SHINIER import SHINIER_CLI
+from .utils import StimulusMasker
 from . import color

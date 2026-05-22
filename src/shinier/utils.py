@@ -283,6 +283,293 @@ class MatlabOperators:
         else:
             return image
 
+MaskType = Literal["hard", "gaussian", "feathered_disk"]
+
+@dataclass
+class StimulusMasker:
+    """
+    Create and apply ellipse masks to image stimuli.
+
+    Args:
+        image_size (int | tuple[int, int]): Mask/image size in pixels. If int,
+            creates a square mask. If tuple, uses (height, width).
+        cutoff_a (float): Horizontal ellipse radius in normalized coordinates.
+        cutoff_b (float | None, optional): Vertical ellipse radius. If None, uses
+            cutoff_a, giving a circular mask. Defaults to None.
+        offset_a (float, optional): Horizontal ellipse offset in normalized
+            coordinates. Defaults to 0.0.
+        offset_b (float, optional): Vertical ellipse offset in normalized
+            coordinates. Defaults to 0.0.
+        mask_type (MaskType, optional): Mask edge type. Defaults to "feathered_disk".
+            - "hard": for a binary edge
+            - "gaussian": for a blurred hard mask
+            - "feathered_disk": for a linear edge ramp.
+        sigma (float, optional): Gaussian standard deviation in pixels, used only
+            when mask_type is "gaussian". Defaults to 2.0.
+        edge_width (float, optional): Transition width in pixels, used only when
+            mask_type is "feathered_disk". Defaults to 2.0.
+        background (float, optional): Background value in [0, 1] outside the mask.
+            Defaults to 0.5.
+        output_dtype (np.dtype | type, optional): Dtype for returned images. Float
+            outputs remain in [0, 1]; integer outputs are scaled to the dtype range.
+            Defaults to np.float64.
+
+    Image input:
+        image (np.ndarray): Input image. Accepts (H, W) grayscale or (H, W, C)
+            channel images. Integer images are normalized by their dtype range;
+            float images above 1 are assumed to be in [0, 255].
+
+    Useful methods:
+        mask(): Generate the current 2D mask.
+        apply(image): Apply the current mask to one image.
+        apply_all(stimuli): Apply the same mask to a sequence of images.
+        interactive_mask(image): Open a Matplotlib GUI to tune the mask on top of
+            an image, then return the final mask.
+
+    Example:
+        masker = StimulusMasker(128, 0.7, mask_type="feathered_disk", edge_width=3)
+        mask = masker.mask()
+        masked_images = masker.apply_all(stim_arr)
+        final_mask = masker.interactive_mask(image)
+    """
+
+    image_size: int | tuple[int, int]
+    cutoff_a: float
+    cutoff_b: float | None = None
+    offset_a: float = 0.0
+    offset_b: float = 0.0
+    mask_type: MaskType = "feathered_disk"
+    sigma: float = 2.0
+    edge_width: float = 2.0
+    background: float = 0.5
+    output_dtype: np.dtype | type = np.float64
+
+    def mask(self) -> np.ndarray:
+        """Generate mask as float64 in [0, 1]."""
+        cutoff_b = self.cutoff_a if self.cutoff_b is None else self.cutoff_b
+        height, width = (self.image_size, self.image_size) if isinstance(self.image_size, int) else self.image_size
+        x = np.linspace(0, 1, width, dtype=np.float64)
+        y = np.linspace(0, 1, height, dtype=np.float64)
+        xv, yv = np.meshgrid(x, y)
+        # Normalized ellipse radius: r < 1 is inside, r = 1 is the boundary.
+        r = np.sqrt(
+            ((2 * xv - 1 - self.offset_a) / self.cutoff_a) ** 2
+            + ((2 * yv - 1 - self.offset_b) / cutoff_b) ** 2
+        )
+        m = (r < 1).astype(np.float64)
+        if (
+            self.mask_type == "hard"
+            or (self.mask_type == "gaussian" and self.sigma == 0)
+            or (self.mask_type == "feathered_disk" and self.edge_width == 0)
+        ):
+            return m
+        if self.mask_type == "gaussian":
+            # Blur, then normalize so the maximum mask value is 1.
+            m = self._blur(m)
+            return np.clip(m / m.max(), 0, 1) if m.max() > 0 else m
+        if self.mask_type == "feathered_disk":
+            # Linear ramp from 0 to 1 across edge_width pixels, centered on the ellipse boundary.
+            radius_pixels = min(self.cutoff_a * (width - 1), cutoff_b * (height - 1)) / 2
+            signed_distance = (1 - r) * radius_pixels
+            return np.clip(signed_distance / self.edge_width + 0.5, 0, 1)
+        raise ValueError(f"Unknown mask_type: {self.mask_type!r}")
+
+    def apply(self, image: np.ndarray) -> np.ndarray:
+        """
+        Apply the mask to one image.
+
+        Args:
+            image (np.ndarray): Input image. Accepts (H, W) grayscale or
+                (H, W, C) channel images. Integer images are normalized by their
+                dtype range; float images above 1 are assumed to be in [0, 255].
+
+        Returns:
+            np.ndarray: Masked image cast to output_dtype.
+        """
+        return self._apply_with_mask(image, self.mask())
+
+    def apply_all(self, stimuli: Iterable[np.ndarray]) -> list[np.ndarray]:
+        """Apply the same mask to multiple images."""
+        m = self.mask()
+        return [self._apply_with_mask(stim, m) for stim in stimuli]
+    
+    def interactive_mask(self, image: np.ndarray) -> np.ndarray:
+        """
+        Open a Matplotlib GUI for tuning the mask on top of an image.
+
+        The GUI updates the current object in place. Closing the window keeps the
+        selected cutoff, offset, mask type, sigma, and edge_width values on self.
+
+        Args:
+            image (np.ndarray): Image used for the masked preview. Accepts
+                (H, W) grayscale or (H, W, C) channel images. The mask size is
+                automatically set from this image.
+
+        Returns:
+            np.ndarray: Final mask as float64 in [0, 1].
+        """
+        from matplotlib.widgets import Button, Slider
+        plt.rcParams["font.family"] = "Times New Roman"
+        preview = self._normalize(image)
+        # RGB/grayscale in 3 channels
+        if preview.ndim == 2:
+            preview = np.repeat(preview[..., None], 3, axis=2)
+        preview = preview[:, :, :3]
+
+        self.image_size = preview.shape[:2]
+
+        # ---- Layout parameters for aesthetic GUI design ----
+        height, width = preview.shape[:2]
+        fig_width       = 6.4
+        panel_left      = 0.95
+        panel_width     = 4.90
+        bottom_margin   = 0.35
+        slider_height   = 0.16
+        slider_gap      = 0.10
+        image_gap       = 0.25
+        softness_gap    = 0.28
+        softness_height = 0.16
+        button_gap      = 0.12
+        button_height   = 0.24
+        top_margin      = 0.25
+        slider_block_height = 4 * slider_height + 3 * slider_gap
+        image_height = min(panel_width * height / width, 4.7)
+        slider_bottom = bottom_margin
+        image_bottom = slider_bottom + slider_block_height + image_gap
+        softness_bottom = image_bottom + image_height + softness_gap
+        button_bottom = softness_bottom + softness_height + button_gap
+        fig_height = button_bottom + button_height + top_margin
+        fig = plt.figure(figsize=(fig_width, fig_height))
+        fig.canvas.manager.set_window_title("Interactive Masking GUI - SHINIER")
+        ax_img = fig.add_axes((
+            panel_left / fig_width,
+            image_bottom / fig_height,
+            panel_width / fig_width,
+            image_height / fig_height,
+        ))
+        # ----
+
+        shown = ax_img.imshow(self._apply_with_mask(preview, self.mask()))
+        ax_img.set_axis_off()
+        
+        modes = ("hard", "gaussian", "feathered_disk")
+        buttons = {}
+        for i, mode in enumerate(modes):
+            ax_button = fig.add_axes((
+                (panel_left + i * 1.70) / fig_width,
+                button_bottom / fig_height,
+                1.45 / fig_width,
+                button_height / fig_height,
+            ))
+            buttons[mode] = Button(ax_button, mode, color="0.96", hovercolor="0.88")
+            buttons[mode].label.set_color("0.5")
+            for spine in buttons[mode].ax.spines.values():
+                spine.set_edgecolor("0.5")
+
+        ax_softness = fig.add_axes((
+            panel_left / fig_width,
+            softness_bottom / fig_height,
+            panel_width / fig_width,
+            softness_height / fig_height,
+        ))
+        softness = Slider(ax_softness, "sigma", 0.0, 20.0, valinit=self.sigma)
+
+        specs = [
+            ("cutoff_a", 0.05, 1.5, self.cutoff_a),
+            ("cutoff_b", 0.05, 1.5, self.cutoff_a if self.cutoff_b is None else self.cutoff_b),
+            ("offset_a", -1.0, 1.0, self.offset_a),
+            ("offset_b", -1.0, 1.0, self.offset_b),
+        ]
+        sliders = {}
+        for i, (name, vmin, vmax, value) in enumerate(specs):
+            y = slider_bottom + (len(specs) - 1 - i) * (slider_height + slider_gap)
+            ax = fig.add_axes((
+                panel_left / fig_width,
+                y / fig_height,
+                panel_width / fig_width,
+                slider_height / fig_height,
+            ))
+            sliders[name] = Slider(ax, name, vmin, vmax, valinit=value)
+
+        def update(_=None):
+            for name, slider in sliders.items():
+                # Update attributes based on slider values
+                setattr(self, name, slider.val)
+            ax_softness.set_visible(self.mask_type != "hard")
+            if self.mask_type == "gaussian":
+                softness.label.set_text("sigma")
+                self.sigma = softness.val
+            elif self.mask_type == "feathered_disk":
+                softness.label.set_text("edge_width")
+                self.edge_width = softness.val
+            for mode, button in buttons.items():
+                active = mode == self.mask_type
+                button.label.set_color("black" if active else "0.5")
+                for spine in button.ax.spines.values():
+                    spine.set_edgecolor("black" if active else "0.5")
+                    spine.set_linewidth(1.5 if active else 1.0)
+            # shown is an AxesImage, this updates the displayed image
+            shown.set_data(self._apply_with_mask(preview, self.mask()))
+            fig.canvas.draw_idle()
+
+        def set_mask_type(mode):
+            self.mask_type = mode
+            if mode == "gaussian":
+                softness.set_val(self.sigma)
+            elif mode == "feathered_disk":
+                softness.set_val(self.edge_width)
+            else:
+                update()
+
+        for s in sliders.values():
+            s.on_changed(update)
+        softness.on_changed(update)
+        for mode, button in buttons.items():
+            button.on_clicked(lambda _, mode=mode: set_mask_type(mode))
+        update()
+        plt.show()
+        return self.mask()
+
+    def _normalize(self, image: np.ndarray) -> np.ndarray:
+        """Return image as float64 in [0, 1]."""
+        image = np.asarray(image)
+        out = image.astype(np.float64, copy=False)
+        if np.issubdtype(image.dtype, np.integer):
+            out = out / np.iinfo(image.dtype).max
+        elif out.size and out.max() > 1:
+            out = out / 255.0
+        return np.clip(out, 0, 1)
+
+    def _apply_with_mask(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        """Helper for the interactive_mask method."""
+        stim = self._normalize(image)
+        if stim.ndim == 2:
+            stim = np.repeat(stim[:, :, None], 3, axis=2)
+        mask = np.asarray(mask, dtype=np.float64)
+        stim = stim.copy()
+        # Mask up to the first 3 channels; alpha, if present, is left unchanged.
+        channels = min(3, stim.shape[2])
+        stim[:, :, :channels] = mask[:, :, None] * (stim[:, :, :channels] - self.background) + self.background
+        return self._as_output(np.clip(stim, 0, 1))
+
+    def _as_output(self, image: np.ndarray) -> np.ndarray:
+        """Convert the masked image to output_dtype."""
+        dtype = np.dtype(self.output_dtype)
+        if np.issubdtype(dtype, np.integer):
+            image = np.rint(image * np.iinfo(dtype).max)
+        return image.astype(dtype)
+
+    def _blur(self, image: np.ndarray) -> np.ndarray:
+        """Apply a NumPy-only separable Gaussian blur."""
+        radius = int(3 * self.sigma)
+        x = np.arange(-radius, radius + 1, dtype=np.float64)
+        k = np.exp(-(x**2) / (2 * self.sigma**2))
+        k /= k.sum()
+        # Blur vertically (axis 0), then horizontally (axis 1).
+        convolve = lambda v: np.convolve(np.pad(v, radius, mode="edge"), k, "valid")
+        image = np.apply_along_axis(convolve, 0, image)
+        return np.apply_along_axis(convolve, 1, image)
+    
 
 def get_field_values_from_pydantic_model(field):
     """Return all possible categorical values for a Pydantic field."""

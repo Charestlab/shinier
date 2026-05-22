@@ -566,6 +566,41 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
 
 ---
 
+## StimulusMasker
+`StimulusMasker` is a utility class for creating elliptical masks and applying
+them to images or image sets. It is useful when stimuli should be shown inside a
+controlled region of interest while the outside area is replaced by a constant
+user-defined background value.
+
+Available mask types are:
+
+- `"hard"`: binary ellipse with a sharp border.
+- `"gaussian"`: hard ellipse with a Gaussian-smoothed border.
+- `"feathered_disk"`: linear edge transition with an explicit width in pixels.
+
+The interactive GUI is often the easiest way to choose the right cutoff and
+offset values because it shows the masked image live while sliders are adjusted.
+
+```python
+from shinier import StimulusMasker
+
+masker = StimulusMasker(
+    image_size=128,
+    cutoff_a=0.7,
+    mask_type="feathered_disk",
+    edge_width=3,
+)
+
+mask = masker.mask()
+masked_image = masker.apply(image)
+masked_images = masker.apply_all(stim_arr)
+
+# Opens a Matplotlib GUI with sliders for cutoff, offset, and mask softness.
+mask_from_gui = masker.interactive_mask(image)
+```
+
+---
+
 <a id="implemented-algorithms"></a>
 ## 🧮 Implemented Algorithms
 

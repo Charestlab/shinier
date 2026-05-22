@@ -119,12 +119,13 @@ And documentation:
 3. [MATLAB vs Python Differences](documentation/documentation.md#matlab-vs-python-differences)
 4. [Detailed Processing Modes](documentation/documentation.md#detailed-processing-modes)
 5. [Package Main Classes](documentation/documentation.md#main-classes)
-6. [Visualization Functions](documentation/documentation.md#visualization-functions)
-7. [Implemented Algorithms](documentation/documentation.md#implemented-algorithms)
-8. [Memory Management and Performance](documentation/documentation.md#memory-management-and-performance)
-9. [Testing and Validation](documentation/documentation.md#testing-and-validation)
-10. [Usage Demonstrations](documentation/demos.md)
-11. [Additional Resources](documentation/documentation.md#additional-resources)
+6. [StimulusMasker](documentation/documentation.md#stimulusmasker)
+7. [Visualization Functions](documentation/documentation.md#visualization-functions)
+8. [Implemented Algorithms](documentation/documentation.md#implemented-algorithms)
+9. [Memory Management and Performance](documentation/documentation.md#memory-management-and-performance)
+10. [Testing and Validation](documentation/documentation.md#testing-and-validation)
+11. [Usage Demonstrations](documentation/demos.md)
+12. [Additional Resources](documentation/documentation.md#additional-resources)
 
 ---
 ## 📚 Citing
