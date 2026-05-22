@@ -32,6 +32,7 @@ from shinier import __version__ as package_version
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 DiffusionTap = Tuple[int, int, float]  # (dy, dx, weight)
+DEFAULT_FFT_PADDING_RATIO = 0.5
 
 
 class Bcolors:
@@ -1076,7 +1077,7 @@ def sf_profile(
         power_spectrum = spectrum ** exp
 
     # Compute radius
-    xs, ys, channels = image.shape
+    xs, ys, channels = power_spectrum.shape
     r = get_radius_grid(x_size=xs, y_size=ys, legacy_mode=legacy_mode)
 
     # --- accumarray equivalent: mean energy per radius ---
@@ -2195,12 +2196,39 @@ def separate(mask: np.ndarray, background: Union[int, float] = 0, background_ope
     return mask_fgr.astype(bool), mask_bgr.astype(bool), background
 
 
-def image_spectrum(image: np.ndarray, rescale: bool = True) -> tuple[np.ndarray, np.ndarray]:
+def _pad_for_fft(image: np.ndarray, mode: Optional[Literal["reflect", "symmetric", "constant"]], value: Optional[float] = None) -> np.ndarray:
+    """Pad image spatial axes before FFT. Returns image unchanged when mode is None."""
+    if mode is None:
+        return image
+    height, width = image.shape[:2]
+    pad = int(min(height, width) * DEFAULT_FFT_PADDING_RATIO)
+    pad_width = ((pad, pad), (pad, pad)) if image.ndim == 2 else ((pad, pad), (pad, pad), (0, 0))
+    if mode == "constant":
+        constant_value = image.mean() if value is None else value / 255
+        return np.pad(image, pad_width=pad_width, mode=mode, constant_values=constant_value)
+    return np.pad(image, pad_width=pad_width, mode=mode)
+
+
+def _crop_after_fft(image: np.ndarray, original_shape: tuple[int, int]) -> np.ndarray:
+    """Center-crop a padded image back to its original spatial size."""
+    height, width = original_shape
+    start_y, start_x = (image.shape[0] - height) // 2, (image.shape[1] - width) // 2
+    return image[start_y:start_y + height, start_x:start_x + width, ...]
+
+
+def image_spectrum(
+    image: np.ndarray,
+    rescale: bool = True,
+    fft_padding_mode: Optional[Literal["reflect", "symmetric", "constant"]] = None,
+    fft_padding_value: Optional[float] = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute the spectrum of an image
     Args:
         image (np.ndarray): An image
         rescale (bool): If true, will rescale each channel to [0, 1] range.
+        fft_padding_mode (Optional[Literal["reflect", "symmetric", "constant"]]): Optional spatial padding mode before FFT.
+        fft_padding_value (Optional[float]): Constant padding value in [0, 255].
 
     Returns:
         magnitude, phase
@@ -2210,6 +2238,7 @@ def image_spectrum(image: np.ndarray, rescale: bool = True) -> tuple[np.ndarray,
     image = im3D(image)
     if rescale:
         image = rescale_image(image, 0, 1)  # [0, 255] -> [0, 1]
+    image = _pad_for_fft(image=image, mode=fft_padding_mode, value=fft_padding_value)
 
     x_size, y_size, n_channels = image.shape
     phase = np.zeros((x_size, y_size, n_channels))  # Phase FT
@@ -2656,8 +2685,8 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
     """
 
     import os, matplotlib
-    if os.environ.get("DISPLAY", "") == "":
-        matplotlib.use("TkAgg")
+    if not show_figure and os.environ.get("DISPLAY", "") == "":
+        matplotlib.use("Agg")
 
     fontname = 'Arial'
 
@@ -2684,13 +2713,20 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
     masks = getattr(processor, "bool_masks", [None])[img_idx]
 
     # --- Figure layout ---
-    diag_steps = [s for s in steps if s != "dithering"]
+    fft_padding = processor.options.fft_padding_mode is not None
+    diag_steps = []
+    for step in steps:
+        if step == "dithering":
+            continue
+        diag_steps.append(step)
+        if fft_padding and step in {"sf_match", "spec_match"}:
+            diag_steps.append(f"{step}_padded")
     n_rows = 1 + len(diag_steps) if len(diag_steps) > 0 else 1
     fig = plt.figure(figsize=(11.5, 3.6 * n_rows))
     gs = GridSpec(
         n_rows, 2, figure=fig,
         height_ratios=[2.0] + [1.5] * (n_rows - 1),
-        hspace=0.38, wspace=0.18
+        hspace=0.50, wspace=0.18
     )
     # --- Row 1: Before/After images ---
     ax_before = fig.add_subplot(gs[0, 0])
@@ -2702,13 +2738,15 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
         ax.axis("off")
 
     # --- Per-step diagnostics ---
-    for i, step in enumerate(steps, start=1):
-        readable = name_map.get(step, step)
+    for i, step in enumerate(diag_steps, start=1):
+        padded_row = step.endswith("_padded")
+        base_step = step.removesuffix("_padded")
+        readable = name_map.get(base_step, base_step)
         axL = fig.add_subplot(gs[i, 0])
         axR = fig.add_subplot(gs[i, 1])
 
         # ---- Luminance matching ----
-        if step == "lum_match":
+        if base_step == "lum_match":
             _ = imhist_plot(
                 img=processor._initial_buffer[img_idx],
                 binary_mask=masks if masks is not None else None,
@@ -2731,7 +2769,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
                 fig.text(0.72, 0.26 - 0.18 * (i - 1), text, fontsize=9, va="top")
 
         # ---- Histogram matching ----
-        elif step == "hist_match":
+        elif base_step == "hist_match":
             final_target_hist = processor._target_hist
             if 'hist' in processor._initial_targets.keys() and show_initial_target:
                 initial_target_hist = processor._initial_targets['hist']
@@ -2761,7 +2799,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
                 axR.legend(frameon=False, fontsize=9, loc='upper right')
 
         # ---- Spatial frequency matching ----
-        elif step == "sf_match":
+        elif base_step == "sf_match":
             final_target_sf, _ = sf_profile(
                 processor._initial_buffer[img_idx],
                 spectrum=processor._target_spectrum,
@@ -2776,20 +2814,40 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
             else:
                 initial_target_sf = final_target_sf
 
+            mag_before, _ = image_spectrum(
+                processor._initial_buffer[img_idx],
+                fft_padding_mode=processor.options.fft_padding_mode if padded_row else None,
+                fft_padding_value=processor.options.fft_padding_value if padded_row else None,
+            )
+            mag_after, _ = image_spectrum(
+                processor._final_buffer[img_idx],
+                fft_padding_mode=processor.options.fft_padding_mode if padded_row else None,
+                fft_padding_value=processor.options.fft_padding_value if padded_row else None,
+            )
+            target_spectrum = processor._target_spectrum if padded_row or not fft_padding else _crop_after_fft(processor._target_spectrum, mag_after.shape[:2])
+            target_sf, _ = sf_profile(
+                processor._initial_buffer[img_idx],
+                spectrum=target_spectrum,
+                legacy_mode=processor.options.legacy_mode,
+            )
             avg_before, radii = sf_profile(
                 processor._initial_buffer[img_idx],
+                spectrum=mag_before,
                 legacy_mode=processor.options.legacy_mode,
             )
             avg_after, radii = sf_profile(
                 processor._final_buffer[img_idx],
+                spectrum=mag_after,
                 legacy_mode=processor.options.legacy_mode
             )
-            _ = sf_plot(processor._initial_buffer[img_idx], sf_p=avg_before, target_sf=initial_target_sf, ax=axL, show_normalized_rmse=True)
-            _ = sf_plot(processor._final_buffer[img_idx], sf_p=avg_after, target_sf=initial_target_sf, ax=axR, show_normalized_rmse=True)
+            _ = sf_plot(mag_before, sf_p=avg_before, target_sf=target_sf, ax=axL, show_normalized_rmse=target_sf is not None)
+            _ = sf_plot(mag_after, sf_p=avg_after, target_sf=target_sf, ax=axR, show_normalized_rmse=target_sf is not None)
+            row_label = "padded FFT space" if padded_row else "displayed stimulus"
+            axL.set_title(f"Before – {readable} ({row_label})", fontsize=11, fontname=fontname)
+            axR.set_title(f"After – {readable} ({row_label})", fontsize=11, fontname=fontname)
 
-            if n_steps > 1 and show_initial_target:
-                image = im3D(processor._initial_buffer[img_idx])
-                xs, ys, channels = image.shape
+            if padded_row and n_steps > 1 and show_initial_target:
+                xs, ys, channels = mag_after.shape
                 R = int(np.floor(min(xs, ys) / 2.0))
                 if final_target_sf is not None and final_target_sf.shape[0] > xs / 2:
                     final_target_sf = final_target_sf[1: R + 1]
@@ -2797,25 +2855,37 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
                 axR.legend(frameon=False, fontsize=9, loc='upper right')
 
         # ---- Fourier spectrum matching ----
-        elif step == "spec_match":
-            target_spectrum = processor._target_spectrum
-            mag_before, _ = image_spectrum(processor._initial_buffer[img_idx])
-            mag_after, _ = image_spectrum(processor._final_buffer[img_idx])
-            _ = spectrum_plot(mag_before, ax=axL, target_spectrum=target_spectrum, show_normalized_rmse=True)
-            _ = spectrum_plot(mag_after, ax=axR, target_spectrum=target_spectrum, show_normalized_rmse=True)
+        elif base_step == "spec_match":
+            mag_before, _ = image_spectrum(
+                processor._initial_buffer[img_idx],
+                fft_padding_mode=processor.options.fft_padding_mode if padded_row else None,
+                fft_padding_value=processor.options.fft_padding_value if padded_row else None,
+            )
+            mag_after, _ = image_spectrum(
+                processor._final_buffer[img_idx],
+                fft_padding_mode=processor.options.fft_padding_mode if padded_row else None,
+                fft_padding_value=processor.options.fft_padding_value if padded_row else None,
+            )
+            target_spectrum = processor._target_spectrum if padded_row or not fft_padding else _crop_after_fft(processor._target_spectrum, mag_after.shape[:2])
+            _ = spectrum_plot(mag_before, ax=axL, target_spectrum=target_spectrum, show_normalized_rmse=target_spectrum is not None)
+            _ = spectrum_plot(mag_after, ax=axR, target_spectrum=target_spectrum, show_normalized_rmse=target_spectrum is not None)
+            row_label = "padded FFT space" if padded_row else "displayed stimulus"
+            axL.set_title(f"Before – spectrum\n({row_label})", fontsize=10, fontname=fontname, pad=8)
+            axR.set_title(f"After – spectrum\n({row_label})", fontsize=10, fontname=fontname, pad=8)
 
         # ---- Dithering ----
-        elif step == "dithering":
+        elif base_step == "dithering":
             # Dithering only affects appearance (already visible in row 1)
             axL.text(0.5, 0.5, "Dithering only", ha="center", va="center")
             axR.axis("off")
 
-    (y0L, y1L) = axL.get_ylim()
-    (y0R, y1R) = axR.get_ylim()
-    ymin, ymax = min(y0L, y0R), max(y1L, y1R)
+    if diag_steps:
+        (y0L, y1L) = axL.get_ylim()
+        (y0R, y1R) = axR.get_ylim()
+        ymin, ymax = min(y0L, y0R), max(y1L, y1R)
 
-    axL.set_ylim(ymin, ymax)
-    axR.set_ylim(ymin, ymax)
+        axL.set_ylim(ymin, ymax)
+        axR.set_ylim(ymin, ymax)
 
     fig.suptitle(
         f"SHINIER — Mode {mode}: {', '.join(name_map.get(s, s) for s in steps)}",
@@ -3382,7 +3452,14 @@ def normalized_rmse(
     return norm_rmse
 
 
-def get_images_spectra(images: ImageListIO, magnitudes: Optional[ImageListIO] = None, phases: Optional[ImageListIO] = None, rescale: bool = True) -> Tuple[ImageListIO, ImageListIO]:
+def get_images_spectra(
+    images: ImageListIO,
+    magnitudes: Optional[ImageListIO] = None,
+    phases: Optional[ImageListIO] = None,
+    rescale: bool = True,
+    fft_padding_mode: Optional[Literal["reflect", "symmetric", "constant"]] = None,
+    fft_padding_value: Optional[float] = None,
+) -> Tuple[ImageListIO, ImageListIO]:
     """
     Get spectrum over list of images
     Args:
@@ -3390,6 +3467,8 @@ def get_images_spectra(images: ImageListIO, magnitudes: Optional[ImageListIO] = 
         magnitudes (Optional[ImageListIO]): If provided, inserts new magnitudes into this list.
         phases (Optional[ImageListIO]): If provided, inserts new phases into this list.
         rescale (bool): Determines if input is stretched to [0, 1] range.
+        fft_padding_mode (Optional[Literal["reflect", "symmetric", "constant"]]): Optional spatial padding mode before FFT.
+        fft_padding_value (Optional[float]): Constant padding value in [0, 255].
 
     Returns:
         magnitudes, phases (Tuple[ImageListIO, ImageListIO])
@@ -3403,7 +3482,12 @@ def get_images_spectra(images: ImageListIO, magnitudes: Optional[ImageListIO] = 
     for idx, image in enumerate(images):
         if images.drange == (0, 255):
             image = np.float64(image)/255
-        magnitudes[idx], phases[idx] = image_spectrum(image, rescale=rescale)
+        magnitudes[idx], phases[idx] = image_spectrum(
+            image,
+            rescale=rescale,
+            fft_padding_mode=fft_padding_mode,
+            fft_padding_value=fft_padding_value,
+        )
     return magnitudes, phases
 
 

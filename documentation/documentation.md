@@ -269,14 +269,15 @@ mode = 2  # hist_match only
 ```python
 mode = 3  # sf_match only
 ```
-**Match spatial frequencies of input images to a target rotational spectrum.** 
 
-**Algorithm (summary):**
-1) Convert images to float [0,255] (H×W×C) and prepare optional masks/bit-depth.
-2) Build the target rotational magnitude spectrum (provided or averaged from inputs).
-3) For each image, compute FFT, replace the radial magnitude profile with the target while preserving phase, then inverse FFT.
-4) Apply rescaling per `options.rescaling` (0 none, 1 per-image, 2 global, 3 average) and clip to valid range.
-5) Store float255 outputs and optionally log/plot spectral diagnostics.
+Equalizes the **mean amplitude per spatial frequency** across images — i.e., the rotational average of the Fourier magnitude spectrum. Image phase (and thus structure) is preserved; only the amplitude envelope is adjusted.
+
+**Algorithm:**
+1 Convert images to float [0, 255] (H×W×C).
+2. Build the target rotational magnitude profile (provided, or averaged from all inputs).
+3. For each image: optionally pad → FFT → replace the radial magnitude profile with the target while keeping the phase → inverse FFT → crop back if padded.
+4. Rescale per `options.rescaling` (0 = none, 1 = per-image, 2 = global, 3 = average) and clip to valid range.
+5. Store float255 outputs and optionally log/plot spectral diagnostics.
 
 ---
 
@@ -284,14 +285,15 @@ mode = 3  # sf_match only
 ```python
 mode = 4  # spec_match only
 ```
-**Match the full magnitude spectrum of images to a target spectrum (2D magnitude, not only rotational average).**
 
-**Algorithm (summary):**
-1) Convert images to float [0,255] (H×W×C) and consider masks if provided.
-2) Build the target 2D magnitude spectrum (provided or element-wise average of input magnitudes).
-3) For each image, compute FFT, replace the full magnitude by the target while preserving phase, then inverse FFT.
-4) Apply rescaling per `options.rescaling` and clip to the valid intensity range.
-5) Store float255 outputs and optionally log or visualize spectrum-related diagnostics.
+Equalizes the **amplitude at every spatial frequency and orientation** across images — matching the full 2D Fourier magnitude spectrum. Image phase (and thus structure) is preserved; only the amplitude at each frequency/orientation pair is adjusted.
+
+**Algorithm:**
+1. Convert images to float [0, 255] (H×W×C).
+2. Build the target 2D magnitude (provided, or element-wise average across all inputs).
+3. For each image: optionally pad → FFT → replace the full magnitude by the target while keeping the phase → inverse FFT → crop back if padded.
+4. Apply rescaling per `options.rescaling` and clip to the valid intensity range.
+5. Store float255 outputs and optionally log or visualize spectrum-related diagnostics.
 
 ### Composite Modes (5-8)
 
@@ -323,6 +325,33 @@ mode = 8  # spec_match → hist_match
 ```python
 mode = 9  # only dithering
 ```
+
+---
+
+### Border Artifacts and FFT Padding
+
+**Why border artifacts occur**
+The Fourier transform implicitly treats an image as if it repeats infinitely in all directions: the left edge connects to the right, and the top to the bottom. When opposite edges differ, this creates artificial discontinuities that introduce unwanted high-frequency energy (*spectral leakage*), sometimes visible as ringing or edge artifacts after reconstruction.
+
+**How FFT padding helps**
+Images can optionally be padded before computing the FFT, then cropped back to the original size after the inverse FFT. This pushes border discontinuities farther from the region of interest and reduces edge-related spectral artifacts.
+
+**Available padding modes** (`fft_padding_mode`)
+
+| Mode          | Behavior                                                                                                                          |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `None`        | No padding                                                                                                                        |
+| `"reflect"`   | Mirror the image without repeating the edge pixel                                                                                 |
+| `"symmetric"` | Mirror the image including the edge pixel                                                                                         |
+| `"constant"`  | Pad using a constant intensity value. If `fft_padding_value=None`, the image mean is used; otherwise, the provided value is used. |
+
+**Notes**
+
+* Padding reduces border discontinuities but does not remove the FFT's periodic assumption.
+* `"reflect"` and `"symmetric"` generally preserve local image continuity better than `"constant"`.
+* `"constant"` padding avoids introducing mirrored structures.
+* If a `target_spectrum` array is passed directly, it must already match the padded FFT dimensions when padding is enabled.
+* FFT padding and feathered masks are complementary: feathered masks reduce visible edge discontinuities in the stimulus; FFT padding reduces spectral artifacts during Fourier operations. For psychophysics, feathered masks remain the recommended default.
 
 ---
 
@@ -404,6 +433,8 @@ class Options:
     # --- Fourier ---
     rescaling: Optional[Literal[0, 1, 2, 3]] = 2
     target_spectrum: Optional[Union[np.ndarray, Literal["unit_test"]]] = Field(default=None)
+    fft_padding_mode: Optional[Literal["reflect", "symmetric", "constant"]] = None
+    fft_padding_value: Optional[confloat(ge=0, le=255)] = None
 
     # --- Misc ---
     verbose: Literal[-1, 0, 1, 2, 3] = 0

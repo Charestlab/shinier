@@ -18,7 +18,7 @@ from shinier.utils import (
     rescale_images255, get_images_spectra, ssim_sens, spectrum_plot, imhist_plot, sf_plot, avg_hist,
     uint8_plus, float01_to_uint, uint_to_float01, noisy_bit_dithering, floyd_steinberg_dithering,
     exact_histogram, Bcolors, MatlabOperators, compute_rmse, get_radius_grid, rotational_avg,
-    has_duplicates, stretch, console_log, print_log, StepSizeController, image_spectrum
+    has_duplicates, stretch, console_log, print_log, StepSizeController, image_spectrum, _crop_after_fft
 )
 from shinier.color import ColorConverter, ColorTreatment, rgb2gray, gray2rgb, RGB2GRAY_WEIGHTS, RGB_STANDARD, GamutControl
 
@@ -251,7 +251,10 @@ class ImageProcessor(InformativeBaseModel):
         self.dataset.magnitudes, self.dataset.phases = get_images_spectra(
             images=buffer_collection,
             magnitudes=self.dataset.magnitudes,
-            phases=self.dataset.phases, rescale=False)
+            phases=self.dataset.phases,
+            rescale=False,
+            fft_padding_mode=self.options.fft_padding_mode,
+            fft_padding_value=self.options.fft_padding_value)
         self.dataset.buffer = self.float01_to_float255(buffer_collection)
 
     def _compute_initial_target_spectrum(self):
@@ -265,7 +268,14 @@ class ImageProcessor(InformativeBaseModel):
         elif isinstance(target_spectrum, Path):
             target_spectrum = self._compute_target_spectrum_from_image_path(target_spectrum)
         else:
-            if target_spectrum.shape[:2] != self.dataset.buffer.reference_size:
+            target_spectrum = im3D(target_spectrum)
+            expected_shape = im3D(self.dataset.magnitudes[0]).shape if self.options.fft_padding_mode is not None else im3D(self.dataset.buffer[0]).shape
+            if target_spectrum.shape != expected_shape:
+                if self.options.fft_padding_mode is not None:
+                    raise TypeError(
+                        "When fft_padding_mode is enabled, a direct target_spectrum array must already "
+                        f"match the padded FFT shape. Got {target_spectrum.shape}, expected {expected_shape}."
+                    )
                 raise TypeError('The target spectrum must have the same size as the images.')
         self._target_spectrum = im3D(target_spectrum)
 
@@ -316,7 +326,12 @@ class ImageProcessor(InformativeBaseModel):
             )
 
         target_buffer = self.float255_to_float01(target_buffer)
-        target_spectrum, _ = image_spectrum(target_buffer[0], rescale=False)
+        target_spectrum, _ = image_spectrum(
+            target_buffer[0],
+            rescale=False,
+            fft_padding_mode=self.options.fft_padding_mode,
+            fft_padding_value=self.options.fft_padding_value,
+        )
         target_images.close()
         target_buffer.close()
         if target_buffer_other is not None:
@@ -403,7 +418,7 @@ class ImageProcessor(InformativeBaseModel):
             raise ValueError('The target spectrum has not been computed yet.')
         _target_sf = []
         xs, ys, n_channels = self._target_spectrum.shape
-        if self._radius_grid is None:
+        if self._radius_grid is None or self._radius_grid.shape != (xs, ys):
             self._radius_grid = get_radius_grid(x_size=xs, y_size=ys, legacy_mode=self.options.legacy_mode)
         for ch in range(n_channels):
             _target_sf.append(rotational_avg(spectrum=self._target_spectrum[..., ch], radius=self._radius_grid))
@@ -959,6 +974,7 @@ class ImageProcessor(InformativeBaseModel):
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
             console_log(msg=f"\nImage {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
             matched_image = []
+            original_shape = image.shape[:2]
             magnitude = im3D(self.dataset.magnitudes[idx])
             phase = im3D(self.dataset.phases[idx])
             for self._processed_channel in range(n_channels):
@@ -985,7 +1001,7 @@ class ImageProcessor(InformativeBaseModel):
                 new = XX + YY * 1j  # 1j = sqrt(-1)
 
                 output = np.real(np.fft.ifft2(np.fft.ifftshift(new)))
-                matched_image.append(output)
+                matched_image.append(_crop_after_fft(output, original_shape))
 
                 # Comparison: obtained vs target rotational averages (up to Nyquist)
                 obtained_ra = rotational_avg(spectrum=new_magnitude, radius=r_int)
@@ -1046,8 +1062,8 @@ class ImageProcessor(InformativeBaseModel):
         # If target_spectrum is None, target magnitude is the average of all spectra
         x_size, y_size, n_channels = self._target_spectrum.shape[:3]
         image = im3D(buffer_collection[0])
-        if self._target_spectrum.shape != image.shape:
-            raise TypeError('The target spectrum must have the same size as the images.')
+        if self._target_spectrum.shape[-1] != image.shape[-1]:
+            raise TypeError('The target spectrum must have the same number of channels as the images.')
 
         # Iterate over each image (each entry in the phase collection)
         for idx, image in enumerate(buffer_collection):
@@ -1055,6 +1071,7 @@ class ImageProcessor(InformativeBaseModel):
             console_log(msg=f"\nImage {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
 
             matched_image = []
+            original_shape = image.shape[:2]
 
             # Convert the stored phase to 3D array
             phase = im3D(self.dataset.phases[idx])
@@ -1071,8 +1088,7 @@ class ImageProcessor(InformativeBaseModel):
 
                 # Inverse FFT to go back to spatial domain (real-valued image)
                 output = np.real(np.fft.ifft2(np.fft.ifftshift(new)))
-
-                matched_image.append(output)
+                matched_image.append(_crop_after_fft(output, original_shape))
 
                 # Comparison: obtained vs target spectrum
                 obtained_mag = np.abs(np.fft.fftshift(np.fft.fft2(output)))

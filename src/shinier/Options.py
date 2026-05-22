@@ -32,7 +32,7 @@ OPTION_TYPES = {
     'dithering_memory': ['dithering', 'conserve_memory'],
     'luminance':        ['safe_lum_match', 'target_lum'],
     'histogram':        ['hist_optim', 'hist_specification', 'hist_iterations', 'target_hist'],
-    'fourier':          ['rescaling', 'target_spectrum'],
+    'fourier':          ['rescaling', 'target_spectrum', 'fft_padding_mode', 'fft_padding_value'],
     'misc':             ['verbose']
 }
 
@@ -213,6 +213,17 @@ class Options(InformativeBaseModel):
                     > Uses the average spectrum of all input images.
             Used in all modes involving Fourier matching (modes 3, 4, 5, 6, 7, and 8).
 
+        fft_padding_mode (Optional[Literal['reflect', 'symmetric', 'constant']]): Optional spatial padding before FFT computation (default = None).
+            - None = No padding.
+            - 'reflect' = Mirror image values without repeating the edge pixel.
+            - 'symmetric' = Mirror image values including the edge pixel.
+            - 'constant' = Pad with a constant spatial-domain intensity.
+            > Padding is applied before FFT and cropped after inverse FFT reconstruction.
+
+        fft_padding_value (Optional[float]): Constant padding intensity in [0, 255] when fft_padding_mode='constant' (default = None).
+            If None, the mean intensity of the current normalized image is used.
+            Used only when fft_padding_mode='constant'.
+
     --------------------------------------------------Misc--------------------------------------------------------
         verbose (Literal[-1, 0, 1, 2, 3]): Controls verbosity levels (default = 0).
             -1 = Quiet mode
@@ -266,6 +277,8 @@ class Options(InformativeBaseModel):
     # --- Fourier ---
     rescaling: Optional[Literal[0, 1, 2, 3]] = 2
     target_spectrum: Optional[Union[np.ndarray, Path, Literal["unit_test"]]] = Field(default=None)
+    fft_padding_mode: Optional[Literal["reflect", "symmetric", "constant"]] = None
+    fft_padding_value: Optional[confloat(ge=0, le=255)] = None
 
     # --- Misc ---
     verbose: Literal[-1, 0, 1, 2, 3] = 0
