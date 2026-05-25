@@ -150,9 +150,11 @@ class Options(InformativeBaseModel):
             True = No values will be clipped, but the resulting targets may differ from the requested values.
             False = Values will be clipped, but the resulting targets will stay the same.
 
-        target_lum (Optional[Iterable[Union[int, float]]]): Pair (mean, std) of target luminance for luminance matching (default = (0, 0)).
-            The mean must be in [0, 255], and the standard deviation must be ≥ 0.
-            If (0, 0), the mean and std will be the average mean and average std of the images.
+        target_lum (Tuple[Optional[float], Optional[float]]): Pair (mean, std) of target luminance for luminance matching (default = (0, 0)).
+            The mean must be in [0, 255] or None, and the standard deviation must be >= 0 or None.
+            0 uses the dataset average for that statistic; None leaves that statistic unchanged per image.
+            Mean and standard deviation can be controlled separately by setting one value to None.
+
             Only for mode 1.
 
     --------------------------------------------------HISTOGRAM matching--------------------------------------------------------
@@ -266,7 +268,7 @@ class Options(InformativeBaseModel):
 
     # --- Luminance ---
     safe_lum_match: bool = True
-    target_lum: Tuple[conint(ge=0, le=255), confloat(ge=0)] = (0, 0)
+    target_lum: Tuple[Optional[confloat(ge=0, le=255)], Optional[confloat(ge=0)]] = (0, 0)
 
     # --- Histogram ---
     hist_optim: bool = False
@@ -346,6 +348,14 @@ class Options(InformativeBaseModel):
             raise TypeError("target_spectrum must be a numpy.ndarray or an image path.")
         if not np.issubdtype(v.dtype, np.floating):
             raise TypeError("target_spectrum dtype must be float.")
+        return v
+
+    @field_validator("target_lum")
+    @classmethod
+    def validate_target_lum(cls, v):
+        """Reject target_lum values that would not adjust any luminance statistic."""
+        if v[0] is None and v[1] is None:
+            raise ValueError("target_lum=(None, None) does not adjust mean or contrast.")
         return v
 
     # ================================================================================================

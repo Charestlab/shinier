@@ -3,7 +3,6 @@ from typing import Optional, Any, List, Callable, Tuple, get_args
 import sys
 import numpy as np
 from datetime import datetime
-import re
 import warnings
 from shinier import __version__ as shinier_version
 from shinier.Options import ACCEPTED_IMAGE_FORMATS, OPTION_TYPES
@@ -138,8 +137,10 @@ def prompt(
             if not (1 <= val <= len(choices)):
                 raise ValueError
         elif kind == "tuple":
-            tokens = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", raw)
-            val = tuple(map(float, tokens))
+            tokens = [token.strip() for token in raw.strip("()[]").split(",")]
+            if any(token == "" for token in tokens):
+                raise ValueError
+            val = tuple(None if token == "None" else float(token) for token in tokens)
             if len(val) == 0:
                 raise ValueError("Expected a non-empty list of tuple. E.g.: `0, 2` or `(0, 2)` or `[0, 2]`")
         else:

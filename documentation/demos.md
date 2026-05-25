@@ -63,7 +63,7 @@ shinier
 shinier --show_results --image_index=1
 ```
 ##### Save the processing overview of image #0 after CLI
-```base
+```bash
 shinier --show_results --save_path="path/file.png"
 ```
 
@@ -149,16 +149,20 @@ Mode 1 (lum_match): simple normalization for the grayscale values of one or
   for a desired (M, STD).
 
 Example use case: the "luminance" will be adjusted so that the mean values and the standard
- deviation of the output images will be the average if the input images. The 
- "safe_lum_match" setting being off will cause some values to be clipped and 
- set to either 0 (< 0) or 255 (> 255).
+ deviation of the output images will be the average of the input images. Turning 
+ "safe_lum_match" off can allow some values to be clipped later to 0 (< 0) or 
+ 255 (> 255).
 """
 opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 1,
     #safe_lum_match = False,
-    #target_lum = (0, 0)  # (mean, std), here it's the average of the images
+    #target_lum = (0, 0)  # 0 means dataset average for that statistic
+    #target_lum = (0, 20)  # use dataset-average mean, set contrast/std to 20
+    #target_lum = (100, 0)  # set mean to 100, use dataset-average contrast/std
+    #target_lum = (None, 20)  # keep each image mean, set contrast/std to 20
+    #target_lum = (100, None)  # set mean to 100, keep each image contrast/std
 )
 ```
 
@@ -267,15 +271,14 @@ opts = Options(
 Mode 6 (hist_match & spec_match): histogram matching followed by full Fourier
   spectrum alignment.
 
-Example use case: Exact histogram specification (no noise), with SSIM
-  optimization enabled. After spectrum alignment. Rescaling is done by 
-  default.
+Example use case: Exact histogram specification with SSIM optimization is enabled for histogram matching, then
+  full Fourier spectra are aligned. Rescaling is done by default.
 """
 opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 6,
-    hist_optim = 1           # enable SSIM optimization
+    hist_optim = True,        # enable SSIM optimization
     #rescaling = 2
 )
 ```
@@ -342,7 +345,8 @@ Example use case: dithering will be applied with the default noisy-bit method
 opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
-    mode = 9
+    mode = 9,
+    dithering = 1
 )
 ```
 
@@ -359,21 +363,20 @@ Example use case: hist_matching using Coltuc, Bolon & Chassery (2006) exact
   images (default), no SSIM optimization (Avanki, 2009).
 
   The masks are used for figure-ground separation (whole_image = 3), background
-  value in the most will be automatically selected using the most frequent
-  grayscale value in the masks, the image will be transform to a grayscale image
+  value in the mask will be automatically selected using the most frequent
+  grayscale value in the masks, the images will be transformed to grayscale
   (1 channel), the dithering won't be applied before saving, the smart memory
-  gestion won't be used here and legacy_mode, which is to replicate MATLAB more
-  closely is used.
+  management won't be used here, and legacy_mode will reproduce MATLAB-like
+  defaults where applicable.
 """
 opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
-    masks_folder=MASKS_FOLDER,
     mode = 2,                # hist_match
     whole_image = 3,         # figure-ground separation using masks
     background = 300,        # masking value: most frequent grayscale value
-    as_gray = True,          # RGB or grayscale
-    dithering = False,       # noisy-bit dithering
+    as_gray = True,          # convert to grayscale
+    dithering = 0,           # no dithering
     conserve_memory = False, # smart memory management
     legacy_mode = True       # use MATLAB-like operators (e.g., round)
 )
@@ -398,7 +401,7 @@ Notes:
 opts = Options(
   input_folder=INPUT_FOLDER,
   output_folder=OUTPUT_FOLDER,
-  mode=2,                                      # spec_match -> hist_match
+  mode=8,                                      # spec_match -> hist_match
   as_gray=False,                               # keep color
   linear_luminance=False,                      # use xyY conversions
   rec_standard=2,                              # Rec.709 (sRGB-like)
@@ -427,7 +430,7 @@ dataset = ImageDataset(options=opts)
 from shinier import ImageListIO
 
 im_loaded_before = [...]  # list of numpy arrays
-dataset = ImageDataset(images=ImageListIO(im_loaded_before), options=opts)
+dataset = ImageDataset(images=ImageListIO(input_data=im_loaded_before), options=opts)
 ```
 
 ---
@@ -443,6 +446,7 @@ results = ImageProcessor(dataset=dataset)
 
 ```python
 from shinier.utils import show_processing_overview
+import matplotlib.pyplot as plt
 
 fig = show_processing_overview(results)
 plt.show()

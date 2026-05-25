@@ -154,6 +154,24 @@ def test_background_valid_values(tmp_dirs):
 
 
 @pytest.mark.unit_tests
+def test_target_lum_accepts_partial_control(tmp_dirs):
+    """target_lum may leave either mean or contrast uncontrolled."""
+    in_dir, out_dir, _ = tmp_dirs
+    assert Options(input_folder=in_dir, output_folder=out_dir, target_lum=(None, 20)).target_lum == (None, 20)
+    assert Options(input_folder=in_dir, output_folder=out_dir, target_lum=(100, None)).target_lum == (100, None)
+    assert Options(input_folder=in_dir, output_folder=out_dir, target_lum=[None, 20]).target_lum == (None, 20)
+
+
+@pytest.mark.unit_tests
+@pytest.mark.parametrize("target_lum", [(None, None), (1,), (1, 2, 3), (-1, 20), (256, 20), (100, -1)])
+def test_target_lum_rejects_invalid_partial_control(target_lum, tmp_dirs):
+    """target_lum must control at least one valid luminance statistic."""
+    in_dir, out_dir, _ = tmp_dirs
+    with pytest.raises((ValueError, ValidationError)):
+        Options(input_folder=in_dir, output_folder=out_dir, target_lum=target_lum)
+
+
+@pytest.mark.unit_tests
 def test_target_hist_valid_and_invalid_shapes(tmp_dirs):
     """Validate histogram array shape, dtype and path constraints."""
     in_dir, out_dir, _ = tmp_dirs
@@ -287,7 +305,7 @@ def test_all_combo(tmp_dirs):
     choices['masks_folder'] = [mask_dir]
     choices['background'] += [120, 130]
     choices['seed'] += [4242424242]
-    choices['target_lum'] += [(100, 20)]
+    choices['target_lum'] += [(100, 20), (None, 20), (100, None)]
     choices['target_hist'] += ['unit_test']
     choices['target_spectrum'] += ['unit_test']
     choices['hist_iterations'] = [3]

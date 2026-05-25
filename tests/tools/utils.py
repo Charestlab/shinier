@@ -35,7 +35,7 @@ ComboType = Tuple[
     int,  # hist_optim
     int,  # rescaling
     bool,  # safe_lum_match
-    Tuple[int, int],  # target_lum
+    Tuple[Optional[float], Optional[float]],  # target_lum
     str,  # target_hist_choice ("target" | "none")
     str,  # target_spec_choice ("target" | "none")
 ]

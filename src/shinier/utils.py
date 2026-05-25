@@ -2764,8 +2764,13 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
 
             # Overlay mean/std text box for target comparison
             t_mu, t_sd = getattr(processor, "_target_lum", (None, None))
-            if t_mu is not None and t_sd is not None:
-                text = f"Target μ={t_mu:.1f}, σ={t_sd:.1f}"
+            target_parts = []
+            if t_mu is not None:
+                target_parts.append(f"μ={t_mu:.1f}")
+            if t_sd is not None:
+                target_parts.append(f"σ={t_sd:.1f}")
+            if target_parts:
+                text = f"Target {', '.join(target_parts)}"
                 fig.text(0.72, 0.26 - 0.18 * (i - 1), text, fontsize=9, va="top")
 
         # ---- Histogram matching ----

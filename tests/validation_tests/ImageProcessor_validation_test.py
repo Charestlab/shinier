@@ -99,7 +99,7 @@ def test_imageprocessor_validations_sharded(test_tmpdir: Path) -> None:
     choices['masks_folder'] = [mask_dir]
     choices['background'] += [120, 130]
     choices['seed'] += [4242424242]
-    choices['target_lum'] += [(100, 20)]
+    choices['target_lum'] += [(100, 20), (None, 20), (100, None)]
     choices['target_hist'] += ['unit_test']
     choices['target_spectrum'] += ['unit_test']
     choices['hist_iterations'] = [3]

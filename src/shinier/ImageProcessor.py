@@ -106,7 +106,7 @@ class ImageProcessor(InformativeBaseModel):
     _step: int = PrivateAttr(default=0)
     _sum_bool_masks: List = PrivateAttr(default_factory=list)
     _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
-    _target_lum: Optional[List[Tuple[float, float]]] = PrivateAttr(default=None)
+    _target_lum: Optional[Tuple[Optional[float], Optional[float]]] = PrivateAttr(default=None)
     _target_sf: Optional[np.ndarray] = PrivateAttr(default=None)
     _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
 
@@ -691,9 +691,10 @@ class ImageProcessor(InformativeBaseModel):
 
     def lum_match(self):
         """
-        Matches the mean and standard deviation of a set of images. If target_lum is provided, it will match the mean and standard
-        deviation of target_lum, where target_lum[0] is the mean and target_lum[1] is the standard deviation. If safe_values is enabled, it will
-        find a target mean and standard deviation that is close to target_lum while not producing out-of-range values, i.e. outside of [0, 255].
+        Matches the mean and/or standard deviation of a set of images. If target_lum is provided, it will match the requested
+        target statistics, where target_lum[0] is the mean and target_lum[1] is the standard deviation. A 0 value uses the dataset
+        average for that statistic. A None value leaves that statistic unchanged for each image. If safe_values is enabled, it will
+        find target values that are close to target_lum while not producing out-of-range values, i.e. outside of [0, 255].
 
             Warnings:
                 - Clipping should be applied prior to uint8 conversion since np.uint8 and .astype('uint8') exhibit wrap-around behavior for out-of-range values. E.g. np.array([-2, 256]).astype('uint8') = [254, 0]
@@ -706,8 +707,10 @@ class ImageProcessor(InformativeBaseModel):
             original minimum and maximum values based on the provided target mean and standard deviation.
             The transformation is performed using the Z-score normalization formula.
             """
-            predicted_min = (np.array(original_min_max)[:, 0] - np.array(original_means)) / np.array(original_stds) * target_std + target_mean
-            predicted_max = (np.array(original_min_max)[:, 1] - np.array(original_means)) / np.array(original_stds) * target_std + target_mean
+            target_mean = np.asarray(target_mean, dtype=float)
+            target_std = np.asarray(target_std, dtype=float)
+            predicted_min = (original_min_max[:, 0] - original_means) / original_stds * target_std + target_mean
+            predicted_max = (original_min_max[:, 1] - original_means) / original_stds * target_std + target_mean
             predicted_range = predicted_max - predicted_min
             return predicted_min, predicted_max, predicted_range
 
@@ -740,10 +743,18 @@ class ImageProcessor(InformativeBaseModel):
 
             return M, SD, min, max
 
+        def resolve_target(value, originals):
+            """Map None to original values, 0 to dataset average, and numbers to themselves."""
+            return originals if value is None else float(np.mean(originals)) if value == 0 else float(value)
+
+        def as_target_array(value, n_images):
+            """Ensures 1 target value per image."""
+            return np.full(n_images, value, dtype=float) if np.ndim(value) == 0 else np.asarray(value, dtype=float)
+
         buffer_collection = self.dataset.buffer
 
         # 1) Compute the mean and standard deviation of the original images.
-        # 2) Compute the target mean and standard deviation if not provided.
+        # 2) Resolve the target mean and standard deviation.
         # 3) Adjust the target mean and standard deviation if safe_values is enabled and if there are out-of-range values.
         # 4) Convert images into float
         # 5) Rescale according to target mean and standard deviation
@@ -758,24 +769,56 @@ class ImageProcessor(InformativeBaseModel):
             original_means.append(M)
             original_stds.append(SD)
             original_min_max.append((min, max))
-        target_mean, target_std = (np.mean(original_means), np.mean(original_stds)) if target_lum == (0, 0) else target_lum
+
+        original_means, original_stds = np.array(original_means, dtype=float), np.array(original_stds, dtype=float)
+        partial_mean,   partial_std   = target_lum[0] is None, target_lum[1] is None
+        target_mean,    target_std    = resolve_target(target_lum[0], original_means), resolve_target(target_lum[1], original_stds)
+
+        original_min_max = np.array(original_min_max, dtype=float)
         predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
 
         if safe_values and (any(predicted_min < 0) or any(predicted_max > 255)):
-            max_range = predicted_max.max() - predicted_min.min()
-            scaling_factor = np.min([1, (255 - 1e-6) / max_range])  # Safety margin of 1e-6 to avoid precision issues
+            if partial_std:
+                raise ValueError(
+                    "safe_lum_match cannot keep values within [0, 255] for target_lum=(mean, None) "
+                    "without changing the original contrasts."
+                )
+            if partial_mean:
+                safe_std_limits = []
+                for original_mean, original_std, (original_min, original_max) in zip(original_means, original_stds, original_min_max):
+                    # Find largest std that keeps values within [0, 255] for this image, given the target mean.
+                    if original_min < original_mean:
+                        safe_std_limits.append(original_mean * original_std / (original_mean - original_min))
+                    if original_max > original_mean:
+                        safe_std_limits.append((255 - original_mean) * original_std / (original_max - original_mean))
+                # Use most constraining std limit across images to ensure all values are within [0, 255]
+                max_safe_std = min(safe_std_limits)
+                scaling_factor = min(1, (max_safe_std - 1e-6) / target_std)
+            else:
+                max_range = predicted_max.max() - predicted_min.min()
+                scaling_factor = np.min([1, (255 - 1e-6) / max_range])  # Safety margin of 1e-6 to avoid precision issues
             target_std *= scaling_factor
             predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
-            target_mean = target_mean + (255 - np.max(predicted_max))
-            console_log(msg=f"Adjusted target values for safe values: M = {target_mean:.4f}, SD = {target_std:.4f}", indent_level=0,color=Bcolors.WARNING, verbose=self.verbose > 2)
-            predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
+            if not partial_mean:
+                target_mean = target_mean + (255 - np.max(predicted_max))
+                predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
+            target_mean_log = np.mean(target_mean) if np.ndim(target_mean) else target_mean
+            target_std_log = np.mean(target_std) if np.ndim(target_std) else target_std
+            console_log(msg=f"Adjusted target values for safe values: M = {target_mean_log:.4f}, SD = {target_std_log:.4f}", indent_level=0,color=Bcolors.WARNING, verbose=self.verbose > 2)
             if np.any(predicted_min < -1e-3) or np.any(predicted_max > (255 + 1e-3)):
                 raise Exception(f'Out-of-range values detected: mins = {list(predicted_min)}, maxs = {list(predicted_max)}')
-
-        self._target_lum = (target_mean, target_std)
+        # 1 value per image
+        target_means = as_target_array(target_mean, len(original_means))
+        target_stds = as_target_array(target_std, len(original_stds))
+        self._target_lum = (
+            None if partial_mean else float(target_means[0]),
+            None if partial_std else float(target_stds[0]),
+        )
         for idx, im in enumerate(buffer_collection):
             im2 = im3D(im.copy())
             M, SD, min, max = compute_stats(im=im2, binary_mask=self.bool_masks[idx])
+            target_mean_i = target_means[idx]
+            target_std_i = target_stds[idx]
 
             self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
             console_log(msg=f"\nImage {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose>=2)
@@ -783,16 +826,23 @@ class ImageProcessor(InformativeBaseModel):
 
             # Standardization
             if original_stds[idx] != 0:
-                im2[self.bool_masks[idx]] = (im2[self.bool_masks[idx]] - original_means[idx]) / original_stds[idx] * target_std + target_mean
+                im2[self.bool_masks[idx]] = (im2[self.bool_masks[idx]] - original_means[idx]) / original_stds[idx] * target_std_i + target_mean_i
             else:
-                im2[self.bool_masks[idx]] = target_mean
+                im2[self.bool_masks[idx]] = target_mean_i
 
             M, SD, min, max = compute_stats(im=im2, binary_mask=self.bool_masks[idx])
 
             # Save resulting image
-            console_log(msg=f"Target values: M = {target_mean:.4f}, SD = {target_std:.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
+            console_log(msg=f"Target values: M = {target_mean_i:.4f}, SD = {target_std_i:.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
             self.dataset.buffer[idx] = im2  # update the dataset
-            self._validate(observed=[M, SD], expected=[target_mean, target_std], measures_str=['M', 'SD'])
+
+            checks = []
+            if not partial_mean:
+                checks.append((M, target_mean_i, 'M'))
+            if not partial_std:
+                checks.append((SD, target_std_i, 'SD'))
+            observed, expected, measures = map(list, zip(*checks))
+            self._validate(observed=observed, expected=expected, measures_str=measures)
 
         self.dataset.buffer.drange = (0, 255)
 

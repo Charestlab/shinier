@@ -242,14 +242,17 @@ and the precise calibration of display monitors are essential for accurate visua
 mode = 1  # lum_match only
 ```
 **Algorithm:**
-- If `target_lum` is None or equals `(0, 0)`: compute target parameters from the dataset
-  - `mean` = average of image means
-  - `std`  = average of image standard deviations
-- Otherwise (when `target_lum=(mean, std)` is provided): use it directly as the target
+- A `target_lum` value of `0` uses the dataset average for that statistic
+  - mean `0` = average of image means
+  - std `0` = average of image standard deviations
+- If `target_lum=(mean, std)` is provided: use it directly as the target
+- If one value is `None`, leave that statistic unchanged for each image:
+  - `target_lum=(None, 20)`: keep each image mean and set std to 20
+  - `target_lum=(100, None)`: set mean to 100 and keep each image std
 - Apply linear rescaling per image: `new_pixel = (pixel - mean) * (target_std/std) + target_mean`
 
 **Specific Parameters:**
-- `target_lum`: Optional tuple `(mean, std)` where `mean ∈ [0, 255]` and `std ∈ [0, +∞)`. If omitted or `(0, 0)`, dataset averages are used
+- `target_lum`: Tuple `(mean, std)` where `mean ∈ [0, 255]` or `None`, and `std ∈ [0, +∞)` or `None`. `0` uses the dataset average for that statistic, so `(0, 20)` uses the average mean and a std of 20, while `(100, 0)` uses a mean of 100 and the average std. 
 - `safe_lum_match`: If True, automatically adjusts `(target_mean, target_std)` to keep all pixel values within [0, 255] (values may differ slightly from the requested target)
 
 ### Mode 2: Histogram Matching Only
@@ -422,7 +425,7 @@ class Options:
 
     # --- Luminance ---
     safe_lum_match: bool = True
-    target_lum: Tuple[conint(ge=0, le=255), confloat(ge=0)] = (0, 0)
+    target_lum: Tuple[Optional[confloat(ge=0, le=255)], Optional[confloat(ge=0)]] = (0, 0)
 
     # --- Histogram ---
     hist_optim: bool = False
@@ -510,7 +513,7 @@ class ImageProcessor:
     _step: int = PrivateAttr(default=0)
     _sum_bool_masks: List = PrivateAttr(default_factory=list)
     _target_hist: Optional[np.ndarray] = PrivateAttr(default=None)
-    _target_lum: Optional[List[Tuple[float, float]]] = PrivateAttr(default=None)
+    _target_lum: Optional[Tuple[Optional[float], Optional[float]]] = PrivateAttr(default=None)
     _target_sf: Optional[np.ndarray] = PrivateAttr(default=None)
     _target_spectrum: Optional[np.ndarray] = PrivateAttr(default=None)
 ```
@@ -745,6 +748,9 @@ options = Options(
     mode=1
 )
 ```
+When using partial luminance targets, `None` keeps the original statistic for each image. For example,
+`target_lum=(None, 20)` may reduce the requested contrast in safe mode if needed, but `target_lum=(100, None)`
+will raise an error if the requested mean cannot be achieved safely without changing the original contrasts.
 
 **2. Excessive memory usage**
 ```python
