@@ -155,8 +155,6 @@ class Options(InformativeBaseModel):
             0 uses the dataset average for that statistic; None leaves that statistic unchanged per image.
             Mean and standard deviation can be controlled separately by setting one value to None.
 
-            Only for mode 1.
-
     --------------------------------------------------HISTOGRAM matching--------------------------------------------------------
         hist_optim (bool): Optimization of the histogram-matched images with structural similarity index measure (Avanaki, 2009) (default = False)
             True = SSIM optimization (Avanaki, 2009)
