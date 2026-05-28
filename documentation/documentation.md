@@ -341,18 +341,18 @@ Images can optionally be padded before computing the FFT, then cropped back to t
 
 **Available padding modes** (`fft_padding_mode`)
 
-| Mode          | Behavior                                                                                                                          |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `None`        | No padding                                                                                                                        |
-| `"reflect"`   | Mirror the image without repeating the edge pixel                                                                                 |
-| `"symmetric"` | Mirror the image including the edge pixel                                                                                         |
-| `"constant"`  | Pad using a constant intensity value. If `fft_padding_value=None`, the image mean is used; otherwise, the provided value is used. |
+| Mode   | Name        | Behavior                                                                                                                          |
+| ------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `0`    | Disabled    | No padding                                                                                                                        |
+| `1`    | Reflect     | Mirror the image without repeating the edge pixel                                                                                 |
+| `2`    | Symmetric   | Mirror the image including the edge pixel                                                                                         |
+| `3`    | Constant    | Pad using a constant intensity value. If `fft_padding_value=300`, the image mean is used; otherwise, the provided value is used. |
 
 **Notes**
 
 * Padding reduces border discontinuities but does not remove the FFT's periodic assumption.
-* `"reflect"` and `"symmetric"` generally preserve local image continuity better than `"constant"`.
-* `"constant"` padding avoids introducing mirrored structures.
+* `1` (`Reflect`) and `2` (`Symmetric`) generally preserve local image continuity better than `3` (`Constant`).
+* `3` (`Constant`) padding avoids introducing mirrored structures.
 * If a `target_spectrum` array is passed directly, it must already match the padded FFT dimensions when padding is enabled.
 * FFT padding and feathered masks are complementary: feathered masks reduce visible edge discontinuities in the stimulus; FFT padding reduces spectral artifacts during Fourier operations. For psychophysics, feathered masks remain the recommended default.
 
@@ -380,7 +380,7 @@ Manages gamut repairs and dataset- or image-level constraints after luminance/ch
 class GamutControl:
     model_config = ConfigDict(arbitrary_types_allowed=True)
     color_space: Literal['xyY'] = 'xyY'
-    strategy: GAMUT_STRATEGY_TYPE = 'constrain_dataset_chrominance'
+    strategy: Literal['constrain_dataset_luminance', 'constrain_dataset_chrominance', 'constrain_image_chrominance', 'constrain_image_luminance', 'clip'] = 'constrain_dataset_chrominance'
     rec_standard: str = 'rec709'
     warning_threshold: float = 1.0
     prc_clipping: float = 0.5
@@ -417,7 +417,7 @@ class Options:
     as_gray: bool = False
     linear_luminance: bool = False
     rec_standard: Literal[1, 2, 3] = 2
-    gamut_strategy: GAMUT_STRATEGY_TYPE = Field(default='constrain_image_chrominance')
+    gamut_strategy: Literal['constrain_dataset_luminance', 'constrain_dataset_chrominance', 'constrain_image_chrominance', 'constrain_image_luminance', 'clip'] = Field(default='constrain_image_chrominance')
 
     # --- Dithering / Memory ---
     dithering: Literal[0, 1, 2] = 0
@@ -431,13 +431,13 @@ class Options:
     hist_optim: bool = False
     hist_specification: Optional[Literal[1, 2, 3, 4]] = 4
     hist_iterations: conint(ge=1) = 10
-    target_hist: Optional[Union[np.ndarray, Literal["equal", "unit_test"]]] = Field(default=None)
+    target_hist: Optional[Union[np.ndarray, Path, Literal["equal"]]] = Field(default=None)
 
     # --- Fourier ---
     rescaling: Optional[Literal[0, 1, 2, 3]] = 2
-    target_spectrum: Optional[Union[np.ndarray, Literal["unit_test"]]] = Field(default=None)
-    fft_padding_mode: Optional[Literal["reflect", "symmetric", "constant"]] = None
-    fft_padding_value: Optional[confloat(ge=0, le=255)] = None
+    target_spectrum: Optional[Union[np.ndarray, Path]] = Field(default=None)
+    fft_padding_mode: Literal[0, 1, 2, 3] = 0
+    fft_padding_value: Union[int, Literal[300]] = 300
 
     # --- Misc ---
     verbose: Literal[-1, 0, 1, 2, 3] = 0
@@ -474,6 +474,8 @@ Main image processing class.
 class ImageProcessor:
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=False)
     # --- Public attributes ---
+    # User inputs are mainly: dataset, options.
+    # Test-related flags below are internal execution controls.
     bool_masks: List = Field(default_factory=list)
     dataset: ImageDataset
     desaturate_chroma_on_low_luminance: bool = Field(default=True)

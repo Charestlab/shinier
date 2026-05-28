@@ -27,39 +27,58 @@ Vector = Iterable[Union[float, int]]
 
 
 class ImageProcessor(InformativeBaseModel):
-    """
-    Provides functionality for image processing with multiple configurable steps.
+    """Process an image dataset with configurable SHINIER operations.
 
     This class is designed to process a dataset of images by applying the following
     configurable transformations: luminance matching, histogram matching, spatial frequency
     matching, and Fourier spectrum matching. It is highly customizable and includes
     options like verbosity levels, random seed initialization, and mask generation
-    for more fine-grained processing. Validation test are applied on each transformation
+    for more fine-grained processing. Validation tests are applied on each transformation
     and all processing steps and important information (e.g. seed) are logged in the output_folder.
 
-    Attributes:
-        dataset (ImageDataset): The dataset containing the images to be processed.
-        options (Optional[Options]): Options for processing, including mode, verbosity,
-            and seed values.
-        bool_masks (List): Boolean masks for all images in the dataset.
-        verbose (Literal[-1, 0, 1, 2, 3]): Controls verbosity levels (default = 0).
-            -1 = Quiet mode
-            0 = Progress bar with ETA
-            1 = Basic progress steps (no progress bar)
-            2 = Additional info about image and channels being processed are printed (no progress bar)
-            3 = Debug mode for developers (no progress bar)
-        log (List): Log messages related to processing.
-        validation (List): Results of validation checks during processing.
-        ssim_results (List): Structural Similarity Index (SSIM) test results.
-        ssim_data (List): SSIM-related data for analysis.
-        seed (int): Random seed for reproducibility in processing steps.
+    Only ``dataset`` and ``options`` are expected as participant/user inputs.
 
-        Notes:
-            - Using exact_histogram_without_ties whenever possible for faster and deterministic results.
-            - Input images are transformed into floats [0, 255] and then converted into relevant color space
-                at the very beginning. A buffer image dataset is used to store intermediate results. Output images
-                are reconverted back into sRGG and into uint8 at the end of all image processing steps.
-            - All important processing information (e.g. seed) are logged and stored in output_folder.
+    Parameters
+    ----------
+    dataset : ImageDataset
+        Dataset containing images, masks, buffers, and processing metadata.
+
+    options : Optional[Options]
+        Processing options, including mode selection, verbosity, random seed,
+        and matching parameters.
+
+    Runtime Attributes
+    ------------------
+    - ``bool_masks`` (List): Boolean masks used for masked processing of each image.
+    - ``verbose`` (Literal[-1, 0, 1, 2, 3]): Verbosity level controlling console
+      output.
+    - ``log`` (List[str]): Processing log messages accumulated during execution.
+    - ``validation`` (List[dict]): Internal validation results collected after
+      processing steps.
+    - ``ssim_results`` (List[dict]): Structural Similarity Index (SSIM) test
+      results.
+    - ``ssim_data`` (List[dict]): SSIM-related intermediate data retained for
+      analysis.
+    - ``seed`` (Optional[int]): Random seed used for reproducible stochastic
+      operations.
+    - ``desaturate_chroma_on_low_luminance`` (bool): Whether low-luminance
+      chroma desaturation is applied in color treatment.
+    - ``from_cli`` (bool): Flag indicating that the processor was launched via
+      command-line entry point.
+    - ``from_unit_test`` (bool): Internal flag used by unit-test execution paths.
+    - ``from_validation_test`` (bool): Internal flag used by validation-test
+      execution paths.
+
+    Notes
+    -----
+    - Uses exact histogram specification without ties whenever possible for
+      faster and deterministic results.
+    - Input images are transformed into floats [0, 255] and then converted into
+      the relevant color space at the beginning of processing. A buffer image
+      dataset stores intermediate results. Output images are reconverted back
+      into sRGB and uint8 at the end of all image processing steps.
+    - All important processing information (e.g. seed) is logged and stored in
+      output_folder.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=False)
@@ -206,7 +225,26 @@ class ImageProcessor(InformativeBaseModel):
                 print_log(logs=logs, log_path=self.options.output_folder)
 
     def get_results(self):
-        """Return list of processed np.ndarray if input was arrays, otherwise None."""
+        """Return the processed output in the same container style as the input.
+
+        This method is the public accessor for completed runs. It should be called
+        after :meth:`process` has finished successfully.
+
+        Returns
+        -------
+        Union[list[np.ndarray], ImageListIO]
+            If the original input images were provided as NumPy arrays, returns the
+            processed array data.
+
+            If the input images were loaded from files, returns the same
+            ``ImageListIO`` container used by the processor, with the processed
+            images stored inside it.
+
+        Raises
+        ------
+        RuntimeError
+            If processing has not been completed yet.
+        """
         sp = getattr(self.dataset.images, "store_paths", None)
         if self._complete:
             if not sp or sp[0] is None:
@@ -269,9 +307,9 @@ class ImageProcessor(InformativeBaseModel):
             target_spectrum = self._compute_target_spectrum_from_image_path(target_spectrum)
         else:
             target_spectrum = im3D(target_spectrum)
-            expected_shape = im3D(self.dataset.magnitudes[0]).shape if self.options.fft_padding_mode is not None else im3D(self.dataset.buffer[0]).shape
+            expected_shape = im3D(self.dataset.magnitudes[0]).shape if self.options.fft_padding_mode != 0 else im3D(self.dataset.buffer[0]).shape
             if target_spectrum.shape != expected_shape:
-                if self.options.fft_padding_mode is not None:
+                if self.options.fft_padding_mode != 0:
                     raise TypeError(
                         "When fft_padding_mode is enabled, a direct target_spectrum array must already "
                         f"match the padded FFT shape. Got {target_spectrum.shape}, expected {expected_shape}."
@@ -509,13 +547,30 @@ class ImageProcessor(InformativeBaseModel):
         self.validation.append(results)
 
     def process(self):
-        """
-        The method consists of a series of image processing operations which are applied to the dataset's
-        images buffer. The input uint8 images are first converted into float [0, 255]. Dithering and
-        reconversion into uint8 is applied in the final step, based on the provided dithering option.
+        """Run the full SHINIER pipeline on the current dataset.
 
-        If certain processing modes support histogram specification, a reproducible random seed is optionally generated
-        and logged for replicability.
+        This method performs the complete processing workflow selected by
+        ``options.mode``. Input images are first copied into the working buffer and
+        converted to float values in ``[0, 255]``. Depending on the selected mode,
+        the processor may then apply luminance matching, histogram matching,
+        spatial-frequency matching, Fourier-spectrum matching, or dithering only.
+
+        The processing order and number of iterations are controlled by
+        ``options.mode`` and ``options.iterations``. When histogram-based methods are
+        used, a random seed is created if needed and recorded in the log so that the
+        run can be reproduced. Color conversion behavior is driven by
+        ``options.as_gray``, ``options.linear_luminance``, ``options.rec_standard``,
+        and ``options.gamut_strategy``. Final conversion to ``uint8`` is handled by
+        ``options.dithering`` and can use noisy-bit or Floyd-Steinberg dithering.
+
+        Notes
+        -----
+            - ``legacy_mode`` switches several sub-steps to MATLAB-compatible
+                behavior.
+            - ``conserve_memory`` and the input storage mode affect how much data is
+                kept in memory during processing.
+            - Fourier-based modes reuse the padding configuration from
+                ``options.fft_padding_mode`` and ``options.fft_padding_value``.
         """
 
         # Set a seed for the random generator used in exact histogram specification
@@ -660,23 +715,30 @@ class ImageProcessor(InformativeBaseModel):
         self._complete = True
 
     def dithering(self, input_collection: ImageListIO, output_collection: ImageListIO, dithering: Literal[0, 1, 2]):
-        """
-        Applies a dithering effect to a collection of images based on the specified dithering mode.
+        """Convert the processed float images back to ``uint8`` with optional dithering.
 
         This function processes each image in the input collection individually and applies the appropriate
         dithering method. Supported methods include noisy bit dithering, Floyd-Steinberg dithering, and
         a standard uint8 conversion, depending on the specified mode. The processed images are stored
         in the provided output collection.
 
-        Args:
-            input_collection: A collection of input images to be processed.
-            output_collection: A collection where the processed images will be stored.
-            dithering: An integer indicating the dithering method to use. 1 corresponds
-                to noisy bit dithering, 2 corresponds to Floyd-Steinberg dithering, and
-                any other value defaults to a standard uint8 conversion.
+        Parameters
+        ----------
+        input_collection : ImageListIO
+            Buffer of processed images in float form, typically in ``[0, 255]``.
+        output_collection : ImageListIO
+            Destination collection that receives the converted images.
+        dithering : Literal[0, 1, 2]
+            Dithering mode from ``options.dithering``.
+            - 0 = disables dithering
+            - 1 = applies noisy-bit dithering
+            - 2 = applies Floyd-Steinberg dithering
 
-        Returns:
-            A collection with the results of the applied dithering effect.
+        Returns
+        -------
+        ImageListIO
+            Collection containing the converted images (or unchanged conversion
+            results when dithering is disabled).
         """
         # Dithering function assumes float with values in the [0, 1] range.
         for idx, image in enumerate(input_collection):
@@ -690,15 +752,27 @@ class ImageProcessor(InformativeBaseModel):
         return output_collection
 
     def lum_match(self):
-        """
-        Matches the mean and/or standard deviation of a set of images. If target_lum is provided, it will match the requested
-        target statistics, where target_lum[0] is the mean and target_lum[1] is the standard deviation. A 0 value uses the dataset
-        average for that statistic. A None value leaves that statistic unchanged for each image. If safe_values is enabled, it will
-        find target values that are close to target_lum while not producing out-of-range values, i.e. outside of [0, 255].
+        """Match the luminance statistics of each image to a target.
 
-            Warnings:
-                - Clipping should be applied prior to uint8 conversion since np.uint8 and .astype('uint8') exhibit wrap-around behavior for out-of-range values. E.g. np.array([-2, 256]).astype('uint8') = [254, 0]
-                - the target M and STD provided if safe_values is true, will not be equal to the grand average of the images' mean and std. Instead, it will find the closet mean and std that prevent out-of-range values.
+        This method adjusts the mean and/or standard deviation of each masked image
+        region. The target values come from ``options.target_lum``:
+
+        - ``target_lum[0]`` controls the mean.
+        - ``target_lum[1]`` controls the standard deviation.
+
+        A value of ``0`` means "use the dataset average" for that statistic, while
+        ``None`` leaves the statistic unchanged. When ``safe_lum_match`` is enabled,
+        the method searches for nearby statistics that avoid values outside
+        ``[0, 255]``.
+
+        Notes
+        -----
+        - The operation works on the processed buffer after the color treatment
+          selected by ``options.as_gray`` and ``options.linear_luminance``.
+        - Clipping should happen before ``uint8`` conversion because NumPy wraps
+          out-of-range values when casting to ``uint8``.
+        - In grayscale mode, the matching is applied directly to the intensity
+          values.
         """
 
         def predict_values(original_means, original_stds, original_min_max, target_mean, target_std):
@@ -715,14 +789,19 @@ class ImageProcessor(InformativeBaseModel):
             return predicted_min, predicted_max, predicted_range
 
         def compute_stats(im: np.ndarray, binary_mask: np.ndarray) -> Tuple[float, float, float, float]:
-            """
-            M, SD, min, max from RGB images whose channels are weighted (or not if grayscale).
-            Args:
-                im: An image
-                binary_mask: A mask
+            """M, SD, min, max from RGB images whose channels are weighted (or not if grayscale).
 
-            Returns:
-                Tuple: mean, standard deviation
+            Parameters
+            ----------
+            im : np.ndarray
+                An image.
+            binary_mask : np.ndarray
+                A mask.
+
+            Returns
+            -------
+            Tuple[float, float, float, float]
+                Mean, standard deviation, minimum, and maximum.
             """
             im = im3D(im)
             binary_mask = im3D(binary_mask)
@@ -847,29 +926,53 @@ class ImageProcessor(InformativeBaseModel):
         self.dataset.buffer.drange = (0, 255)
 
     def hist_match(self):
-        """
-        Performs histogram matching on a collection of images to adjust their pixel intensities to match a
-        target histogram. The method includes optional optimization steps to enhance the structural similarity
-        index (SSIM) during the histogram matching process.
+        """Match each image histogram to the target histogram.
 
-        Notes:
-            - The input image collection, target histogram, and optimization options are managed as class-level
-              attributes.
-            - Includes safeguards to process images with different dynamic ranges.
-            - Applies faster and deterministic exact_histogram_without_ties whenever possible.
-            - Structural similarity and gradient maps are computed to guide the optimization process if enabled.
+        The target histogram is taken from ``options.target_hist`` and is matched
+        with an exact histogram specification routine on 8-bit bins
+        (``n_bins = 256``).
 
-        Warnings:
-            - Grayscale images: `hist_match` operates directly on intensity values and does not assume linear
-              luminance scaling.
-            - Color images: by default, `hist_match` is applied independently to each color channel.
-              This may produce inaccurate color relationships or out-of-gamut results.
-              If joint color consistency is required, consider using histogram matching of joint RGB distributions
-              or other color-aware distribution matching methods.
+        Tie handling is selected by ``options.hist_specification``:
 
-        Raises:
-            ValueError: If the target histogram's number of bins does not match the dynamic range of the processed
-                        images.
+        - 1 = ``noise``
+        - 2 = ``moving-average``
+        - 3 = ``gaussian``
+        - 4 = ``hybrid``
+
+        In practice, this implementation first checks whether ties are present
+        in the current image. If no ties are detected, it forces the fast
+        deterministic mapping path (``tie_strategy='none'``).
+
+        If ``options.hist_optim`` is enabled, the method performs additional SSIM
+        guided sub-iterations using sensitivity maps and adaptive step-size
+        control. The number of optimization iterations comes from
+        ``options.hist_iterations`` (implemented as ``hist_iterations + 1`` so the
+        last pass remains an exact histogram projection). The random seed set in
+        ``process`` is reused for reproducibility when tie-breaking requires
+        stochastic behavior.
+
+        Notes
+        -----
+        - Matching is performed inside the current masks when masks are active.
+        - Behavior depends on color-treatment mode. In the default color path
+          (``linear_luminance=False`` and ``as_gray=False``), histogram matching
+          is applied to the luminance channel only and chromaticity is restored
+          later. With ``linear_luminance=True`` and ``as_gray=False``, matching is
+          done independently per RGB channel. With ``as_gray=True``, matching is
+          done on grayscale intensities.
+        - Output is kept as float ``[0, 255]`` in the working buffer.
+        - In optimization mode, SSIM trends are monitored and can trigger
+          rollback/stall stopping through ``StepSizeController``.
+
+        Raises
+        ------
+        ValueError
+            If ``target_hist`` is incompatible with the processed images.
+            Typical cases are:
+            - wrong number of bins (must be 256),
+            - wrong number of channels for the active processing mode,
+            - target histogram image path with a size different from the
+              processed dataset reference size.
         """
 
         hist_optim = self.options.hist_optim
@@ -988,24 +1091,33 @@ class ImageProcessor(InformativeBaseModel):
         buffer_collection.drange = (0, 255)
 
     def sf_match(self):
-        """Match spatial frequencies of input images to a target rotational spectrum.
+        """Match the rotationally averaged spatial-frequency content of each image 
+        (i.e., mean amplitude per spatial frequency).
 
-        This function performs spatial frequency (SF) matching by adjusting the
-        rotational average of the Fourier amplitude of each input image so that
-        it matches the target spectrum. Each input image's magnitude spectrum
-        is scaled relative to the target spectrum, while preserving its original
-        phase, and then reconstructed in the spatial domain.
+        The target frequency profile is derived from ``options.target_spectrum``
+        and the initial padded spectra computed through the Fourier pipeline. The
+        method scales each channel's magnitude spectrum to match the target radial
+        average while preserving the original phase.
 
-        Notes:
-            - get_images_spectra will stretch input to [0, 1] range
-            - Frequencies beyond the Nyquist limit are set to zero to avoid aliasing.
-            - The adjustment is performed separately for each channel.
-            - Uses `cart2pol` and `pol2cart` to switch between Cartesian and polar
-              representations of the Fourier domain.
-            - output values are typically out-of-range. This does not represent a problem
-                for iterative modes [5, 7] as hist_match could benefit from images without
-                duplicated values. Values need to be readjusted when
-                self._is_last_operation is True.
+        Notes
+        -----
+        - Spectra are computed upstream from float ``[0, 1]`` images. If FFT
+          padding is enabled, it is controlled by ``options.fft_padding_mode`` and
+          ``options.fft_padding_value``.
+        - The target profile is recomputed when the pipeline uses moving targets
+          (composite iterative modes).
+        - Frequencies above the Nyquist limit are explicitly zeroed to avoid
+          aliasing artifacts.
+        - The implementation switches between Cartesian and polar Fourier
+          representations (``cart2pol``/``pol2cart``) so magnitude can be
+          reweighted while phase is preserved.
+        - Channel phases are preserved; only magnitude is reweighted to match the
+          target rotational average.
+        - The adjustment is done independently per channel.
+        - Intermediate outputs can go outside ``[0, 1]``. This is expected in
+          iterative modes ``5`` and ``7`` and is readjusted when
+          ``self._is_last_operation`` through soft clipping and optional
+          rescaling.
         """
 
         if not self._is_first_operation and self.options._is_moving_target and self.options.mode > 3:
@@ -1084,20 +1196,23 @@ class ImageProcessor(InformativeBaseModel):
                 buffer_collection.drange = (0, 255)
 
     def spec_match(self):
-        """Match the full magnitude spectrum of images to a target spectrum.
+        """Match the full Fourier magnitude spectrum to a target spectrum.
 
-        This function reconstructs images whose Fourier magnitude is replaced
-        by the `target_spectrum`, while preserving the original Fourier phase.
-        The inverse FFT is then used to get spatial-domain images with the
-        desired spectral characteristics.
+        This method replaces the magnitude of each image's Fourier transform with
+        ``options.target_spectrum`` while keeping the original phase information.
+        It then reconstructs the image through the inverse FFT.
 
-        Notes:
-            - Phase information from each input image is preserved.
-            - The output is real-valued because only magnitude is replaced.
-            - output values are typically out-of-range. This does not represent a problem
-            for iterative modes [6, 8] as hist_match could benefit from images without
-            duplicated values. Values need to be readjusted when self._is_last_operation
-            is True.
+        Notes
+        -----
+        - This method is used by ``options.mode = 4`` (spectrum-only) and by
+          composite histogram+spectrum modes ``6`` and ``8``.
+        - The target spectrum must be compatible with the processed image shape
+          and channel count.
+        - Fourier spectra are computed using the padding parameters from
+          ``options.fft_padding_mode`` and ``options.fft_padding_value``.
+        - Output values are often outside ``[0, 1]`` in intermediate steps and are
+          readjusted when ``self._is_last_operation`` through clipping and
+          optional rescaling.
         """
         # Target magnitude spectrum to which the
         # input images should be matched. Should be a 2D or 3D array

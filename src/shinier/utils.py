@@ -11,7 +11,7 @@ import numpy as np
 from datetime import datetime
 from numpy.lib.stride_tricks import sliding_window_view
 from typing import (
-    Any, Optional, Tuple, Union, NewType, List, Iterable, ClassVar,
+    Any, Optional, Tuple, Union, NewType, List, Iterable, ClassVar, Sequence,
     Callable, Literal, Dict, Annotated, TYPE_CHECKING, get_args, get_origin)
 from PIL import Image
 from itertools import chain
@@ -33,6 +33,12 @@ from shinier import __version__ as package_version
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 DiffusionTap = Tuple[int, int, float]  # (dy, dx, weight)
 DEFAULT_FFT_PADDING_RATIO = 0.5
+FFT_PADDING_MODE_MAP = {
+    0: "disabled",
+    1: "reflect",
+    2: "symmetric",
+    3: "constant",
+}
 
 
 class Bcolors:
@@ -2196,17 +2202,30 @@ def separate(mask: np.ndarray, background: Union[int, float] = 0, background_ope
     return mask_fgr.astype(bool), mask_bgr.astype(bool), background
 
 
-def _pad_for_fft(image: np.ndarray, mode: Optional[Literal["reflect", "symmetric", "constant"]], value: Optional[float] = None) -> np.ndarray:
-    """Pad image spatial axes before FFT. Returns image unchanged when mode is None."""
-    if mode is None:
+def _pad_for_fft(
+    image: np.ndarray,
+    mode: Optional[Union[Literal[0, 1, 2, 3], Literal["reflect", "symmetric", "constant"]]],
+    value: Optional[float] = 300,
+) -> np.ndarray:
+    """Pad image spatial axes before FFT. Returns image unchanged when mode is None or 0."""
+    if mode is None or mode == 0:
         return image
+
+    mode_name: Optional[str] = None
+    if isinstance(mode, str):
+        mode_name = mode.strip().lower()
+    elif isinstance(mode, int):
+        mode_name = FFT_PADDING_MODE_MAP.get(mode)
+    if mode_name not in ("reflect", "symmetric", "constant"):
+        raise ValueError("fft_padding_mode must be 0, 1, 2, 3, None, 'reflect', 'symmetric', or 'constant'.")
+
     height, width = image.shape[:2]
     pad = int(min(height, width) * DEFAULT_FFT_PADDING_RATIO)
     pad_width = ((pad, pad), (pad, pad)) if image.ndim == 2 else ((pad, pad), (pad, pad), (0, 0))
-    if mode == "constant":
+    if mode_name == "constant":
         constant_value = image.mean() if value is None else value / 255
-        return np.pad(image, pad_width=pad_width, mode=mode, constant_values=constant_value)
-    return np.pad(image, pad_width=pad_width, mode=mode)
+        return np.pad(image, pad_width=pad_width, mode=mode_name, constant_values=constant_value)
+    return np.pad(image, pad_width=pad_width, mode=mode_name)
 
 
 def _crop_after_fft(image: np.ndarray, original_shape: tuple[int, int]) -> np.ndarray:
@@ -2219,16 +2238,17 @@ def _crop_after_fft(image: np.ndarray, original_shape: tuple[int, int]) -> np.nd
 def image_spectrum(
     image: np.ndarray,
     rescale: bool = True,
-    fft_padding_mode: Optional[Literal["reflect", "symmetric", "constant"]] = None,
-    fft_padding_value: Optional[float] = None,
+    fft_padding_mode: Literal[0, 1, 2, 3] = 0,
+    fft_padding_value: Optional[float] = 300,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute the spectrum of an image
     Args:
         image (np.ndarray): An image
         rescale (bool): If true, will rescale each channel to [0, 1] range.
-        fft_padding_mode (Optional[Literal["reflect", "symmetric", "constant"]]): Optional spatial padding mode before FFT.
-        fft_padding_value (Optional[float]): Constant padding value in [0, 255].
+        fft_padding_mode (Literal[0, 1, 2, 3]): Spatial padding mode before FFT.
+            0=disabled, 1=reflect, 2=symmetric, 3=constant.
+        fft_padding_value (Optional[float]): Constant padding value in [0, 255], or 300 for mean intensity.
 
     Returns:
         magnitude, phase
@@ -2713,7 +2733,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
     masks = getattr(processor, "bool_masks", [None])[img_idx]
 
     # --- Figure layout ---
-    fft_padding = processor.options.fft_padding_mode is not None
+    fft_padding = processor.options.fft_padding_mode != 0
     diag_steps = []
     for step in steps:
         if step == "dithering":
@@ -2821,13 +2841,13 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
 
             mag_before, _ = image_spectrum(
                 processor._initial_buffer[img_idx],
-                fft_padding_mode=processor.options.fft_padding_mode if padded_row else None,
-                fft_padding_value=processor.options.fft_padding_value if padded_row else None,
+                fft_padding_mode=processor.options.fft_padding_mode if padded_row else 0,
+                fft_padding_value=processor.options.fft_padding_value if padded_row else 300,
             )
             mag_after, _ = image_spectrum(
                 processor._final_buffer[img_idx],
-                fft_padding_mode=processor.options.fft_padding_mode if padded_row else None,
-                fft_padding_value=processor.options.fft_padding_value if padded_row else None,
+                fft_padding_mode=processor.options.fft_padding_mode if padded_row else 0,
+                fft_padding_value=processor.options.fft_padding_value if padded_row else 300,
             )
             target_spectrum = processor._target_spectrum if padded_row or not fft_padding else _crop_after_fft(processor._target_spectrum, mag_after.shape[:2])
             target_sf, _ = sf_profile(
@@ -2863,13 +2883,13 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
         elif base_step == "spec_match":
             mag_before, _ = image_spectrum(
                 processor._initial_buffer[img_idx],
-                fft_padding_mode=processor.options.fft_padding_mode if padded_row else None,
-                fft_padding_value=processor.options.fft_padding_value if padded_row else None,
+                fft_padding_mode=processor.options.fft_padding_mode if padded_row else 0,
+                fft_padding_value=processor.options.fft_padding_value if padded_row else 300,
             )
             mag_after, _ = image_spectrum(
                 processor._final_buffer[img_idx],
-                fft_padding_mode=processor.options.fft_padding_mode if padded_row else None,
-                fft_padding_value=processor.options.fft_padding_value if padded_row else None,
+                fft_padding_mode=processor.options.fft_padding_mode if padded_row else 0,
+                fft_padding_value=processor.options.fft_padding_value if padded_row else 300,
             )
             target_spectrum = processor._target_spectrum if padded_row or not fft_padding else _crop_after_fft(processor._target_spectrum, mag_after.shape[:2])
             _ = spectrum_plot(mag_before, ax=axL, target_spectrum=target_spectrum, show_normalized_rmse=target_spectrum is not None)
@@ -3472,7 +3492,8 @@ def get_images_spectra(
         magnitudes (Optional[ImageListIO]): If provided, inserts new magnitudes into this list.
         phases (Optional[ImageListIO]): If provided, inserts new phases into this list.
         rescale (bool): Determines if input is stretched to [0, 1] range.
-        fft_padding_mode (Optional[Literal["reflect", "symmetric", "constant"]]): Optional spatial padding mode before FFT.
+        fft_padding_mode (Optional[Literal[1, 2, 3]]): Optional spatial padding mode before FFT.
+            1=reflect, 2=symmetric, 3=constant.
         fft_padding_value (Optional[float]): Constant padding value in [0, 255].
 
     Returns:

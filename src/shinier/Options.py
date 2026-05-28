@@ -41,196 +41,394 @@ class Options(InformativeBaseModel):
     """
     Class to hold SHINIER processing options.
 
-    Args:
-    ------------------------------------------INPUT/OUTPUT images folders------------------------------------------
-        input_folder (Union[str, Path]): relative or absolute path of the image folder (default = ./INPUT)
+    Subsections
+    -----------
+    1. INPUT/OUTPUT images folders
+        ``input_folder``, ``output_folder``
+    2. MASKS and FIGURE-GROUND separation
+        ``masks_folder``, ``whole_image``, ``background``
+    3. SHINIER MODE
+        ``mode``, ``legacy_mode``, ``seed``, ``iterations``
+    4. Grayscale / color
+        ``as_gray``, ``linear_luminance``, ``rec_standard``, ``gamut_strategy``
+    5. Dithering / Memory
+        ``dithering``, ``conserve_memory``
+    6. LUMINANCE matching
+        ``safe_lum_match``, ``target_lum``
+    7. HISTOGRAM matching
+        ``hist_optim``, ``hist_specification``, ``hist_iterations``, ``target_hist``
+    8. FOURIER matching
+        ``rescaling``, ``target_spectrum``, ``fft_padding_mode``, ``fft_padding_value``
+    9. Misc
+        ``verbose``
 
-        output_folder (Union[str, Path]): relative or absolute path where processed images will be saved (default = ./OUTPUT)
+    Options
+    -------
+    input_folder : Union[str, Path]
+        [1] INPUT/OUTPUT images folders.
 
-    ------------------------------------------MASKS and FIGURE-GROUND separation------------------------------------------
-        masks_folder (Union[str, Path]): relative or absolute path of mask (default = ./MASKS)
+        Relative or absolute path of the image folder.
+        Default is the package sample INPUT folder.
 
-        whole_image (Literal[1-3]): Binary ROI masks: Analysis run on selected pixels (default = 1)
-            1 = No ROI mask: Whole images will be analyzed
-            2 = ROI masks: Analysis run on pixels != `background` pixel value
-            3 = ROI masks: Masks loaded from the `MASK` folder and analysis run on pixels >= 127
+    output_folder : Union[str, Path]
+        [1] INPUT/OUTPUT images folders.
 
-        background (Union[int, float]): Background grayscale intensity of mask, or 300 = automatic (default = 300)
-            (By default (300), the most frequent luminance intensity in the image is used as the background value);
-            i.e., all regions of that luminance intensity are treated as background
+        Relative or absolute path where processed images will be saved.
+        Default is the package sample OUTPUT folder.
 
-    --------------------------------------------------   SHINIER MODE  --------------------------------------------------
-        mode (Literal[1-9]): Image processing treatment (default = 8)
-            1 = lum_match only
-            2 = hist_match only (default)
-            3 = sf_match only
-            4 = spec_match only
-            5 = hist_match & sf_match
-            6 = hist_match & spec_match
-            7 = sf_match & hist_match
-            8 = spec_match & hist_match
-            9 = only dithering
+    masks_folder : Optional[Union[str, Path]]
+        [2] MASKS and FIGURE-GROUND separation.
 
-        legacy_mode (Optional[bool]): Enables backward compatibility with older versions while retaining recent optimizations (default = False).
-            True = reproduces the behavior of previous releases by setting:
-                - `conserve_memory = False`
-                - `as_gray = 1`
-                - `dithering = 0`
-                - `hist_specification = 1`
-                - `safe_lum_match = False`
-            False = no legacy settings are forced and all options follow their current defaults.
+        Relative or absolute path of mask folder.
+        Default is None.
 
-        seed (Optional[Int]): Seed to initialize the PRNG (default = None).
-            Used for the 'Noisy bit dithering' and hist_specification (with "hybrid" or "noise" tie-breaking strategies).
-            If 'None', int(time.time()) will be used.
+    whole_image : Literal[1, 2, 3]
+        [2] MASKS and FIGURE-GROUND separation.
 
-        iterations (int): Number of iteration for composites mode (default = 2).
-            For these modes, histogram specification and Fourier amplitude specification affect each other.
-            Multiple iterations will allows a high degree a joint matching.
+        Binary region-of-interest (ROI) masks: analysis runs on selected pixels.
+        Default is 1.
 
-                >This method of iterating was develop so that it recalculates the respective target at each iteration (i.e., no target hist/spectrum).
+        - 1 = No ROI mask: whole images will be analyzed.
+        - 2 = ROI masks: analysis run on pixels != ``background`` pixel value.
+        - 3 = ROI masks: masks loaded from the MASK folder and analysis run on pixels >= 127.
 
-    --------------------------------------------------Grayscale / color------------------------------------------------------
-        as_gray (bool): Conversion into grayscale images (default = 0).
-            False = No conversion applied.
-            True = Convert into grayscale images.
-                - Using `rec_standard` if `linear_luminance` is False
-                - Using simple mean(RGB) if `linear_luminance` is True
+    background : Union[int, float]
+        [2] MASKS and FIGURE-GROUND separation.
 
-        linear_luminance (bool): Are pixel values linearly related to luminance? (default = False).
-            True: "no conversion" mode
+        Background grayscale intensity of mask, or 300 = automatic.
+        Default is 300.
+
+        By default (300), the most frequent luminance intensity in the image is used as the background value;
+        i.e., all regions of that luminance intensity are treated as background.
+
+    mode : Literal[1, 2, 3, 4, 5, 6, 7, 8, 9]
+        [3] SHINIER MODE.
+
+        Image processing treatment.
+        Default is 2.
+
+        - 1 = lum_match only.
+        - 2 = hist_match only (default).
+        - 3 = sf_match only.
+        - 4 = spec_match only.
+        - 5 = hist_match and sf_match.
+        - 6 = hist_match and spec_match.
+        - 7 = sf_match and hist_match.
+        - 8 = spec_match and hist_match.
+        - 9 = only dithering.
+
+    legacy_mode : Optional[bool]
+        [3] SHINIER MODE.
+
+        Enables backward compatibility with older versions while retaining recent optimizations.
+        Default is False.
+
+        Important: legacy_mode affects more than the explicit option overrides listed below.
+        It also enables MATLAB-compatibility behavior in several processing steps
+        (for example MATLAB-style rounding and grayscale conversion paths), so outputs may differ
+        even when two runs appear to share the same visible option values.
+
+        True reproduces the behavior of previous releases by setting:
+
+        - ``conserve_memory`` = ``False``
+        - ``as_gray`` = ``1``
+        - ``dithering`` = ``0``
+        - ``hist_specification`` = ``1``
+        - ``safe_lum_match`` = ``False``
+
+        False means no legacy settings are forced and all options follow their current defaults.
+
+    seed : Optional[int]
+        [3] SHINIER MODE.
+
+        Seed to initialize the PRNG.
+        Default is None.
+
+        Used for the Noisy bit dithering and ``hist_specification`` (with ``hybrid`` or ``noise`` tie-breaking strategies).
+        If ``None``, ``int(time.time())`` will be used.
+
+    iterations : int
+        [3] SHINIER MODE.
+
+        Number of iterations for composite modes.
+        Default is 5.
+
+        For these modes, histogram specification and Fourier amplitude specification affect each other.
+        Multiple iterations allow a high degree of joint matching.
+
+        This method of iterating was developed so that it recalculates the respective target at each iteration
+        (i.e., no target hist/spectrum).
+
+    as_gray : bool
+        [4] Grayscale / color.
+
+        Conversion into grayscale images.
+        Default is 0 (False).
+
+        - True = Convert into grayscale images.
+
+                - When ``linear_luminance`` is ``False``:
+                    computes non-linear grayscale images by applying the perceptual
+                    luma weights from the specified ``rec_standard``.
+                    
+                - When ``linear_luminance`` is ``True``:
+                    computes linear grayscale images by averaging the RGB channels
+                    (simple mean(RGB)).
+
+        - False = No conversion applied.
+
+    linear_luminance : bool
+        [4] Grayscale / color.
+
+        Are pixel values linearly related to luminance?
+        Default is False.
+
+        - True: no conversion mode.
+
                 - Assumes input images are linear RGB or grayscale.
                 - All transformations are applied independently to each channel.
                 - No color-space conversion is performed.
 
-            False: "conversion to xyY" [recommended and default]
+        - False: conversion to CIE xyY (recommended and default).
+
                 - Assumes input images are gamma-encoded (e.g., sRGB).
                 - Images are converted to the CIE xyY color space:
-                      sRGB → linRGB → XYZ → xyY
+                    sRGB -> linRGB -> XYZ -> xyY
                 - Transformations are applied only to the luminance channel (Y),
-                  while chromatic channels (x, y) remain unchanged.
+                    while chromatic channels (x, y) remain unchanged.
                 - The modified image is then reconstructed via:
-                      xyY → XYZ → linRGB → sRGB
-                - This mode preserves color gamuts and is highly recommended
-                  for operations on linear-to-luminance values like fourier matching and luminance matching.
+                    xyY -> XYZ -> linRGB -> sRGB
+                - This mode preserves color gamuts and is highly recommended for operations
+                    on linear-to-luminance values like fourier matching and luminance matching.
 
-        rec_standard (Literal[1, 2, 3]): Specifies the Rec. color standard used for RGB ↔ XYZ conversion (default = 2).
-            1 = Rec.601 (SDTV, legacy systems)
-            2 = Rec.709 (HDTV, sRGB default). Shinier assumes display-referred Rec. 709 with sRGB-like transfer.
-            3 = Rec.2020 (UHDTV, wide-gamut HDR)
+    rec_standard : Literal[1, 2, 3]
+        [4] Grayscale / color.
 
-        gamut_strategy (Literal['constrain_dataset_luminance', 'constrain_dataset_chrominance', 'constrain_image_chrominance', 'constrain_image_luminance', clip']):
-            Specify the strategy to deal with out-of-gamut problem (Requires linear_luminance=False ; default = 'constrain_image_chrominance').
+        Specifies the Rec. color standard used for RGB <-> XYZ conversion.
+        Default is 2.
 
-            Global constraints (applies the same transform to the whole dataset): Best for dataset consistency.
-            - 'constrain_dataset_luminance': Scales the luminance of ALL images down so the most saturated pixel fits.
-              (Preserves: Hue, Saturation. Compresses: Contrast/Luminance).
-            - 'constrain_dataset_chrominance': Scales the saturation of ALL images down so the brightest pixel fits.
-              (Preserves: Contrast/Luminance. Compresses: Saturation).
+        - 1 = Rec.601 (SDTV, legacy systems).
+        - 2 = Rec.709 (HDTV, sRGB default). SHINIER assumes display-referred Rec. 709 with sRGB-like transfer.
+        - 3 = Rec.2020 (UHDTV, wide-gamut HDR).
 
-            Local Repairs (applies a single transform to all pixels of a given image): Best to maximize image contrast.
-            - 'constrain_image_chrominance': Darkens all pixels so that there are no  out-of-gamut pixels.
-            - 'constrain_image_luminance': Desaturates all pixels so that there are not out-of-gamut pixels.
-            - 'clip': Default color conversion behavior: numpy safe_mode (not recommended unless you know what are you doing).
+        
+    gamut_strategy : Literal['constrain_dataset_luminance', 'constrain_dataset_chrominance', 'constrain_image_chrominance', 'constrain_image_luminance', 'clip']
+        [4] Grayscale / color.
 
-    --------------------------------------------------Dithering / Memory------------------------------------------------------
-        dithering (Literal[0-2]): Dithering applied before final conversion to uint8 (default = 0).
-            0 = No dithering
-            1 = Noisy bit dithering (Allard R. & Faubert J., 2008)
-            2 = Floyd-Steinberg dithering (Floyd R.W. & Steinberg L., 1976)
+        Strategy to deal with out-of-gamut problem.
+        Requires ``linear_luminance=False``.
+        Default is ``constrain_image_chrominance``.
 
-        conserve_memory (Optional[bool]): Controls how images are loaded and stored in memory during processing (default = True).
-            True = Minimizes memory usage by keeping only one image in memory at a time and using a temporary directory to save the images.
-                If the `input_data` is a list of NumPy arrays images are first saved as .npy in a temporary directory, and they are loaded
-                in memory one at a time upon request.
-            False = Increases memory usage substantially by loading all images into memory at once, but may improve processing speed.
+        Global constraints (applies the same transform to the whole dataset): best for dataset consistency.
 
-    --------------------------------------------------LUMINANCE matching------------------------------------------------------
-        safe_lum_match (bool): Adjusting the mean and standard deviation to keep all luminance values [0, 255] (default = False).
-            True = No values will be clipped, but the resulting targets may differ from the requested values.
-            False = Values will be clipped, but the resulting targets will stay the same.
+            - ``constrain_dataset_luminance``: Scales the luminance of ALL images down so the most saturated pixel fits.
+                Preserves hue and saturation; compresses contrast/luminance.
 
-        target_lum (Tuple[Optional[float], Optional[float]]): Pair (mean, std) of target luminance for luminance matching (default = (0, 0)).
-            The mean must be in [0, 255] or None, and the standard deviation must be >= 0 or None.
-            0 uses the dataset average for that statistic; None leaves that statistic unchanged per image.
-            Mean and standard deviation can be controlled separately by setting one value to None.
+            - ``constrain_dataset_chrominance``: Scales the saturation of ALL images down so the brightest pixel fits.
+                Preserves contrast/luminance; compresses saturation.
 
-    --------------------------------------------------HISTOGRAM matching--------------------------------------------------------
-        hist_optim (bool): Optimization of the histogram-matched images with structural similarity index measure (Avanaki, 2009) (default = False)
-            True = SSIM optimization (Avanaki, 2009)
-                    >> Following Avanaki's experimental results, no tie-breaking strategy is applied when optimizing SSIM except for the very last
-                       iteration where the "hybrid" strategy is used (see hist_specification).
-                    > To change the number if iterations (default = 5) and adjust step size (default = 35), see below
-            False = No SSIM optimization
+        Local repairs (applies a single transform to all pixels of a given image): best to maximize image contrast.
 
-        hist_specification (Literal[1-4]): Determines the algorithm used to break the ties (isoluminance) when matching the histogram (default = 4).
-            >> Set to None if hist_optim is True. See hist_optim for more info.
-            1 = 'Noise': Exact specification with noise (legacy code)
-                    > Add small uniform noise to break ties (fast; non-deterministic unless seed set).
-            2 = 'Moving-average': Coltuc Bolon & Chassery (2006) tie-breaking strategy with moving-average filters.
-                    > Kernels defined in the paper sorted lexicographically for deterministic local ordering.
-            3 = 'Gaussian': Coltuc's tie-breaking strategy with gaussian filters.
-                    > Adaptive amount of gaussian filters used (min 5, max 7; deterministic local ordering).
-            4 = 'Hybrid': Coltuc's tie-breaking strategy with gaussian filters, then noise if isoluminant pixels persist.
-                    > 'Gaussian' (deterministic) + 'Noise' (stochastic; if needed) - best compromise.
+            - ``constrain_image_chrominance``: Darkens all pixels so that there are no out-of-gamut pixels.
 
-        hist_iterations (int): Number of iterations for SSIM optimization in hist_optim (default is 10).
+            - ``constrain_image_luminance``: Desaturates all pixels so that there are not out-of-gamut pixels.
 
-        target_hist (Optional[Union[np.ndarray, Path, Literal['equal']]]): Target histogram, image path, 'equal', or None (default=None).
-            Multiple input types allowed:
-            - 'Histogram array': Load from a precomputed array (np.ndarray):
-                    > Can contain histogram counts (int) or weights (float) (histograms are normalized internally before use).
-                    > Shape must be (256,) or (256, 1) for single-channel processing, or (256, C) for multi-channel processing
-                        (e.g., RGB with linear_luminance=True, as_gray=False).
-                    > See "imhist" in utils.py to compute a target histogram from an image.
-            - 'Input image file': Derive the histogram from an image file (Path):
-                    > Image is processed using the same pipeline as the dataset to compute the target histogram.
-                    > Spatial dimensions must match the processed images.
-            - 'equal':
-                    > Uses a flat histogram, i.e. histogram equalization.
-            - None:
-                    > Uses the average histogram of all input images.
-            Used in all modes involving histogram matching (modes 2, 5, 6, 7, and 8).
-                
-    --------------------------------------------------FOURIER matching--------------------------------------------------------
-        rescaling (Literal[0-3]): Post-processing applied after sf_match or spec_match only (default = 2).
-            0 = no rescaling
-            1 = Rescaling each image so that it stretches to [0, 1] (its own min→0, max→1).
-            2 = Rescaling absolute max/min (shared 0–1 range).
-            3 = Rescaling average max/min.
-            > Not allowed for modes 1 and 2.
+            - ``clip``: Default color conversion behavior, numpy ``safe_mode`` (not recommended unless you know what are you doing).
 
-        target_spectrum (Optional[Union[np.ndarray, Path]]): Target Fourier magnitude spectrum, image path, or None (default=None).
-            Multiple input types allowed:
-            - 'Magnitude spectrum array': Load from a precomputed array (np.ndarray, dtype must be float):
-                    > Spatial shape must match the processed images: (H, W), or (H, W, C) for multi-channel processing
-                        (e.g., RGB with linear_luminance=True, as_gray=False).
-                    > See "image_spectrum" in utils.py to compute a target spectrum from an image.
-            - 'Input image file': Derive the spectrum from an image file (Path):
-                    > Image is processed using the same pipeline as the dataset to compute the target spectrum.
-                    > Spatial dimensions must match the processed images.
-            - None:
-                    > Uses the average spectrum of all input images.
-            Used in all modes involving Fourier matching (modes 3, 4, 5, 6, 7, and 8).
+    dithering : Literal[0, 1, 2]
+        [5] Dithering / Memory.
 
-        fft_padding_mode (Optional[Literal['reflect', 'symmetric', 'constant']]): Optional spatial padding before FFT computation (default = None).
-            - None = No padding.
-            - 'reflect' = Mirror image values without repeating the edge pixel.
-            - 'symmetric' = Mirror image values including the edge pixel.
-            - 'constant' = Pad with a constant spatial-domain intensity.
-            > Padding is applied before FFT and cropped after inverse FFT reconstruction.
+        Dithering applied before final conversion to uint8 to mitigate precision loss 
+        from float64 processing and perceptually extend effective bit depth.
+        
+        Default is 0.
 
-        fft_padding_value (Optional[float]): Constant padding intensity in [0, 255] when fft_padding_mode='constant' (default = None).
-            If None, the mean intensity of the current normalized image is used.
-            Used only when fft_padding_mode='constant'.
+        - 0 = No dithering.
+        - 1 = Noisy bit dithering (Allard R. and Faubert J., 2008).
+        - 2 = Floyd-Steinberg dithering (Floyd R.W. and Steinberg L., 1976).
 
-    --------------------------------------------------Misc--------------------------------------------------------
-        verbose (Literal[-1, 0, 1, 2, 3]): Controls verbosity levels (default = 0).
-            -1 = Quiet mode
-            0 = Progress bar with ETA
-            1 = Basic progress steps (no progress bar)
-            2 = Additional info about image and channels being processed are printed (no progress bar)
-            3 = Debug mode for developers (no progress bar)
+    conserve_memory : Optional[bool]
+        [5] Dithering / Memory.
+
+        Controls how images are loaded and stored in memory during processing.
+        Default is True.
+
+        True minimizes memory usage by keeping only one image in memory at a time and using a temporary directory
+        to save the images. If the ``input_data`` is a list of NumPy arrays, images are first saved as ``.npy`` in a
+        temporary directory, and they are loaded in memory one at a time upon request.
+
+        False increases memory usage substantially by loading all images into memory at once,
+        but may improve processing speed.
+
+    safe_lum_match : bool
+        [6] LUMINANCE matching.
+
+        Adjusting the mean and standard deviation to keep all luminance values [0, 255].
+        Default is True.
+
+        True = No values will be clipped, but the resulting targets may differ from the requested values.
+        False = Values will be clipped, but the resulting targets will stay the same.
+
+    target_lum : Tuple[Optional[float], Optional[float]]
+        [6] LUMINANCE matching.
+
+        Target luminance statistics as ``(mean, std)`` for luminance matching.
+        Default is ``(0, 0)``.
+
+        Constraints:
+
+        - ``mean`` must be in ``[0, 255]`` or ``None``.
+        - ``std`` must be ``>= 0`` or ``None``.
+
+        Semantics:
+
+        - ``0`` uses the dataset average for that statistic.
+        - ``None`` leaves that statistic unchanged per image.
+
+        Mean and standard deviation can be controlled independently by setting
+        either value to ``None``.
+
+    hist_optim : bool
+        [7] HISTOGRAM matching.
+
+        Optimization of the histogram-matched images with structural similarity index measure (Avanaki, 2009).
+        Default is False.
+
+                - True = SSIM optimization (Avanaki, 2009).
+
+                        - Following Avanaki's experimental results, no tie-breaking strategy is applied when
+                            optimizing SSIM except for the very last iteration where the hybrid strategy is used
+                            (see ``hist_specification``).
+
+                        - To change the number of iterations (default = 5) and adjust step size
+                            (default = 35), see below.
+
+                - False = No SSIM optimization.
+
+    hist_specification : Literal[1, 2, 3, 4]
+        [7] HISTOGRAM matching.
+
+        Determines the algorithm used to break ties (isoluminance) when matching the histogram.
+        Default is 4.
+
+        - 1 = ``Noise``: Exact specification with noise (legacy code).
+            Add small uniform noise to break ties (fast; non-deterministic unless seed set).
+
+        - 2 = ``Moving-average``: Coltuc Bolon and Chassery (2006) tie-breaking strategy with moving-average filters.
+            Kernels defined in the paper sorted lexicographically for deterministic local ordering.
+
+        - 3 = ``Gaussian``: Coltuc tie-breaking strategy with gaussian filters.
+            Adaptive amount of gaussian filters used (min 5, max 7; deterministic local ordering).
+
+        - 4 = ``Hybrid``: Coltuc tie-breaking strategy with gaussian filters and noise fallback if isoluminant pixels persist.
+            ``Gaussian`` (deterministic) + ``Noise fallback`` (stochastic, if needed), best compromise.
+
+        Set to ``None`` if ``hist_optim`` is ``True``. See ``hist_optim`` for more info.
+
+    hist_iterations : int
+        [7] HISTOGRAM matching.
+
+        Number of iterations for SSIM optimization in hist_optim.
+        Default is 10.
+
+    target_hist : Optional[Union[np.ndarray, Path, Literal['equal']]]
+        [7] HISTOGRAM matching.
+
+        Target histogram, image path, ``'equal'``, or ``None``.
+        Default is ``None``.
+
+        Accepted inputs:
+
+            - ``np.ndarray`` (histogram array):
+                    - Can contain histogram counts (int) or weights (float).
+                        Histograms are normalized internally before use.
+                    - Shape must be ``(256,)`` or ``(256, 1)`` for single-channel processing,
+                        or ``(256, C)`` for multi-channel processing
+                        (e.g., RGB with ``linear_luminance=True``, ``as_gray=False``).
+                    - See ``imhist`` in ``utils.py`` to compute a target histogram from an image.
+
+            - ``Path`` (input image file):
+                    - Image is processed using the same pipeline as the dataset to compute the target histogram.
+                    - Spatial dimensions must match the processed images.
+
+            - ``'equal'``:
+                    - Uses a flat histogram, i.e., histogram equalization.
+
+            - ``None``:
+                    - Uses the average histogram of all input images.
+
+        Used in all modes involving histogram matching (modes 2, 5, 6, 7, and 8).
+
+    rescaling : Literal[0, 1, 2, 3]
+        [8] FOURIER matching.
+
+        Post-processing applied after sf_match or spec_match only.
+        Default is 2.
+
+        - 0 = no rescaling.
+        - 1 = Rescaling each image so that it stretches to [0, 1] (its own min -> 0, max -> 1).
+        - 2 = Rescaling absolute max/min (shared 0-1 range).
+        - 3 = Rescaling average max/min.
+
+        Not allowed for modes 1 and 2.
+
+    target_spectrum : Optional[Union[np.ndarray, Path]]
+        [8] FOURIER matching.
+
+        Target Fourier magnitude spectrum, image path, or ``None``.
+        Default is ``None``.
+
+        Accepted inputs:
+
+            - ``np.ndarray`` (magnitude spectrum array, dtype must be float):
+                    - Spatial shape must match the processed images: ``(H, W)``, or ``(H, W, C)``
+                        for multi-channel processing
+                        (e.g., RGB with ``linear_luminance=True``, ``as_gray=False``).
+                    - See ``image_spectrum`` in ``utils.py`` to compute a target spectrum from an image.
+
+            - ``Path`` (input image file):
+                    - Image is processed using the same pipeline as the dataset to compute the target spectrum.
+                    - Spatial dimensions must match the processed images.
+
+            - ``None``:
+                    - Uses the average spectrum of all input images.
+
+        Used in all modes involving Fourier matching (modes 3, 4, 5, 6, 7, and 8).
+
+    fft_padding_mode : Literal[0, 1, 2, 3]
+        [8] FOURIER matching.
+
+        Optional spatial padding before FFT computation.
+        Default is 0.
+
+        - 0 = No padding (disabled).
+        - 1 = ``Reflect`` : mirror image values without repeating the edge pixel.
+        - 2 = ``Symmetric`` : mirror image values including the edge pixel.
+        - 3 = ``Constant`` : pad with a constant spatial-domain intensity.
+
+        Padding is applied before FFT and cropped after inverse FFT reconstruction.
+
+    fft_padding_value : Union[int, Literal[300]]
+        [8] FOURIER matching.
+
+        Constant padding intensity in [0, 255] when ``fft_padding_mode=3``.
+        ``300`` means: use the mean intensity of the current normalized image.
+        Default is ``300``.
+
+        If ``300``, the mean intensity of the current normalized image is used.
+        Used only when ``fft_padding_mode=3``.
+
+    verbose : Literal[-1, 0, 1, 2, 3], optional
+        [9] Misc.
+
+        Controls verbosity levels.
+        Default is 0.
+
+        - -1 = Quiet mode.
+        - 0 = Progress bar with ETA.
+        - 1 = Basic progress steps (no progress bar).
+        - 2 = Additional info about image and channels being processed are printed (no progress bar).
+        - 3 = Debug mode for developers (no progress bar).
 
     """
     model_config = ConfigDict(
@@ -277,8 +475,8 @@ class Options(InformativeBaseModel):
     # --- Fourier ---
     rescaling: Optional[Literal[0, 1, 2, 3]] = 2
     target_spectrum: Optional[Union[np.ndarray, Path, Literal["unit_test"]]] = Field(default=None)
-    fft_padding_mode: Optional[Literal["reflect", "symmetric", "constant"]] = None
-    fft_padding_value: Optional[confloat(ge=0, le=255)] = None
+    fft_padding_mode: Literal[0, 1, 2, 3] = 0
+    fft_padding_value: Union[int, Literal[300]] = 300
 
     # --- Misc ---
     verbose: Literal[-1, 0, 1, 2, 3] = 0
@@ -356,6 +554,28 @@ class Options(InformativeBaseModel):
             raise ValueError("target_lum=(None, None) does not adjust mean or contrast.")
         return v
 
+    @field_validator("fft_padding_mode", mode="before")
+    @classmethod
+    def validate_fft_padding_mode(cls, v):
+        """Normalize FFT padding mode to numbered options used in the public API."""
+        if v is None:
+            return 0
+        if isinstance(v, bool):
+            raise TypeError("fft_padding_mode must be an integer in {0, 1, 2, 3}.")
+        if isinstance(v, int) and 0 <= v <= 3:
+            return v
+        raise TypeError("fft_padding_mode must be 0, 1, 2, or 3.")
+
+    @field_validator("fft_padding_value", mode="before")
+    @classmethod
+    def validate_fft_padding_value(cls, v):
+        """Normalize FFT padding value so 300 is the explicit mean-intensity sentinel."""
+        if not isinstance(v, int):
+            raise TypeError("fft_padding_value must be an integer in [0, 255] or 300.")
+        if v != 300 and not (0 <= v <= 255):
+            raise ValueError("fft_padding_value must be in [0, 255] or 300.")
+        return v
+
     # ================================================================================================
     # CROSS-FIELD LOGIC VALIDATION
     # ================================================================================================
@@ -387,6 +607,11 @@ class Options(InformativeBaseModel):
         if self.hist_optim:
             object.__setattr__(self, "hist_specification", None)
             console_log(msg=f"hist_specification ignored if hist_optim = True. hist_specification -> None", color=Bcolors.WARNING, verbose=self.verbose > 0)
+
+        # fft_padding_value is only meaningful for mode 3 (constant padding)
+        if self.fft_padding_mode != 3 and self.fft_padding_value != 300:
+            object.__setattr__(self, "fft_padding_value", 300)
+            console_log(msg="fft_padding_value ignored unless fft_padding_mode = 3. fft_padding_value -> 300", color=Bcolors.WARNING, verbose=self.verbose > 0)
 
         # whole_image == 3 → requires mask folder & format
         if self.whole_image == 3:

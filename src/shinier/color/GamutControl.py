@@ -72,8 +72,24 @@ if TYPE_CHECKING:
 
 
 class GamutControl(InformativeBaseModel):
-    """
-    Manages gamut constraints and repairs for image datasets.
+    """Manage gamut constraints and repairs for image datasets.
+
+    GamutControl is used when SHINIER modifies luminance while preserving
+    chromatic information. It estimates whether reconstructed RGB values would
+    fall outside the valid display gamut and either clips, compresses luminance,
+    or desaturates chromaticity depending on ``strategy``.
+
+    Attributes:
+        color_space (Literal["xyY"]): Color space used for gamut repair.
+        strategy (GAMUT_STRATEGY_TYPE): Gamut strategy to apply.
+        rec_standard (str): RGB standard used by the internal color converters.
+        warning_threshold (float): Scaling threshold below which warnings are logged.
+        prc_clipping (float): Percentage of extreme pixels allowed to clip when
+            robust quantile reduction is used.
+        low_Y_desaturate (bool): Whether to desaturate low-luminance chroma before processing.
+        low_Y_threshold (float): Low-luminance threshold in [0, 1].
+        low_Y_fade_width (float): Width of the optional low-luminance fade ramp.
+        log_low_Y_chroma_loss (bool): Whether to log chroma-loss metrics for low-luminance desaturation.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
     # Safeguard IDs used in comments below:
@@ -696,4 +712,3 @@ class GamutControl(InformativeBaseModel):
     def _log_warning(self, strategy: str, factor: float, action: str, verbose: bool = False):
         if factor < self.warning_threshold:
             console_log(f"[GamutControl] Strategy '{strategy}' is {action} dataset by {100*(1-factor):.1f}%.", indent_level=1, color=Bcolors.FAIL, verbose=verbose)
-

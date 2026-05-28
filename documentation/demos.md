@@ -20,17 +20,16 @@
 >
 > Below is a summary of all nine available modes. Full descriptions can be found in `Options.py`.
 
-```python
-modes:
-      1 = lum_match
-      2 = hist_match (default)
-      3 = safe_lum_match
-      4 = spec_match
-      5 = hist_match & sf_match
-      6 = hist_match & spec_match
-      7 = sf_match & hist_match
-      8 = spec_match & hist_match
-      9 = only dithering
+```text
+1 = lum_match
+2 = hist_match (default)
+3 = sf_match
+4 = spec_match
+5 = hist_match & sf_match
+6 = hist_match & spec_match
+7 = sf_match & hist_match
+8 = spec_match & hist_match
+9 = only dithering
 ```
 
 ---
@@ -362,18 +361,18 @@ Example use case: hist_matching using Coltuc, Bolon & Chassery (2006) exact
   histogram specification. Target histogram will be the average from all the
   images (default), no SSIM optimization (Avanki, 2009).
 
-  The masks are used for figure-ground separation (whole_image = 3), background
-  value in the mask will be automatically selected using the most frequent
-  grayscale value in the masks, the images will be transformed to grayscale
-  (1 channel), the dithering won't be applied before saving, the smart memory
-  management won't be used here, and legacy_mode will reproduce MATLAB-like
-  defaults where applicable.
+  The masks loaded from masks_folder are used for figure-ground separation
+  (whole_image = 3). The images will be transformed to grayscale (1 channel),
+  the dithering won't be applied before saving, the smart memory management
+  won't be used here, and legacy_mode will reproduce MATLAB-like defaults where
+  applicable.
 """
 opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 2,                # hist_match
     whole_image = 3,         # figure-ground separation using masks
+    masks_folder = MASKS_FOLDER,
     background = 300,        # masking value: most frequent grayscale value
     as_gray = True,          # convert to grayscale
     dithering = 0,           # no dithering

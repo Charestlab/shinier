@@ -33,7 +33,8 @@ def prompt(
 ) -> Any:
     """Prompt user input with type casting, validation, and defaults.
 
-    Args:
+    Parameters
+    ----------        
         label: Message displayed to the user.
         default: Default value returned if Enter is pressed.
         kind: Input type ('str', 'int', 'float', 'bool', 'choice').
@@ -43,14 +44,16 @@ def prompt(
         max_v: Maximum numeric bound (for int/float).
         color: Console text color.
 
-    Returns:
+    Returns
+    -------        
         The validated and type-converted user input.
     """
 
     def print_answer(answer: str = '', prefix: str = 'Selected'):
         """
         Prints the given answer with a custom prefix and updates the console output.
-        Args:
+        Parameters
+        ----------            
             answer (str): The string representing the answer to be displayed.
             prefix (str): A custom prefix to precede the answer.
         """
@@ -168,7 +171,8 @@ def prompt(
 def options_display(opts):
     """Display the options after images are processed.
 
-    Args:
+    Parameters
+    ----------        
         opts (Options): Options object
     """
     types = ['io']
@@ -200,11 +204,13 @@ def options_display(opts):
 def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray] = None) -> ImageProcessor:
     """Interactive CLI to configure and run SHINIER processing.
 
-    Args:
+    Parameters
+    ----------        
         images: Optional image array to bypass folder selection.
         masks: Optional mask array to bypass folder selection.
 
-    Returns:
+    Returns
+    -------        
         Options: Configured SHINIER options object.
     """
     print_shinier_header(is_tty=IS_TTY, version=shinier_version)
@@ -407,6 +413,30 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
                 ts = load_np_array(tsp)
             if ts is not None:
                 opts.target_spectrum = ts
+
+            pad_sel = prompt(
+                "Optional FFT padding mode before Fourier matching",
+                default=1,
+                kind="choice",
+                choices=[
+                    "Disabled (no padding)",
+                    "Reflect: mirror edges without repeating edge pixel",
+                    "Symmetric: mirror edges including edge pixel",
+                    "Constant: pad with a constant intensity",
+                ],
+            )
+            opts.fft_padding_mode = pad_sel - 1
+            if opts.fft_padding_mode == 3:
+                opts.fft_padding_value = prompt(
+                    "Constant FFT padding intensity [0, 255] (300 = use image mean)",
+                    default=300,
+                    kind="int",
+                    min_v=0,
+                    max_v=300,
+                )
+            else:
+                opts.fft_padding_value = 300
+
             if mode in (5, 6, 7, 8):
                 opts.iterations = prompt("How many composite iterations (hist/spec coupling)?", default=2, kind="int", min_v=1, max_v=1_000_000)
 

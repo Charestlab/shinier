@@ -65,11 +65,14 @@ class ColorConverter(InformativeBaseModel):
     """Encapsulates color-space conversions for Rec.601/709/2020 systems.
 
     Attributes:
-        rec_standard (str): Rec. standard ("rec601", "rec709", or "rec2020").
-        gamma (float): Transfer-function exponent (≈2.2–2.4).
+        rec_standard (Literal["rec601", "rec709", "rec2020"]): Rec. standard
+            used for transfer functions and RGB/XYZ matrices.
+        gamma (float): Transfer-function exponent (approximately 2.2-2.4).
+        safe_mode (bool): If True, clip intermediate RGB values to valid ranges
+            during conversions where clipping is appropriate.
         white_point (np.ndarray): Reference white (default: D65).
-        M_RGB2XYZ (np.ndarray): Forward RGB→XYZ matrix.
-        M_XYZ2RGB (np.ndarray): Inverse XYZ→RGB matrix.
+        M_RGB2XYZ (np.ndarray): Forward RGB to XYZ conversion matrix.
+        M_XYZ2RGB (np.ndarray): Inverse XYZ to RGB conversion matrix.
     """
 
     model_config = ConfigDict(
@@ -253,6 +256,18 @@ class ColorConverter(InformativeBaseModel):
 
 
 class ColorTreatment(ColorConverter):
+    """Apply forward and backward color treatment around SHINIER processing.
+
+    The forward treatment converts input images into the space used by the
+    processing pipeline. In the default color-preserving path, sRGB images are
+    converted to CIE xyY, the luminance channel is stored in the main buffer,
+    and chromaticity channels are stored in an auxiliary buffer. The backward
+    treatment reconstructs display-ready sRGB images after processing.
+
+    Attributes:
+        Y_desaturation_threshold (ClassVar[float]): Low-luminance threshold used
+            when preventive chroma desaturation is enabled.
+    """
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,

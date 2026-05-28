@@ -15,21 +15,43 @@ class ImageDataset(InformativeBaseModel):
     """
     Class to load and manage a collection of images and masks, keeping track of their state throughout image processing.
 
-    Args:
-        images (ImageListType): List of images. If not provided, images will be loaded from `input_folder` as defined in the Options class.
-        masks (ImageListType): List of masks, each specifying the parts of the image that should be taken into account.
-            If not provided, they will be loaded from `masks_folder` as defined in the Options class.
-        options (Optional[Options]): Instance of the Options class. If not provided, Options will be instantiated with default values.
+    Only ``images``, ``masks``, and ``options`` are expected as participant/user inputs.
+    For normal usage, only ``options`` should be set by the user.
 
-    Attributes:
-        images (ImageListType): The collection of images.
-        masks (ImageListType): The collection of masks.
-        n_images (int): Number of images.
-        n_masks (int): Number of masks.
-        images_name (List[str]): List of image file names.
-        masks_name (List[str]): List of mask file names.
-        processing_logs (List[str]): List of processing steps applied to the dataset along with relevant image metrics and information.
-        options (Options): Configuration options for the dataset.
+    Parameters
+    ----------
+    images : ImageListType
+        List of images. If not provided, images are loaded from ``input_folder``
+        as defined in ``Options``.
+
+    masks : ImageListType
+        List of masks, each specifying the image regions to include in processing.
+        If not provided, masks are loaded from ``masks_folder`` as defined in
+        ``Options``.
+
+    options : Optional[Options]
+        Instance of the ``Options`` class. If not provided, ``Options`` is
+        instantiated with default values.
+
+    Runtime Attributes
+    ------------------
+    - ``images`` (ImageListType): Collection of images.
+    - ``masks`` (ImageListType): Collection of masks.
+    - ``n_images`` (int): Number of images.
+    - ``n_masks`` (int): Number of masks.
+    - ``images_name`` (List[str]): List of image file names.
+    - ``masks_name`` (List[str]): List of mask file names.
+    - ``processing_logs`` (List[str]): Processing steps applied to the dataset
+      with related metrics and info.
+    - ``options`` (Options): Configuration options for the dataset.
+    - ``magnitudes`` (Optional[ImageListIO]): Buffer of Fourier magnitudes used
+      in Fourier-based modes.
+    - ``phases`` (Optional[ImageListIO]): Buffer of Fourier phases used in
+      Fourier-based modes.
+    - ``buffer`` (Optional[ImageListIO]): Main working buffer used during
+      processing.
+    - ``buffer_other`` (Optional[ImageListIO]): Secondary working buffer (e.g.,
+      chromatic channels when applicable).
     """
 
     # --- Pydantic config ---

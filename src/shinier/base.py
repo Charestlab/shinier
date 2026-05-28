@@ -34,6 +34,17 @@ ImageListType = Annotated[
 
 
 class InformativeBaseModel(BaseModel):
+    """Base Pydantic model with a wrapped post-initialization hook.
+
+    Subclasses can implement ``post_init`` instead of overriding Pydantic's
+    ``model_post_init`` directly. Any exception raised during ``post_init`` is
+    wrapped with the subclass name to make initialization errors easier to trace.
+
+    Methods:
+        model_post_init(__context): Pydantic hook called after validation.
+        post_init(__context): Optional subclass hook for post-validation setup.
+    """
+
     def model_post_init(self, __context: Any) -> None:
         try:
             self.post_init(__context)

@@ -15,7 +15,19 @@ from shinier.color import ColorTreatment, REC_STANDARD
 
 @dataclass(frozen=True)
 class ChromaInfoLossResult:
-    """Result for one Y1 value (entropy-only; kept for backward compatibility)."""
+    """Entropy-only chroma information loss result for one ``y1`` value.
+
+    This container is kept for backward compatibility with earlier chroma-loss
+    analyses.
+
+    Attributes:
+        y1 (float): Low-luminance threshold or tested Y value.
+        h_before_bpp (float): Chroma entropy before treatment, in bits per pixel.
+        h_after_bpp (float): Chroma entropy after treatment, in bits per pixel.
+        loss_bpp (float): Entropy loss in bits per pixel.
+        frac_pixels_affected (float): Fraction of pixels affected, in [0, 1].
+        n_pixels_measured (int): Number of pixels included in the measurement.
+    """
 
     y1: float
     h_before_bpp: float
@@ -27,7 +39,21 @@ class ChromaInfoLossResult:
 
 @dataclass(frozen=True)
 class ChromaMetrics:
-    """A set of chroma-related metrics for one image at one Y1."""
+    """Chroma-related metrics for one image at one ``y1`` value.
+
+    Attributes:
+        y1 (float): Low-luminance threshold or tested Y value.
+        affected_fraction (float): Fraction of pixels affected, in [0, 1].
+        entropy_before_bpp (float): Chroma entropy before treatment, in bits per pixel.
+        entropy_after_bpp (float): Chroma entropy after treatment, in bits per pixel.
+        rel_entropy_loss_pct (float): Relative entropy loss, in percent.
+        mean_chroma_before (float): Mean chroma before treatment.
+        mean_chroma_after (float): Mean chroma after treatment.
+        rel_mean_chroma_loss_pct (float): Relative mean chroma loss, in percent.
+        delta_e76_mean (float): Mean CIE76 color difference.
+        delta_e76_p95 (float): 95th percentile CIE76 color difference.
+        n_pixels_measured (int): Number of pixels included in the measurement.
+    """
 
     y1: float
     affected_fraction: float  # in [0,1]
@@ -44,7 +70,12 @@ class ChromaMetrics:
 
 @dataclass(frozen=True)
 class AggregateMetric:
-    """Mean ± std summary for a metric across images."""
+    """Mean and standard deviation summary for a metric across images.
+
+    Attributes:
+        mean (float): Mean value across images.
+        std (float): Standard deviation across images.
+    """
 
     mean: float
     std: float
@@ -52,7 +83,18 @@ class AggregateMetric:
 
 @dataclass(frozen=True)
 class AggregateRow:
-    """Aggregate results (mean ± std) for one Y1."""
+    """Aggregate chroma metrics for one ``y1`` value.
+
+    Attributes:
+        y1 (float): Low-luminance threshold or tested Y value.
+        affected_pct (AggregateMetric): Percentage of affected pixels.
+        entropy_before_bpp (AggregateMetric): Entropy before treatment, in bits per pixel.
+        entropy_after_bpp (AggregateMetric): Entropy after treatment, in bits per pixel.
+        rel_entropy_loss_pct (AggregateMetric): Relative entropy loss, in percent.
+        rel_mean_chroma_loss_pct (AggregateMetric): Relative mean chroma loss, in percent.
+        delta_e76_mean (AggregateMetric): Mean CIE76 color difference.
+        delta_e76_p95 (AggregateMetric): 95th percentile CIE76 color difference.
+    """
 
     y1: float
     affected_pct: AggregateMetric
@@ -66,7 +108,14 @@ class AggregateRow:
 
 @dataclass(frozen=True)
 class ChromaInfoRetention:
-    """Information-theoretic chroma retention stats."""
+    """Information-theoretic chroma retention statistics.
+
+    Attributes:
+        h_before_bpp (float): Chroma entropy before treatment, in bits per pixel.
+        h_after_bpp (float): Chroma entropy after treatment, in bits per pixel.
+        mi_bpp (float): Mutual information estimate, in bits per pixel.
+        cir (float): Chroma information retention in [0, 1].
+    """
     h_before_bpp: float
     h_after_bpp: float
     mi_bpp: float
