@@ -35,14 +35,22 @@ def prompt(
 
     Parameters
     ----------        
-        label: Message displayed to the user.
-        default: Default value returned if Enter is pressed.
-        kind: Input type ('str', 'int', 'float', 'bool', 'choice').
-        choices: List of valid string choices for 'choice' inputs.
-        validator: Optional callable returning (ok, msg) for validation.
-        min_v: Minimum numeric bound (for int/float).
-        max_v: Maximum numeric bound (for int/float).
-        color: Console text color.
+        label: str
+            Message displayed to the user.
+        default:  Optional[Any]
+            Default value returned if Enter is pressed.
+        kind: str
+            Input type ('str', 'int', 'float', 'bool', 'choice').
+        choices: Optional[List[str]]
+            List of valid string choices for 'choice' inputs.
+        validator: Optional[Callable[[Any], Tuple[bool, str]]]
+            Optional callable returning (ok, msg) for validation.
+        min_v: Optional[float]
+            Minimum numeric bound (for int/float).
+        max_v: Optional[float]
+            Maximum numeric bound (for int/float).
+        color: Optional[str]
+            Console text color.
 
     Returns
     -------        
@@ -205,13 +213,34 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
     """Interactive CLI to configure and run SHINIER processing.
 
     Parameters
-    ----------        
-        images: Optional image array to bypass folder selection.
-        masks: Optional mask array to bypass folder selection.
+    ----------
+    images : Optional[np.ndarray], optional
+        Optional in-memory image array. When provided, input-folder discovery is
+        skipped and data is passed directly to ``ImageDataset``.
+    masks : Optional[np.ndarray], optional
+        Optional in-memory mask array. When provided, mask-folder discovery is
+        skipped and masks are passed directly to ``ImageDataset``.
 
     Returns
-    -------        
-        Options: Configured SHINIER options object.
+    -------
+    ImageProcessor
+        Configured and executed processor instance containing results,
+        validation logs, and run metadata.
+
+    Notes
+    -----
+    This function is interactive and prompts for processing choices unless
+    equivalent data is injected through ``images`` and ``masks``.
+
+    Examples
+    --------
+    Run interactive CLI:
+
+    >>> processor = SHINIER_CLI()
+
+    Run using in-memory arrays:
+
+    >>> processor = SHINIER_CLI(images=my_images, masks=my_masks)
     """
     print_shinier_header(is_tty=IS_TTY, version=shinier_version)
     opts = Options()
@@ -465,8 +494,10 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
 
 
 def get_image_list(src_path: Path):
+    """Return sorted image paths from a file path, folder path, or glob pattern."""
 
     def is_image(file: Path):
+        """Check whether a path points to a supported image file."""
         return file.is_file() and len(file.suffix) > 1 and file.suffix.lower()[1:] in ACCEPTED_FORMATS
 
     # Convert to Path if input_data is a string
@@ -485,6 +516,7 @@ def get_image_list(src_path: Path):
 
 
 def main():
+    """Run the SHINIER CLI entry point and optional overview plotting mode."""
     import argparse
     parser = argparse.ArgumentParser(description="SHINIER")
     parser.add_argument("--show_results", action="store_true",

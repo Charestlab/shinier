@@ -117,6 +117,16 @@ class Options(InformativeBaseModel):
         - 8 = spec_match and hist_match.
         - 9 = only dithering.
 
+        See also
+        --------
+        Mode-specific processing functions live in :class:`shinier.ImageProcessor`:
+
+        - Luminance matching: :meth:`shinier.ImageProcessor.lum_match`
+        - Histogram matching: :meth:`shinier.ImageProcessor.hist_match`
+        - Spatial-frequency matching: :meth:`shinier.ImageProcessor.sf_match`
+        - Spectrum matching: :meth:`shinier.ImageProcessor.spec_match`
+        - Full pipeline orchestration: :meth:`shinier.ImageProcessor.process`
+        
     legacy_mode : Optional[bool]
         [3] SHINIER MODE.
 
@@ -490,6 +500,7 @@ class Options(InformativeBaseModel):
     @field_validator("input_folder", "output_folder", "masks_folder")
     @classmethod
     def validate_existing_path(cls, v: Optional[Path]) -> Optional[Path]:
+        """Resolve and validate that a provided folder path exists."""
         if v is not None:
             v = v.resolve()
             if not v.exists():
@@ -667,6 +678,7 @@ class Options(InformativeBaseModel):
             """Gracefully replace np.ndarray and Path in schema generation."""
 
             def is_instance_schema(self, schema) -> JsonSchemaValue:
+                """Map unsupported runtime types to JSON-schema placeholders."""
                 typ = schema.get("cls")
                 if typ is np.ndarray:
                     return {
@@ -695,6 +707,7 @@ class Options(InformativeBaseModel):
         )
 
     def export_schema(self, file_path: Path) -> None:
+        """Export the current Options JSON schema to disk."""
         out = Path(file_path)
         indent = 2
         ensure_ascii = True
@@ -708,9 +721,11 @@ class Options(InformativeBaseModel):
             json.dump(json_schema, f, indent=indent, ensure_ascii=ensure_ascii)
 
     def __repr__(self) -> str:
+        """Return a readable multiline representation of option values."""
         return "\n".join(f"{k}: {v}" for k, v in self.model_dump().items())
 
     def _assumptions_warning(self):
+        """Emit context-specific warnings about modeling assumptions."""
         msg = None
         if self.as_gray > 0:
             if self.mode == 1:

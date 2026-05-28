@@ -15,28 +15,28 @@ def _make_gray(h: int = 24, w: int = 32, seed: int = 0) -> np.ndarray:
 
 def test_fft_padding_helpers_shapes_and_values() -> None:
     image = np.arange(20, dtype=np.float64).reshape(4, 5) / 19
-    assert _pad_for_fft(image, None) is image
+    assert _pad_for_fft(image, 0) is image
 
     pad = int(min(image.shape) * DEFAULT_FFT_PADDING_RATIO)
-    padded = _pad_for_fft(image, "reflect")
+    padded = _pad_for_fft(image, 1)
     assert padded.shape == (image.shape[0] + 2 * pad, image.shape[1] + 2 * pad)
     assert _crop_after_fft(padded, image.shape).shape == image.shape
 
     rgb = np.zeros((5, 6, 3), dtype=np.float64)
     rgb[..., 0] = 0.25
     pad = int(min(rgb.shape[:2]) * DEFAULT_FFT_PADDING_RATIO)
-    padded_constant = _pad_for_fft(rgb, "constant", value=128)
+    padded_constant = _pad_for_fft(rgb, 3, value=128)
     assert padded_constant.shape == (rgb.shape[0] + 2 * pad, rgb.shape[1] + 2 * pad, 3)
     assert np.isclose(padded_constant[0, 0, 0], 128 / 255)
 
-    padded_mean = _pad_for_fft(rgb, "constant")
+    padded_mean = _pad_for_fft(rgb, 3, value=300)
     assert np.isclose(padded_mean[0, 0, 0], rgb.mean())
 
 
 def test_image_spectrum_padding_preserves_default_shape() -> None:
     image = np.zeros((5, 6, 3), dtype=np.float64)
     mag_default, phase_default = image_spectrum(image, rescale=False)
-    mag_padded, phase_padded = image_spectrum(image, rescale=False, fft_padding_mode="symmetric")
+    mag_padded, phase_padded = image_spectrum(image, rescale=False, fft_padding_mode=2)
     pad = int(min(image.shape[:2]) * DEFAULT_FFT_PADDING_RATIO)
 
     assert mag_default.shape == (5, 6, 3)
@@ -46,15 +46,15 @@ def test_image_spectrum_padding_preserves_default_shape() -> None:
 
 
 def test_fft_padding_options_validation(tmp_path) -> None:
-    opt = Options(output_folder=tmp_path, fft_padding_mode="constant", fft_padding_value=128)
-    assert opt.fft_padding_mode == "constant"
+    opt = Options(output_folder=tmp_path, fft_padding_mode=3, fft_padding_value=300)
+    assert opt.fft_padding_mode == 3
+    assert opt.fft_padding_value == 300
+
+    opt = Options(output_folder=tmp_path, fft_padding_mode=3, fft_padding_value=128)
     assert opt.fft_padding_value == 128
 
-    with pytest.raises(ValueError):
-        Options(output_folder=tmp_path, fft_padding_mode="constant", fft_padding_value=300)
 
-
-@pytest.mark.parametrize("mode,padding", [(3, "constant"), (4, "reflect")])
+@pytest.mark.parametrize("mode,padding", [(3, 3), (4, 1)])
 def test_fft_padding_preserves_processed_image_size(tmp_path, mode, padding) -> None:
     images = [_make_gray(seed=1), _make_gray(seed=2)]
     opt = Options(
@@ -81,7 +81,7 @@ def test_direct_target_spectrum_must_match_padded_shape(tmp_path) -> None:
         as_gray=True,
         verbose=-1,
         target_spectrum=target_spectrum,
-        fft_padding_mode="reflect",
+        fft_padding_mode=1,
     )
     dataset = ImageDataset(images=images, options=opt)
 

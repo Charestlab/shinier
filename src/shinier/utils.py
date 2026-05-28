@@ -33,12 +33,6 @@ from shinier import __version__ as package_version
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 DiffusionTap = Tuple[int, int, float]  # (dy, dx, weight)
 DEFAULT_FFT_PADDING_RATIO = 0.5
-FFT_PADDING_MODE_MAP = {
-    0: "disabled",
-    1: "reflect",
-    2: "symmetric",
-    3: "constant",
-}
 
 
 class Bcolors:
@@ -169,51 +163,40 @@ def print_shinier_header(is_tty: bool = True, version: str = package_version):
 
 
 class MatlabOperators:
-    """
-    Provides methods that replicate the behavior of MATLAB functions and operators
-    in Python.
+    """Replicate selected MATLAB operators with NumPy-based implementations.
 
-    This class is designed to provide static methods for MATLAB-like operations,
-    aiming to mimic their behavior as closely as possible using NumPy and Python.
-    It can be useful for porting MATLAB code to Python or when MATLAB-like behavior
-    is desired in numerical computations.
-
+    This utility class provides static methods used to preserve MATLAB-compatible
+    numerical behavior when needed (for example in validation pipelines).
     """
 
     @staticmethod
     def round(x):
-        """
-         alt_round(x)
+        """Round values with MATLAB's tie-breaking rule.
 
-         <x> is an array
+        MATLAB rounds half values away from zero (e.g., ``0.5 -> 1`` and
+        ``-0.5 -> -1``), while NumPy uses banker's rounding by default.
 
-         simulate the rounding behavior of matlab where 0.5 rounds
-         to 1 and -.5 rounds to -1. (python rounds ties to the
-         nearest even integer.)
+        Parameters
+        ----------
+        x : array-like
+            Input scalar or array values.
 
-         return:
-          an array of rounded values
+        Returns
+        -------
+        np.ndarray
+            Rounded values using MATLAB-compatible tie behavior. The returned
+            dtype follows NumPy arithmetic rules for the input type.
 
-         example:
-         import numpy as np
-         x = np.array([-1, -0.5, 0, 0.5, 0.7, 1.0, 1.5, 2.1, 2.5, 2.6, 3.5])
-         y = alt_round(x)
+        Notes
+        -----
+        Original adaptation inspired by GLMsingle's ``alt_round`` implementation,
+        with project-specific adjustments to better align with SHINIER behavior.
 
-         from https://github.com/cvnlab/GLMsingle/blob/main/glmsingle/utils/alt_round.py
-
-        return (np.sign(x) * np.ceil(np.floor(np.abs(x) * 2) / 2)).astype(int)
-        ----
-        Slight modifications to follow MATLAB's behavior of not changing types: Mathias Salvas-Hébert, 2025-07-16
-         MATLAB :
-            x = int8([-3.7, -1.2, 0.5, 2.9, 10.1]);
-            y = round(x);
-            class(y)
-            > ans = 'int8'
-
-            x = double([-3.7, -1.2, 0.5, 2.9, 10.1]);
-            y = round(x);
-            class(y)
-            > ans = 'double'
+        Examples
+        --------
+        >>> x = np.array([-1.0, -0.5, 0.0, 0.5, 1.5, 2.5])
+        >>> MatlabOperators.round(x)
+        array([-1., -1.,  0.,  1.,  2.,  3.])
         """
         return np.sign(x) * np.ceil(np.floor(np.abs(x) * 2) / 2)
 
@@ -229,6 +212,7 @@ class MatlabOperators:
 
     @staticmethod
     def mean2(x):
+        """Return the mean of all elements, mirroring MATLAB's mean2."""
         return np.mean(x)
 
     @staticmethod
@@ -294,50 +278,46 @@ MaskType = Literal["hard", "gaussian", "feathered_disk"]
 
 @dataclass
 class StimulusMasker:
-    """
-    Create and apply ellipse masks to image stimuli.
+    """Create and apply ellipse masks to image stimuli.
 
-    Args:
-        image_size (int | tuple[int, int]): Mask/image size in pixels. If int,
-            creates a square mask. If tuple, uses (height, width).
-        cutoff_a (float): Horizontal ellipse radius in normalized coordinates.
-        cutoff_b (float | None, optional): Vertical ellipse radius. If None, uses
-            cutoff_a, giving a circular mask. Defaults to None.
-        offset_a (float, optional): Horizontal ellipse offset in normalized
-            coordinates. Defaults to 0.0.
-        offset_b (float, optional): Vertical ellipse offset in normalized
-            coordinates. Defaults to 0.0.
-        mask_type (MaskType, optional): Mask edge type. Defaults to "feathered_disk".
-            - "hard": for a binary edge
-            - "gaussian": for a blurred hard mask
-            - "feathered_disk": for a linear edge ramp.
-        sigma (float, optional): Gaussian standard deviation in pixels, used only
-            when mask_type is "gaussian". Defaults to 2.0.
-        edge_width (float, optional): Transition width in pixels, used only when
-            mask_type is "feathered_disk". Defaults to 2.0.
-        background (float, optional): Background value in [0, 1] outside the mask.
-            Defaults to 0.5.
-        output_dtype (np.dtype | type, optional): Dtype for returned images. Float
-            outputs remain in [0, 1]; integer outputs are scaled to the dtype range.
-            Defaults to np.float64.
+    Parameters
+    ----------
+    image_size : int | tuple[int, int]
+        Mask/image size in pixels. If int, creates a square mask. If tuple,
+        uses ``(height, width)``.
+    cutoff_a : float
+        Horizontal ellipse radius in normalized coordinates.
+    cutoff_b : float | None, optional
+        Vertical ellipse radius. If None, uses ``cutoff_a`` (circular mask).
+    offset_a : float, optional
+        Horizontal ellipse offset in normalized coordinates.
+    offset_b : float, optional
+        Vertical ellipse offset in normalized coordinates.
+    mask_type : MaskType, optional
+        Mask edge type: ``"hard"``, ``"gaussian"``, or ``"feathered_disk"``.
+    sigma : float, optional
+        Gaussian standard deviation in pixels, used when
+        ``mask_type == "gaussian"``.
+    edge_width : float, optional
+        Transition width in pixels, used when
+        ``mask_type == "feathered_disk"``.
+    background : float, optional
+        Background value in ``[0, 1]`` outside the mask.
+    output_dtype : np.dtype | type, optional
+        Output dtype for masked images.
 
-    Image input:
-        image (np.ndarray): Input image. Accepts (H, W) grayscale or (H, W, C)
-            channel images. Integer images are normalized by their dtype range;
-            float images above 1 are assumed to be in [0, 255].
+    Notes
+    -----
+    Input images can be grayscale ``(H, W)`` or channel-based ``(H, W, C)``.
+    Integer images are normalized by their dtype range. Float images with max
+    value greater than 1 are assumed to be in ``[0, 255]``.
 
-    Useful methods:
-        mask(): Generate the current 2D mask.
-        apply(image): Apply the current mask to one image.
-        apply_all(stimuli): Apply the same mask to a sequence of images.
-        interactive_mask(image): Open a Matplotlib GUI to tune the mask on top of
-            an image, then return the final mask.
-
-    Example:
-        masker = StimulusMasker(128, 0.7, mask_type="feathered_disk", edge_width=3)
-        mask = masker.mask()
-        masked_images = masker.apply_all(stim_arr)
-        final_mask = masker.interactive_mask(image)
+    Examples
+    --------
+    >>> masker = StimulusMasker(128, 0.7, mask_type="feathered_disk", edge_width=3)
+    >>> mask = masker.mask()
+    >>> masked_images = masker.apply_all(stim_arr)
+    >>> final_mask = masker.interactive_mask(image)
     """
 
     image_size: int | tuple[int, int]
@@ -385,13 +365,17 @@ class StimulusMasker:
         """
         Apply the mask to one image.
 
-        Args:
-            image (np.ndarray): Input image. Accepts (H, W) grayscale or
-                (H, W, C) channel images. Integer images are normalized by their
-                dtype range; float images above 1 are assumed to be in [0, 255].
+        Parameters
+        ----------
+        image : np.ndarray
+            Input image. Accepts ``(H, W)`` grayscale or ``(H, W, C)`` channel
+            images. Integer images are normalized by dtype range; float images
+            above 1 are assumed to be in ``[0, 255]``.
 
-        Returns:
-            np.ndarray: Masked image cast to output_dtype.
+        Returns
+        -------
+        np.ndarray
+            Masked image cast to ``output_dtype``.
         """
         return self._apply_with_mask(image, self.mask())
 
@@ -407,13 +391,17 @@ class StimulusMasker:
         The GUI updates the current object in place. Closing the window keeps the
         selected cutoff, offset, mask type, sigma, and edge_width values on self.
 
-        Args:
-            image (np.ndarray): Image used for the masked preview. Accepts
-                (H, W) grayscale or (H, W, C) channel images. The mask size is
-                automatically set from this image.
+        Parameters
+        ----------
+        image : np.ndarray
+            Image used for the masked preview. Accepts ``(H, W)`` grayscale or
+            ``(H, W, C)`` channel images. The mask size is automatically set
+            from this image.
 
-        Returns:
-            np.ndarray: Final mask as float64 in [0, 1].
+        Returns
+        -------
+        np.ndarray
+            Final mask as ``float64`` in ``[0, 1]``.
         """
         from matplotlib.widgets import Button, Slider
         plt.rcParams["font.family"] = "Times New Roman"
@@ -499,6 +487,7 @@ class StimulusMasker:
             sliders[name] = Slider(ax, name, vmin, vmax, valinit=value)
 
         def update(_=None):
+            """Refresh GUI state from sliders/buttons and redraw preview."""
             for name, slider in sliders.items():
                 # Update attributes based on slider values
                 setattr(self, name, slider.val)
@@ -520,6 +509,7 @@ class StimulusMasker:
             fig.canvas.draw_idle()
 
         def set_mask_type(mode):
+            """Switch mask mode and synchronize the softness control."""
             self.mask_type = mode
             if mode == "gaussian":
                 softness.set_val(self.sigma)
@@ -665,40 +655,48 @@ def hist_plot(
     show_normalized_rmse: bool = False,
 ) -> Tuple[plt.Figure, Tuple[Any, Any]]:
 
-    """Displays a histogram with its optional target histogram and descriptive statistics.
+    """Display a histogram with optional target and descriptive statistics.
 
     The histogram is displayed as a compact horizontal plot.
     A grayscale gradient bar (0–255) is placed directly under the histogram.
-    When `descriptives=True`, the histogram includes:
-      * A vertical line indicating the mean (μ)
-      * A translucent band spanning [μ − σ, μ + σ]
+    When ``descriptives=True``, the histogram includes a vertical line for the
+    mean and a translucent band spanning mean +/- one standard deviation.
     For RGB histograms, μ and σ are computed and displayed per channel.
 
-    Args:
-        hist (np.ndarray): Input histogram. Accepts ``(n_bins,)`` grayscale or
-            ``(n_bins, 3)`` RGB arrays. Histograms are normalized before
-            display.
-        bins (int, optional): Number of histogram bins in [0, 255]. Defaults to 256.
-        figsize (tuple | None, optional): Matplotlib figure size. Used only when
-            ``ax`` is None. If None, the standalone histogram footprint matches
-            the histogram-panel size used inside :func:`imhist_plot`.
-        dpi (int, optional): Matplotlib figure DPI. Used only when ``ax`` is None. Defaults to 100.
-        title (str | None, optional): Optional title for the histogram. Defaults to None.
-        target_hist (np.ndarray | None, optional): If provided, overlays a
-            target histogram already aligned with the displayed normalized
-            histogram. Defaults to None.
-        descriptives (bool, optional): If True, overlays mean (μ) and ±1σ on the
-            histogram (per-channel for RGB). Defaults to False.
-        ax (plt.Axes, optional): Axes on which to display the histogram. Defaults to None.
-        show_normalized_rmse (bool, optional): If True, shows the normalized RMSE
-            between two normalized histograms. This value is therefore computed
-            directly on histogram weights in [0, 1]. Defaults to False.
+    Parameters
+    ----------
+    hist : np.ndarray
+        Input histogram, either ``(n_bins,)`` for grayscale or ``(n_bins, 3)``
+        for RGB. Histograms are normalized before display.
 
-    Returns:
-        tuple:
-            fig (matplotlib.figure.Figure): The created matplotlib figure.
-            (ax_bar, ax_hist): Tuple of matplotlib.axes.Axes for the gradient
-            bar and histogram, respectively.
+    bins : int
+        Number of histogram bins.
+
+    figsize : Optional[tuple]
+        Matplotlib figure size. Used only when ``ax`` is None.
+
+    dpi : int
+        Matplotlib figure DPI. Used only when ``ax`` is None.
+
+    title : Optional[str]
+        Optional histogram title.
+
+    target_hist : Optional[np.ndarray]
+        Optional target histogram to overlay.
+
+    descriptives : bool
+        If True, overlays mean and +/-1 standard deviation.
+
+    ax : Optional[plt.Axes]
+        Axes on which to draw the histogram.
+
+    show_normalized_rmse : bool
+        If True, shows normalized RMSE between two normalized histograms.
+
+    Returns
+    -------
+    Tuple[plt.Figure, Tuple[Any, Any]]
+        Figure and axes for the gradient bar and histogram.
     """
 
     # --- normalize input histogram; force a second dimension if needed ---
@@ -867,40 +865,50 @@ def imhist_plot(
     show_normalized_rmse: bool = False,
 ) -> Tuple[plt.Figure, Tuple[Any, Any, Any]]:
 
-    """Displays an image with its histogram and optional descriptive statistics.
+    """Display an image with its histogram and optional descriptive statistics.
 
     The image is shown on top, with a compact horizontal histogram below.
     A grayscale gradient bar (0–255) is placed directly under the histogram.
-    When `descriptives=True`, the histogram includes:
-      * A vertical line indicating the mean (μ)
-      * A translucent band spanning [μ − σ, μ + σ]
+    When ``descriptives=True``, the histogram includes a vertical line for the
+    mean and a translucent band spanning mean +/- one standard deviation.
     For RGB images, μ and σ are computed and displayed per channel.
 
-    Args:
-        img (np.ndarray): Input image. Accepts (H, W) grayscale or (H, W, 3) RGB arrays.
-            Alpha channels are ignored if present. Floating-point arrays are converted
-            to uint8 for display (assuming [0, 1] range if max ≤ 1).
-        bins (int, optional): Number of histogram bins in [0, 255]. Defaults to 256.
-        figsize (tuple, optional): Matplotlib figure size. Defaults to (8, 6).
-        dpi (int, optional): Matplotlib figure DPI. Defaults to 100.
-        title (str | None, optional): Optional title for the image. Defaults to None.
-        target_hist (np.ndarray | None, optional): If provided, overlays a
-            target histogram already aligned with the displayed normalized
-            histogram. Defaults to None.
-        binary_mask (np.ndarray | None, optional): Optional mask corresponding
-            to image for computing histogram. Defaults to None.
-        descriptives (bool, optional): If True, overlays mean (μ) and ±1σ on the
-            histogram (per-channel for RGB). Defaults to False.
-        ax (plt.Axes, optional): Axes on which to display the image. Defaults to None.
-        show_normalized_rmse (bool, optional): If True, shows the normalized RMSE
-            between two normalized histograms. This value is therefore computed
-            directly on histogram weights in [0, 1]. Defaults to False.
+    Parameters
+    ----------
+    img : np.ndarray
+        Input image, either grayscale ``(H, W)`` or RGB ``(H, W, 3)``.
 
-    Returns:
-        tuple:
-            fig (matplotlib.figure.Figure): The created matplotlib figure.
-            (ax_img, ax_bar, ax_hist): Tuple of matplotlib.axes.Axes for the image,
-            gradient bar, and histogram, respectively.
+    bins : int
+        Number of histogram bins.
+
+    figsize : tuple
+        Matplotlib figure size.
+
+    dpi : int
+        Matplotlib figure DPI.
+
+    title : Optional[str]
+        Optional image title.
+
+    target_hist : Optional[np.ndarray]
+        Optional target histogram to overlay.
+
+    binary_mask : Optional[np.ndarray]
+        Optional mask used to compute the histogram.
+
+    descriptives : bool
+        If True, overlays mean and +/-1 standard deviation.
+
+    ax : Optional[plt.Axes]
+        Axes on which to draw the image.
+
+    show_normalized_rmse : bool
+        If True, shows normalized RMSE between two normalized histograms.
+
+    Returns
+    -------
+    Tuple[plt.Figure, Tuple[Any, Any, Any]]
+        Figure and axes for the image, gradient bar, and histogram.
     """
 
     # --- Make sure the image is in the [0, 255] range ---
@@ -1016,14 +1024,21 @@ def rotational_avg(spectrum: np.ndarray, radius: np.ndarray) -> np.ndarray:
 
 
 def imshow(image: np.ndarray, ax: Optional[plt.Axes] = None) -> Tuple[plt.Figure, plt.Axes]:
-    """
-    Show an image with matplotlib axes.
-    Args:
-        image: An image
-        ax: Optional[plt.Axes], default = None. An axe to display the image on.
+    """Show an image on matplotlib axes.
 
-    Returns:
+    Parameters
+    ----------
+    image : np.ndarray
+        Image to display.
 
+    ax : Optional[plt.Axes]
+        Axes on which to draw the image. If None, a new figure and axes are
+        created.
+
+    Returns
+    -------
+    Tuple[plt.Figure, plt.Axes]
+        Figure and axes containing the image.
     """
     if ax is None:
         fig, ax = plt.subplots()
@@ -1052,23 +1067,31 @@ def sf_profile(
         is_truncated: bool = True,
         legacy_mode: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Rotational average of the Fourier (energy) spectrum.
+    """Compute the rotational average of a Fourier spectrum.
 
-    Args:
-        image: np.ndarray
-            Input image.
-        spectrum: np.ndarray, default = None
-            If not None, uses spectrum instead of computing new spectrum on input image.
-        is_power_spectrum: bool, default = True
-            If True, computes power spectrum else uses magnitude.
-        is_truncated: bool, default = True
-            If True, truncates sf profile to the nyquist of the shortest image size.
-        legacy_mode: bool, default = False
-            If True, uses Matlab round function
-    Returns: Tuples[np.ndarray, np.ndarray]
-        Rotational average of spectrum
-        radius
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image.
+
+    spectrum : Optional[np.ndarray]
+        Precomputed spectrum. If provided, the function uses it instead of
+        computing a new spectrum from ``image``.
+
+    is_power_spectrum : bool
+        If True, averages power. If False, averages magnitude.
+
+    is_truncated : bool
+        If True, truncates the profile at the Nyquist frequency of the shortest
+        image dimension.
+
+    legacy_mode : bool
+        If True, uses MATLAB-compatible rounding for the radius grid.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        Rotational average and corresponding radii.
     """
 
     # --- frequency grids replicating MATLAB logic ---
@@ -1112,23 +1135,30 @@ def sf_plot(
         ax: Optional[plt.axis] = None,
         show_normalized_rmse: bool = False,
 ) -> Union[plt.Figure, plt.Axes]:
-    """
-    Rotational average of the Fourier energy spectrum.
+    """Plot the rotational average of Fourier energy.
 
-    Args:
-        image : np.ndarray
-            Image array of shape (H, W) or (H, W, 3). Can be uint8 or float.
-        sf_p : np.ndarray, default None
-            If not None, uses sf_p (spatial frequency profile) instead of generating a new spectrum.
-        target_sf : np.ndarray, default None
-            If not None, display target_sf against sf_p.
-        ax : plt.Axes, default None
-            If not None, uses the ax instead of generating a new figure.
-        show_normalized_rmse: bool, default = False
-            If True, show normalized RMSE on graph.
+    Parameters
+    ----------
+    image : np.ndarray
+        Image array of shape (H, W) or (H, W, 3).
 
-    Returns:
-        fig : plt.Figure
+    sf_p : Optional[np.ndarray]
+        Precomputed spatial-frequency profile. If None, it is computed from
+        ``image``.
+
+    target_sf : Optional[np.ndarray]
+        Optional target spatial-frequency profile to overlay.
+
+    ax : Optional[plt.Axes]
+        Axes on which to draw the plot. If None, a new figure is created.
+
+    show_normalized_rmse : bool
+        If True, show normalized RMSE on the graph.
+
+    Returns
+    -------
+    Union[plt.Figure, plt.Axes]
+        Figure or axes containing the plot.
     """
 
     image = im3D(image)
@@ -1181,7 +1211,42 @@ def spectrum_plot(
         show_normalized_rmse: bool = False,
     ) -> Union[plt.Figure, plt.Axes]:
 
-    """Display a Fourier magnitude spectrum with optional log and gamma scaling."""
+    """Display a Fourier magnitude spectrum.
+
+    Parameters
+    ----------
+    spectrum : np.ndarray
+        Fourier magnitude or power spectrum.
+
+    cmap : str
+        Matplotlib colormap.
+
+    log : bool
+        If True, display ``log(1 + |F|)``.
+
+    gamma : float
+        Optional gamma correction applied after stretching.
+
+    ax : Optional[plt.Axes]
+        Axes on which to draw the spectrum. If None, a new figure is created.
+
+    with_colorbar : bool
+        If True, add a colorbar.
+
+    colorbar_label : str
+        Label for the colorbar.
+
+    target_spectrum : Optional[np.ndarray]
+        Optional target spectrum used for normalized RMSE display.
+
+    show_normalized_rmse : bool
+        If True, show normalized RMSE against ``target_spectrum``.
+
+    Returns
+    -------
+    Union[plt.Figure, plt.Axes]
+        Figure or axes containing the spectrum plot.
+    """
     if plt is None:
         raise RuntimeError(
             "Matplotlib is not installed. "
@@ -1239,21 +1304,23 @@ def spectrum_plot(
 def im_power_spectrum_plot(im: np.ndarray, with_colorbar: bool = True):
     """2D log-scaled Fourier power spectrum (centered).
 
-    Visualizes the distribution of image energy across spatial frequencies and orientations.
-    The center of the plot corresponds to low spatial frequencies, while the edges represent
-    high frequencies. The brightness at each point indicates the amplitude |F(u, v)| — that
-    is, the energy contribution of a given spatial frequency (radial distance) and
-    orientation (angle).
+    Visualizes the distribution of image energy across spatial frequencies and
+    orientations. The center of the plot corresponds to low spatial
+    frequencies, while the edges represent high frequencies. Brightness
+    indicates the power contribution of each spatial frequency and orientation.
 
-    Args:
-        im : np.ndarray
-            Image array of shape (H, W) or (H, W, 3). Can be uint8 or float.
-            RGB is converted to luminance (ITU-R BT.601).
-        with_colorbar : bool, default True
-            If True, show the colorbar on the right side.
+    Parameters
+    ----------
+    im : np.ndarray
+        Image array of shape ``(H, W)`` or ``(H, W, 3)``. RGB images are
+        converted to grayscale before computing the spectrum.
+    with_colorbar : bool, optional
+        If True, display a colorbar.
 
-    Returns:
-        fig : Matplotlib image
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Figure containing the centered power spectrum.
     """
     # --- to grayscale float64 ---
     arr = np.asarray(im)
@@ -1278,18 +1345,21 @@ def stretch(arr: np.ndarray) -> np.ndarray:
     maximum maps to 1. Works for any number of dimensions (grayscale,
     color images, or higher-dimensional data).
 
-    Args:
-        arr (np.ndarray): Input array of any shape and numeric dtype.
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array of any shape and numeric dtype.
 
-    Returns:
-        np.ndarray: Array of the same shape as input, dtype float64,
-        with values scaled to [0, 1].
+    Returns
+    -------
+    np.ndarray
+        Array of the same shape as input, with dtype ``float64`` and values
+        scaled to ``[0, 1]``.
 
-    Notes:
-        - If the array has constant values (max == min), returns an array
-          of zeros (to avoid division by zero).
-        - Output is float64 for numerical stability. Cast to float32 if
-          needed for memory/performance reasons.
+    Notes
+    -----
+    If the array has constant values, returns an array of zeros to avoid
+    division by zero. Output is ``float64`` for numerical stability.
     """
     arr = np.asarray(arr, dtype=np.float64)
     min_val = arr.min()
@@ -1304,13 +1374,20 @@ def stretch(arr: np.ndarray) -> np.ndarray:
 def convolve_1d(arr: np.ndarray, kernel: np.ndarray, axis: int) -> np.ndarray:
     """Apply 1D convolution with reflect padding along a chosen axis.
 
-    Args:
-        arr (np.ndarray): Input 2D image array.
-        kernel (np.ndarray): 1D convolution kernel.
-        axis (int): Axis along which to convolve (0 for vertical, 1 for horizontal).
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input 2D image array.
+    kernel : np.ndarray
+        1D convolution kernel.
+    axis : int
+        Axis along which to convolve. Use ``0`` for vertical and ``1`` for
+        horizontal.
 
-    Returns:
-        np.ndarray: Convolved image.
+    Returns
+    -------
+    np.ndarray
+        Convolved image.
     """
     if arr.ndim != 2:
         raise TypeError("Input must be a 2D array.")
@@ -1334,20 +1411,27 @@ def convolve_1d(arr: np.ndarray, kernel: np.ndarray, axis: int) -> np.ndarray:
 def convolve_2d(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     """Convolve a 2D image with a kernel.
 
-    Supports:
-      * 1D kernel: applies separable convolution (horizontal then vertical).
-      * 2D square kernel: applies dense 2D convolution with sliding windows.
+    A 1D kernel applies separable convolution. A 2D square kernel applies dense
+    2D convolution with sliding windows.
 
-    Args:
-        image (np.ndarray): Input 2D image.
-        kernel (np.ndarray): Convolution kernel. Either 1D (length k) or 2D (k x k).
+    Parameters
+    ----------
+    image : np.ndarray
+        Input 2D image.
+    kernel : np.ndarray
+        Convolution kernel, either 1D or 2D square.
 
-    Returns:
-        np.ndarray: Convolved image.
+    Returns
+    -------
+    np.ndarray
+        Convolved image.
 
-    Raises:
-        TypeError: If inputs have wrong type or dimensionality.
-        ValueError: If a 2D kernel is not square.
+    Raises
+    ------
+    TypeError
+        If inputs have the wrong type or dimensionality.
+    ValueError
+        If a 2D kernel is not square.
     """
     if not isinstance(image, np.ndarray):
         raise TypeError("Image must be a np.ndarray")
@@ -1385,16 +1469,19 @@ def convolve_2d(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
 
 
 def has_duplicates(image: np.ndarray, binary_mask: np.ndarray) -> bool:
-    """
-    Determines whether the given image contains duplicate pixel values on each channel.
+    """Check whether an image contains duplicate pixel values in any channel.
 
-    Args:
-        image (np.ndarray): A numpy array representing the image data, where
-            each element corresponds to a pixel value.
-        binary_mask (np.ndarray): A numpy array of bools representing masked regions of the image.
+    Parameters
+    ----------
+    image : np.ndarray
+        Image data.
+    binary_mask : np.ndarray
+        Boolean mask selecting the pixels to inspect.
 
-    Returns:
-        bool: True if duplicate pixel values are found in one channel of the image. False otherwise.
+    Returns
+    -------
+    bool
+        True if duplicate pixel values are found in any channel.
     """
     im = im3D(image)
     binary_mask = im3D(binary_mask)
@@ -1411,25 +1498,25 @@ def n_unique(arr: np.ndarray) -> int:
     The implementation uses the np.view(void) hashing trick to perform
     fast and deterministic uniqueness checks across all vector dimensions.
 
-    Args:
-        arr (np.ndarray): Input array representing feature responses or image data.
-            Can be:
-                - (N) → single vector
-                - (H, W) → single-channel image
-                - (H, W, C) → multi-channels image
-                - (N, D) → generic feature vectors
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array representing feature responses or image data. Accepts
+        vectors, 2D images, 3D images, or generic feature matrices.
 
-    Returns:
-        int: Number of unique row vectors in the flattened representation.
+    Returns
+    -------
+    int
+        Number of unique row vectors in the flattened representation.
 
-    Raises:
-        ValueError: If the input has fewer than 2 dimensions or empty shape.
+    Raises
+    ------
+    ValueError
+        If the input has an invalid shape.
 
-    Notes:
-        - The function avoids deep copies; all reshaping uses views where possible.
-        - Deterministic (lexicographically consistent) results.
-        - Faster (~3×) than np.unique(..., axis=0) for large 2D or 3D arrays.
-
+    Notes
+    -----
+    The function avoids deep copies where possible and is deterministic.
     """
 
     # --- Handle 1D case ---
@@ -1470,20 +1557,22 @@ def strict_ordering(
     used for lexicographic sorting. The order accuracy (OA) is tracked after
     each kernel addition.
 
-    Args:
-        image (np.ndarray): Input grayscale or color image (H, W[, C]).
-        kernels (list[np.ndarray]): List of convolution kernels to apply.
-        early_stop (bool): If True, the function will stop early once all pixels
-            have unique feature responses (OA = 1.0) after applying at least
-            `min_kernels` kernels.
-        min_kernels (Optional[int]): Minimum number of kernels to apply before
-            early stopping is allowed. Defaults to len(kernels) if
-            early_stop=False, or ceil(len(kernels)/2) if early_stop=True.
+    Parameters
+    ----------
+    image : np.ndarray
+        Input grayscale or color image.
+    kernels : list[np.ndarray]
+        Convolution kernels to apply.
+    early_stop : bool, optional
+        If True, stop early once all pixels have unique feature responses after
+        applying at least ``min_kernels`` kernels.
+    min_kernels : Optional[int], optional
+        Minimum number of kernels to apply before early stopping is allowed.
 
-    Returns:
-        Tuple[np.ndarray, List[float]]:
-            - im_sort: (H, W, C) array of lexicographic rank indices.
-            - OA: List of order accuracies (float) for each channel.
+    Returns
+    -------
+    tuple[np.ndarray, list[float]]
+        Lexicographic rank indices and order-accuracy values per channel.
     """
     im = im3D(image)
     M, N, P = im.shape
@@ -1542,19 +1631,26 @@ def exact_histogram(
         3) Noise-based tie-breaking: 'noise'.
         4) A hybrid strategies first using 'gaussian', then 'noise if ties persist: 'hybrid'.
 
-    Args:
-        image (np.ndarray): Input grayscale or RGB image.
-        target_hist (np.ndarray): Target histogram counts/weights, shape (n_bins, C).
-        binary_mask (Optional[np.ndarray]): Foreground mask.
-        n_bins (Optional[int]): Number of bins; required for float images.
-        tie_strategy (str): Strategy for tie-breaking. One of:
-            "none", "moving-average", "gaussian", "noise", "hybrid" (default).
-        verbose (bool): If True, logs key operations.
+    Parameters
+    ----------
+    image : np.ndarray
+        Input grayscale or RGB image.
+    target_hist : np.ndarray
+        Target histogram counts or weights, shape ``(n_bins, C)``.
+    binary_mask : Optional[np.ndarray], optional
+        Foreground mask.
+    n_bins : Optional[int], optional
+        Number of bins. Required for float images.
+    tie_strategy : str, optional
+        Tie-breaking strategy: ``"none"``, ``"moving-average"``,
+        ``"gaussian"``, ``"noise"``, or ``"hybrid"``.
+    verbose : bool, optional
+        If True, log key operations.
 
-    Returns:
-        Tuple[np.ndarray, List]:
-            - im_out: Histogram-specified image.
-            - OA: Order accuracy list per channel.
+    Returns
+    -------
+    tuple[np.ndarray, list]
+        Histogram-specified image and order-accuracy values per channel.
     """
     # --- Validate and prepare inputs ---
     L = n_bins if n_bins is not None else None
@@ -1655,13 +1751,19 @@ def apply_histogram_mapping(
 ) -> np.ndarray:
     """Map pixel ranks to discrete intensity levels to match a target histogram.
 
-    Args:
-        image (np.ndarray): Input image with unique-valued pixels (after ordering).
-        target_hist (np.ndarray): Target histogram of shape (n_bins, C).
-        binary_mask (Optional[np.ndarray]): Optional boolean mask.
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image with ordered or unique-valued pixels.
+    target_hist : np.ndarray
+        Target histogram of shape ``(n_bins, C)``.
+    binary_mask : Optional[np.ndarray], optional
+        Optional boolean mask.
 
-    Returns:
-        np.ndarray: Histogram-specified image.
+    Returns
+    -------
+    np.ndarray
+        Histogram-specified image.
     """
     im = im3D(image)
     mask = im3D(binary_mask) if binary_mask is not None else np.ones_like(im, dtype=bool)
@@ -1697,19 +1799,26 @@ def apply_histogram_mapping(
 
 
 def floyd_steinberg_dithering(image: np.ndarray, depth: int = 256, legacy_mode: bool = False) -> np.ndarray:
-    """
-    Implements the dithering algorithm presented in :
-        R.W. Floyd, L. Steinberg, An adaptive algorithm for spatial grey scale.
-        Proceedings of the Society of Information Display 17, 75Ð77 (1976).
+    """Apply Floyd-Steinberg error-diffusion dithering.
 
-    Args:
-        image (np.ndarray): An image of floats ranging from 0 to 1.
-        depth (optional) : The number of gray shades. (Default = 256)
-        legacy_mode (bool) : If True, uses Matlab's rounding algorithm.
+    Parameters
+    ----------
+    image : np.ndarray
+        Floating-point image with values in ``[0, 1]``.
+    depth : int, optional
+        Number of quantization levels.
+    legacy_mode : bool, optional
+        If True, use MATLAB-compatible rounding.
 
-    Returns:
-        processed_image (np.ndarray): image matrix containing integer values [1, depth], indicating which luminance value should be used for every pixel.
-            Output uses the smallest integer dtype that fits all values.
+    Returns
+    -------
+    np.ndarray
+        Dithered integer image in ``[0, depth - 1]``.
+
+    References
+    ----------
+    Floyd, R. W. and Steinberg, L. (1976). An adaptive algorithm for spatial
+    grey scale. Proceedings of the Society for Information Display, 17, 75-77.
     """
     if not isinstance(image, np.ndarray):
         raise TypeError("image must be a np.ndarray")
@@ -1738,21 +1847,27 @@ def error_diffusion_dither(
     scan_order: Literal["raster", "serpentine"] = "raster",
     normalize_map: bool = False,
 ) -> np.ndarray:
-    """
-    Generic error-diffusion dithering (channel-by-channel) with an arbitrary diffusion_map.
+    """Apply generic channel-wise error-diffusion dithering.
 
-    Args:
-        image: Float image in [0, 1], shape (H,W) or (H,W,C).
-        n_levels: Number of quantization levels per channel (>=2). Output in [0, n_levels-1].
-        diffusion_map: Sequence of taps (dy, dx, w). Recommended convention: dy>=0; if dy==0 then dx>0.
-            Weights may be provided either already-normalized (sum≈1) or as integer tap weights (e.g., 7,3,5,1);
-            set `normalize_map=True` to normalize them by their sum.
-        legacy_mode: If True, uses MatlabOperators.round; else np.round.
-        scan_order: "raster" or "serpentine".
-        normalize_map: If True, normalize weights by their sum (when sum != 0).
+    Parameters
+    ----------
+    image : np.ndarray
+        Float image in ``[0, 1]`` with shape ``(H, W)`` or ``(H, W, C)``.
+    n_levels : int, optional
+        Number of quantization levels per channel. Must be at least 2.
+    diffusion_map : Sequence[DiffusionTap]
+        Sequence of diffusion taps ``(dy, dx, weight)``.
+    legacy_mode : bool, optional
+        If True, use MATLAB-compatible rounding.
+    scan_order : Literal["raster", "serpentine"], optional
+        Pixel traversal order.
+    normalize_map : bool, optional
+        If True, normalize diffusion weights by their sum.
 
-    Returns:
-        Quantized uint image in [0, n_levels-1], squeezed back if input was 2D.
+    Returns
+    -------
+    np.ndarray
+        Quantized integer image in ``[0, n_levels - 1]``.
     """
     if not isinstance(image, np.ndarray) or np.issubdtype(image.dtype, np.integer):
         raise TypeError("image must be a float np.ndarray with values in [0, 1].")
@@ -1852,27 +1967,37 @@ def soft_clip(arr: np.ndarray,
               max_percent: float = 0.05,
               tol: float = 1e-4,
               verbose: bool = True) -> np.ndarray:
-    """
-    Softly clip an array to [min_value, max_value] while ensuring that
-    the proportion of clipped values does not exceed `max_percent`.
+    """Softly clip an array to a target range.
 
-    If naive clipping would clip more than `max_percent` of values,
+    Softly clip an array to ``[min_value, max_value]`` while ensuring that
+    the proportion of clipped values does not exceed ``max_percent``. If naive
+    clipping would clip more than ``max_percent`` of values,
     the function rescales the array to reduce clipping until the
-    clipped proportion is approximately `max_percent`.
+    clipped proportion is approximately ``max_percent``.
 
-    Args:
-        arr (np.ndarray): Input array.
-        min_value (float): Minimum allowed value after clipping.
-        max_value (float): Maximum allowed value after clipping.
-        max_percent (float): Maximum allowed proportion (0–1) of clipped values.
-        tol (float): Optimization stops early if the clipped proportion is within `tol` (default 1e-4) of target
-        verbose (bool): If True, print diagnostic information during processing.
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array.
+    min_value : float, optional
+        Minimum allowed value after clipping.
+    max_value : float, optional
+        Maximum allowed value after clipping.
+    max_percent : float, optional
+        Maximum allowed proportion of clipped values.
+    tol : float, optional
+        Optimization tolerance.
+    verbose : bool, optional
+        If True, print diagnostic information.
 
-    Returns:
-        np.ndarray: Clipped (and possibly rescaled) array.
+    Returns
+    -------
+    np.ndarray
+        Clipped and possibly rescaled array.
     """
 
     def _zero_clip_mean_preserving(arr, a, b):
+        """Clip to [a, b] while attempting to preserve the original mean."""
         x_min = np.min(arr)
         x_max = np.max(arr)
         m = np.mean(arr, dtype=np.float64)
@@ -1950,23 +2075,39 @@ def soft_clip(arr: np.ndarray,
 
 
 def noisy_bit_dithering(image: np.ndarray, depth: int = 256, legacy_mode: bool = False) -> np.ndarray:
-    """
+    """Apply noisy-bit dithering.
+
     Implements the dithering algorithm presented in :
         Allard, R., Faubert, J. (2008) The noisy-bit method for digital displays:
         converting a 256 luminance resolution into a continuous resolution. Behavior
         Research Method, 40(3), 735-743.
 
-    Args:
-        image (np.ndarray): An image of floats ranging from 0 to 1.
-        depth (optional) : The number of gray shades. (Default = 256)
-        legacy_mode (bool) : If True, uses Matlab's rounding algorithm.
+    Parameters
+    ----------
+    image : np.ndarray
+        Floating-point image with values in ``[0, 1]``.
+    depth : int, optional
+        Number of quantization levels.
+    legacy_mode : bool, optional
+        If True, use MATLAB-compatible rounding.
 
-    Returns:
-        processed_image (np.ndarray): image matrix containing integer values [1, depth], indicating which luminance value should be used for every pixel.
-            Output uses the smallest integer dtype that fits all values.
-    E.g.:
-        processed_image = noisy_bit_dithering(image, depth = 256)
+    Returns
+    -------
+    np.ndarray
+        Dithered integer image in ``[0, depth - 1]``.
 
+    References
+    ----------
+    Allard, R. and Faubert, J. (2008). The noisy-bit method for digital
+    displays: converting a 256 luminance resolution into a continuous
+    resolution. Behavior Research Methods, 40(3), 735-743.
+
+    Example
+    -------
+        >>> processed_image = noisy_bit_dithering(image, depth = 256)
+
+    Notes
+    -----
     This example assumes that all rgb values are linearly related to luminance
     values (e.g. on a Mac, put your LCD monitor gamma parameter to 1 in the Displays
     section of the System Preferences). If this is not the case, use a lookup table
@@ -1977,6 +2118,13 @@ def noisy_bit_dithering(image: np.ndarray, depth: int = 256, legacy_mode: bool =
     frederic.gosselin@umontreal.ca
 
     Slight modifications for Matlab compatibility: Nicolas Dupuis-Roy & Mathias Salvas-Hébert, 2025-08-19
+
+    References
+    ----------
+    Allard, R. and Faubert, J. (2008). The noisy-bit method for digital
+    displays: converting a 256 luminance resolution into a continuous
+    resolution. Behavior Research Methods, 40(3), 735-743.
+
 
     """
     if not isinstance(image, np.ndarray) or np.issubdtype(image.dtype, np.integer):
@@ -1996,21 +2144,27 @@ def noisy_bit_dithering(image: np.ndarray, depth: int = 256, legacy_mode: bool =
 
 
 def uint_to_float01(image: np.ndarray, apply_clipping: bool = True) -> np.ndarray:
-    """
-    Convert an N-bit unsigned integer (uintN) image to a floating-point image with values ranging from 0 to 1.
+    """Convert an unsigned integer image to floating point values in [0, 1].
 
-    A float is assumed to be within the [0, 1] range whereas the uintN within the [0, n_levels] range.
+    Integer values are divided by the maximum value of their dtype.
 
-    Args:
-        image (np.ndarray): Input image as a NumPy array with floating-point values.
-        apply_clipping (bool): If True, clip values outside the range [0, 1].
-                               If False, raises an error if values are out of range.
+    Parameters
+    ----------
+    image : np.ndarray
+        Unsigned integer image.
+    apply_clipping : bool, optional
+        If True, clip output values to ``[0, 1]``. If False, raise an error
+        when values are out of range.
 
-    Returns:
-        np.ndarray: The converted image as a NumPy array with dtype float64.
+    Returns
+    -------
+    np.ndarray
+        Converted image with dtype ``float64``.
 
-    Raises:
-        ValueError: If `apply_clipping` is False and the image contains values outside the range [0, 1].
+    Raises
+    ------
+    ValueError
+        If ``apply_clipping`` is False and values fall outside ``[0, 1]``.
     """
     if not isinstance(image, np.ndarray) or not np.issubdtype(image.dtype, np.integer):
         raise TypeError('image should be a np.ndarray of integers')
@@ -2034,24 +2188,36 @@ def uint_to_float01(image: np.ndarray, apply_clipping: bool = True) -> np.ndarra
 
 
 def float01_to_uint(image: np.ndarray, apply_clipping: bool = True, apply_rounding: bool = True, bit_size: int = 8, verbose: bool = True) -> np.ndarray:
-    """
-    Convert a floating-point image to an n-bit unsigned integer (uintN) image.
+    """Convert a floating-point image in [0, 1] to an unsigned integer image.
 
-    A float is assumed to be within the [0, 1] range whereas the uintN within the [0, n_levels] range.
+    Values are scaled to the full range of the requested unsigned integer
+    dtype.
 
-    Args:
-        image (np.ndarray): Input image as a NumPy array with floating-point values.
-        apply_clipping (bool): If True, clip values outside the range [0, n_levels].
-                               If False, raises an error if values are out of range.
-        apply_rounding (bool): If True, round values using np.rint
-        bit_size (int): Bit size of the unsigned integer.
-        verbose (bool): Warn if clipping needed.
+    Parameters
+    ----------
+    image : np.ndarray
+        Floating-point image.
+    apply_clipping : bool, optional
+        If True, clip values outside ``[0, 1]``. If False, raise an error
+        when values are out of range.
+    apply_rounding : bool, optional
+        If True, round values before conversion.
+    bit_size : int, optional
+        Bit size of the unsigned integer output. Supported values are 8, 16,
+        32, and 64.
+    verbose : bool, optional
+        If True, warn when clipping is needed.
 
-    Returns:
-        np.ndarray: The converted image as a NumPy array with dtype uintN.
+    Returns
+    -------
+    np.ndarray
+        Converted image with unsigned integer dtype.
 
-    Raises:
-        ValueError: If `apply_clipping` is False and the image contains values outside the range [0, n_levels].
+    Raises
+    ------
+    ValueError
+        If ``bit_size`` is invalid, or if ``apply_clipping`` is False and the
+        image contains values outside ``[0, 1]``.
     """
 
     if not isinstance(image, np.ndarray) or not np.issubdtype(image.dtype, np.floating):
@@ -2096,17 +2262,19 @@ def float01_to_uint(image: np.ndarray, apply_clipping: bool = True, apply_roundi
 
 
 def pol2cart(magnitude: np.ndarray, angle: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Convert polar coordinates (magnitude, angle) to Cartesian coordinates (x, y).
+    """Convert polar coordinates to Cartesian coordinates.
 
-    Args:
-        magnitude (np.ndarray): Distance from the origin (radius).
-        angle (np.ndarray): Angle in radians.
+    Parameters
+    ----------
+    magnitude : np.ndarray
+        Distance from the origin.
+    angle : np.ndarray
+        Angle in radians.
 
-    Returns:
-        tuple: A tuple (x, y) where:
-            - x is the Cartesian x-coordinate.
-            - y is the Cartesian y-coordinate.
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Cartesian ``x`` and ``y`` coordinates.
     """
     x = magnitude * np.cos(angle)  # Compute x-coordinate
     y = magnitude * np.sin(angle)  # Compute y-coordinate
@@ -2114,17 +2282,19 @@ def pol2cart(magnitude: np.ndarray, angle: np.ndarray) -> Tuple[np.ndarray, np.n
 
 
 def cart2pol(x, y) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Convert Cartesian coordinates (x, y) to polar coordinates (magnitude, angle).
+    """Convert Cartesian coordinates to polar coordinates.
 
-    Args:
-        x (np.ndarray): Real part (x-coordinate).
-        y (np.ndarray): Imaginary part (y-coordinate).
+    Parameters
+    ----------
+    x : np.ndarray
+        Cartesian x-coordinate.
+    y : np.ndarray
+        Cartesian y-coordinate.
 
-    Returns:
-        tuple: A tuple (magnitude, angle) where:
-            - magnitude is the distance from the origin.
-            - angle is the angle in radians.
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Magnitude and angle in radians.
     """
     magnitude = np.sqrt(x**2 + y**2)  # Compute magnitude
     angle = np.arctan2(y, x)          # Compute angle
@@ -2132,27 +2302,26 @@ def cart2pol(x, y) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def separate(mask: np.ndarray, background: Union[int, float] = 0, background_operator: Literal['!=', '==', '>=', '<=', '>', '<', '!='] = '==', smoothing: bool = False, show_figure: bool = False) -> Tuple[np.ndarray, np.ndarray, float]:
-    """
-    Function for simple figure-ground segregation.
-    Args:
-        mask (np.ndarray): Source mask. Could be an image or a bit mask.
-        background (Optional[Union[uint8, float64]]); uint8 value of the background ([0,255]) (e.g., 255)
-            or float64 value of the background ([0,1]) (e.g., 1); if equals to 300 or not specified, it is the
-            value that occurs the most frequently in mask.
-        background_operator (Literal['!=', '==', '>=', '<=', '>', '<', '!=']):
-            Foreground is pixel values `background_operator` `background`.
-            Example: If `background_operator` is '>=' then the foreground = pixels >= background
-        smoothing (bool): If true, applies median blur on mask.
-        show_figure (bool): If true, shows the foreground and background
+    """Separate a mask into foreground and background boolean arrays.
 
-    Returns:
-        mask_fgr (np.ndarray[bool]): 2D matrix of the same size as the source mask; Foreground is True
-            and background is False.
-        mask_bgr (np.ndarray[bool]): 2D matrix of the same size as the source mask; Background is True
-            and foreground is False.
-        background (Optional[np.uint8]): Specifies the value that was used to
-            define the background in the original image
+    Parameters
+    ----------
+    mask : np.ndarray
+        Source mask image or boolean mask.
+    background : int or float, optional
+        Background value. Use ``300`` to select the most frequent value in the
+        mask automatically.
+    background_operator : str, optional
+        Operator used to define background pixels relative to ``background``.
+    smoothing : bool, optional
+        If True, apply median blur to the mask.
+    show_figure : bool, optional
+        If True, display foreground and background masks.
 
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, float]
+        Foreground mask, background mask, and resolved background value.
     """
 
     mask = im3D(mask)
@@ -2204,26 +2373,32 @@ def separate(mask: np.ndarray, background: Union[int, float] = 0, background_ope
 
 def _pad_for_fft(
     image: np.ndarray,
-    mode: Optional[Union[Literal[0, 1, 2, 3], Literal["reflect", "symmetric", "constant"]]],
-    value: Optional[float] = 300,
+    mode: Union[Literal[0, 1, 2, 3], Literal["reflect", "symmetric", "constant"]],
+    value: Union[int, Literal[300]] = 300,
+    fft_padding_ratio: float = DEFAULT_FFT_PADDING_RATIO,
 ) -> np.ndarray:
-    """Pad image spatial axes before FFT. Returns image unchanged when mode is None or 0."""
-    if mode is None or mode == 0:
+    """Pad image spatial axes before FFT. Returns image unchanged when mode is 0."""
+    fft_padding_mode_names = ("nopadding", "reflect", "symmetric", "constant")
+    if mode == 0:
         return image
 
     mode_name: Optional[str] = None
     if isinstance(mode, str):
         mode_name = mode.strip().lower()
     elif isinstance(mode, int):
-        mode_name = FFT_PADDING_MODE_MAP.get(mode)
+        mode_name = fft_padding_mode_names[mode] if 0 <= mode < len(fft_padding_mode_names) else None
+    if mode_name == "nopadding":
+        return image
     if mode_name not in ("reflect", "symmetric", "constant"):
-        raise ValueError("fft_padding_mode must be 0, 1, 2, 3, None, 'reflect', 'symmetric', or 'constant'.")
+        raise ValueError("fft_padding_mode must be 0, 1, 2, 3, 'reflect', 'symmetric', or 'constant'.")
+    if not np.isfinite(fft_padding_ratio) or fft_padding_ratio < 0:
+        raise ValueError("fft_padding_ratio must be a finite, non-negative number.")
 
     height, width = image.shape[:2]
-    pad = int(min(height, width) * DEFAULT_FFT_PADDING_RATIO)
+    pad = int(min(height, width) * fft_padding_ratio)
     pad_width = ((pad, pad), (pad, pad)) if image.ndim == 2 else ((pad, pad), (pad, pad), (0, 0))
     if mode_name == "constant":
-        constant_value = image.mean() if value is None else value / 255
+        constant_value = image.mean() if value == 300 else value / 255
         return np.pad(image, pad_width=pad_width, mode=mode_name, constant_values=constant_value)
     return np.pad(image, pad_width=pad_width, mode=mode_name)
 
@@ -2239,26 +2414,39 @@ def image_spectrum(
     image: np.ndarray,
     rescale: bool = True,
     fft_padding_mode: Literal[0, 1, 2, 3] = 0,
-    fft_padding_value: Optional[float] = 300,
+    fft_padding_value: Union[int, Literal[300]] = 300,
+    fft_padding_ratio: float = DEFAULT_FFT_PADDING_RATIO,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Compute the spectrum of an image
-    Args:
-        image (np.ndarray): An image
-        rescale (bool): If true, will rescale each channel to [0, 1] range.
-        fft_padding_mode (Literal[0, 1, 2, 3]): Spatial padding mode before FFT.
-            0=disabled, 1=reflect, 2=symmetric, 3=constant.
-        fft_padding_value (Optional[float]): Constant padding value in [0, 255], or 300 for mean intensity.
+    """Compute Fourier magnitude and phase spectra for an image.
 
-    Returns:
-        magnitude, phase
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image.
+    rescale : bool, optional
+        If True, rescale each channel to ``[0, 1]`` before FFT.
+    fft_padding_mode : int, optional
+        Spatial padding mode before FFT: 0 disabled, 1 reflect, 2 symmetric,
+        3 constant.
+    fft_padding_value : int, optional
+        Constant padding value in ``[0, 255]``, or ``300`` for mean intensity.
+    fft_padding_ratio : float, optional
+        Fraction of the smallest image side used as padding before FFT.
 
-    TODO: Optimization: Check image type and use np.fft.rfft2 for faster computations.
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Magnitude and phase spectra.
     """
     image = im3D(image)
     if rescale:
         image = rescale_image(image, 0, 1)  # [0, 255] -> [0, 1]
-    image = _pad_for_fft(image=image, mode=fft_padding_mode, value=fft_padding_value)
+    image = _pad_for_fft(
+        image=image,
+        mode=fft_padding_mode,
+        value=fft_padding_value,
+        fft_padding_ratio=fft_padding_ratio,
+    )
 
     x_size, y_size, n_channels = image.shape
     phase = np.zeros((x_size, y_size, n_channels))  # Phase FT
@@ -2279,30 +2467,36 @@ def gaussian_kernel(
 ) -> np.ndarray:
     """Generate a normalized Gaussian kernel.
 
-    Exactly one of `sigma` or `coverage` must be provided.
+    Exactly one of ``sigma`` or ``coverage`` must be provided.
 
-    If `coverage` is specified, `sigma` is automatically computed so that
+    If ``coverage`` is specified, ``sigma`` is automatically computed so that
     the specified fraction of the Gaussian's total area is contained
-    within the kernel support of given `size`.
+    within the kernel support of given ``size``.
 
-    Args:
-        size (int): Size of the kernel (must be odd).
-        sigma (float, optional): Standard deviation of the Gaussian.
-            Mutually exclusive with `coverage`.
-        coverage (float, optional): Fraction (0–1) of total Gaussian area
-            contained within the kernel (e.g., 0.99 ≈ ±2.575σ).
-            Mutually exclusive with `sigma`.
-        n_dim (int, optional): Dimensionality of the kernel.
-            * 1 -> return 1D Gaussian kernel of shape (size,)
-            * 2 -> return 2D Gaussian kernel of shape (size, size)
-            Defaults to 2.
+    Parameters
+    ----------
+    size : int
+        Size of the kernel. Must be odd.
+    sigma : float, optional
+        Standard deviation of the Gaussian. Mutually exclusive with
+        ``coverage``.
+    coverage : float, optional
+        Fraction in ``(0, 1)`` of total Gaussian area contained within the
+        kernel. Mutually exclusive with ``sigma``.
+    n_dim : int, optional
+        Dimensionality of the kernel. Use ``1`` for shape ``(size,)`` or ``2``
+        for shape ``(size, size)``.
 
-    Returns:
-        np.ndarray: Normalized Gaussian kernel of shape (size,) or (size, size).
+    Returns
+    -------
+    np.ndarray
+        Normalized Gaussian kernel.
 
-    Raises:
-        ValueError: If `size` is not odd, or if both/neither of `sigma` and
-            `coverage` are provided, or if inputs are invalid.
+    Raises
+    ------
+    ValueError
+        If inputs are invalid or if both/neither of ``sigma`` and ``coverage``
+        are provided.
     """
     if size % 2 == 0:
         raise ValueError("Kernel size must be odd.")
@@ -2359,30 +2553,38 @@ def center_surround_kernel(
 
     The kernel is built as a narrow (center) Gaussian minus a broader (surround)
     Gaussian, each L1-normalized over the *same* finite support defined by
-    `size`. The resulting kernel is DC-balanced (sum≈0), suitable for
+    ``size``. The resulting kernel is DC-balanced, suitable for
     center–surround/edge-like filtering and strict-ordering feature banks.
 
-    Exactly one of `sigma_center` or `coverage` must be provided.
+    Exactly one of ``sigma_center`` or ``coverage`` must be provided.
 
-    If `coverage` is provided, `sigma_center` is chosen so that the specified
+    If ``coverage`` is provided, ``sigma_center`` is chosen so that the specified
     fraction of the 1D Gaussian's total area lies within the half-width
-    `size//2`. `sigma_surround` is then derived as `ratio * sigma_center`.
+    ``size // 2``. ``sigma_surround`` is then derived as
+    ``ratio * sigma_center``.
 
-    Args:
-        size: Odd kernel size; defines spatial support (1D or 2D).
-        sigma_center: Standard deviation of the center Gaussian (pixels).
-        coverage: Fraction (0–1) of total Gaussian area within support, used to
-            *infer* `sigma_center`. (E.g., 0.95 ≈ ±2σ, 0.99 ≈ ±3σ.)
-        ratio: Surround-to-center sigma ratio. Common choices:
-            - 1.6 → good LoG approximation / Marr–Hildreth/SIFT-style           (default)
-            - ~3–6 → retinal ganglion center–surround (HVS-like)
-        n_dim: 1 → shape (size,), 2 → shape (size, size).
+    Parameters
+    ----------
+    size : int
+        Odd kernel size.
+    sigma_center : float, optional
+        Standard deviation of the center Gaussian in pixels.
+    coverage : float, optional
+        Fraction in ``(0, 1)`` of total Gaussian area within the support.
+    ratio : float, optional
+        Surround-to-center sigma ratio.
+    n_dim : int, optional
+        Use ``1`` for shape ``(size,)`` or ``2`` for shape ``(size, size)``.
 
-    Returns:
-        DoG kernel (float64) of shape (size,) or (size, size), zero-mean.
+    Returns
+    -------
+    np.ndarray
+        Zero-mean Difference-of-Gaussians kernel.
 
-    Raises:
-        ValueError: On invalid sizes, exclusivity of args, or nonpositive sigmas.
+    Raises
+    ------
+    ValueError
+        If inputs are invalid.
     """
     if size % 2 == 0:
         raise ValueError("Kernel size must be odd.")
@@ -2437,23 +2639,31 @@ def laplacian_kernel(
 ) -> np.ndarray:
     """Generate a Laplacian-of-Gaussian (LoG) kernel over finite support.
 
-    Exactly one of `sigma` or `coverage` must be provided.
+    Exactly one of ``sigma`` or ``coverage`` must be provided.
 
-    If `coverage` is given, `sigma` is chosen so the specified fraction of the
-    1D Gaussian area lies within half-width `size//2` (matching the convention
-    used in `gaussian_kernel`).
+    If ``coverage`` is given, ``sigma`` is chosen so the specified fraction of
+    the 1D Gaussian area lies within half-width ``size // 2``.
 
-    Args:
-        size: Odd kernel size; defines spatial support (1D or 2D).
-        sigma: Standard deviation of Gaussian envelope (pixels).
-        coverage: Fraction (0–1) of total Gaussian area within support.
-        n_dim: 1 → shape (size,), 2 → shape (size, size).
+    Parameters
+    ----------
+    size : int
+        Odd kernel size.
+    sigma : float, optional
+        Standard deviation of Gaussian envelope in pixels.
+    coverage : float, optional
+        Fraction in ``(0, 1)`` of total Gaussian area within support.
+    n_dim : int, optional
+        Use ``1`` for shape ``(size,)`` or ``2`` for shape ``(size, size)``.
 
-    Returns:
-        Zero-mean LoG kernel (float64) of shape (size,) or (size, size).
+    Returns
+    -------
+    np.ndarray
+        Zero-mean Laplacian-of-Gaussian kernel.
 
-    Raises:
-        ValueError: On invalid sizes, exclusivity of args, or nonpositive sigma.
+    Raises
+    ------
+    ValueError
+        If inputs are invalid.
     """
     if size % 2 == 0:
         raise ValueError("Kernel size must be odd.")
@@ -2498,16 +2708,20 @@ def tie_breaking_noise_level(image: np.ndarray, min_gap: Optional[float] = None,
     to reorder distinct values. Used to ensure strict ranking in exact
     histogram specification when pixel ties are present.
 
-    Args:
-        image (np.ndarray): Input image. Supported dtypes: uint8, uint16,
-            float16, float32, float64.
-        min_gap (float, optional): Smallest nonzero intensity increment
-            in the data (e.g., from np.diff(np.unique(image))). If provided,
-            the returned noise will be capped to a small fraction of it.
-        gap_frac_cap (float): Fraction of `min_gap` allowed for noise (default 1e-3).
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image. Supported dtypes: uint8, uint16, float16, float32, float64.
+    min_gap : Optional[float]
+        Smallest nonzero intensity increment in the data (e.g., from np.diff(np.unique(image))).
+        If provided, the returned noise is capped to a fraction of it.
+    gap_frac_cap : float
+        Fraction of `min_gap` allowed for noise (default 1e-3).
 
-    Returns:
-        float: Recommended amplitude of uniform tie-breaking noise (symmetric ±).
+    Returns
+    -------
+    float
+        Recommended amplitude of uniform tie-breaking noise (symmetric ±)
     """
     x = np.asarray(image)
 
@@ -2557,21 +2771,23 @@ def tie_breaking_noise_level(image: np.ndarray, min_gap: Optional[float] = None,
 
 
 def print_log(logs: List[str], log_path: Union[Path, str], log_name: Optional[str] = None) -> None:
-    """
-    Takes a list of log messages and writes them to a file located
-    at the specified log directory (`log_path`). Optionally, a static filename can
-    be provided (`log_name`). If no static name is supplied, the function generates
-    a filename containing the current date and time, ensuring logs are uniquely
-    stored based on their creation time.
+    """Write log messages to a text file.
 
-    Args:
-        logs (List[str]): A list of log messages to write to the file.
-        log_path (Path): The directory where the log file will be saved.
-        log_name (Optional[str]): The optional static name for the log file. If not
-            specified, a timestamped filename will be generated.
+    If no ``log_name`` is supplied, a timestamped filename is generated.
 
-    Returns:
-        None
+    Parameters
+    ----------
+    logs : List[str]
+        Log messages to write.
+    log_path : Union[Path, str]
+        Directory where the log file will be saved.
+    log_name : Optional[str], optional
+        Optional static text filename. If not specified, a timestamped filename
+        is generated.
+
+    Returns
+    -------
+    None
     """
     if not isinstance(logs, Iterable):
         raise TypeError('logs must be a list of string.')
@@ -2600,6 +2816,7 @@ def print_log(logs: List[str], log_path: Union[Path, str], log_name: Optional[st
 
 
 def strip_ansi(s: str) -> str:
+    """Remove ANSI escape sequences from a string."""
     return ANSI_RE.sub("", s)
 
 
@@ -2609,25 +2826,30 @@ def colorize(text: str, color: str) -> str:
 
 
 def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, verbose: bool = True, strip: bool = True) -> str:
-    """
-    Logs a message to the console with optional indentation, color, and verbose control.
+    """Log a message to the console with optional indentation and color.
 
-    Args:
-        msg (str): The message string to be logged.
-        indent_level (int): The level of indentation represented as the number of tab characters.
-            Defaults to 0.
-        color (Optional[str]): The color code applied to the message text.
-            Defaults to None, indicating no color formatting.
-        verbose (bool): A flag to determine whether to print the message to the console.
-            If False, the message is only processed and not output. Defaults to False.
-        strip (bool): String ainsi characters
+    Parameters
+    ----------
+    msg : str
+        Message to log.
+    indent_level : int
+        Number of tab characters to prepend to each line.
+    color : Optional[str]
+        ANSI color code applied to the message.
+    verbose : bool
+        If True, print the message to the console.
+    strip : bool
+        If True, remove ANSI escape sequences from the returned string.
 
-    Returns:
-        str: The formatted message as a string with any ANSI color codes stripped.
+    Returns
+    -------
+    str
+        Formatted message, optionally stripped of ANSI color codes.
     """
     # TODO: Convert into a class to improve object-oriented logging and storage.
 
     def _set_indent_and_color(text, lev: int, col: Optional[str] = None):
+        """Apply indentation and optional ANSI color formatting line by line."""
         indent_str = '\t' * lev
         if col is not None:
             return "\n".join(f'{indent_str}{col}{line}{Bcolors.ENDC}' for line in text.splitlines())
@@ -2637,6 +2859,7 @@ def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, ve
     def _coat_check(
             text: str,
             transform: Callable[[str], str]) -> str:
+        """Preserve leading control prefixes while transforming message content."""
         prefix_parts: list[str] = []
         remaining = text
         ESC_UP_ONE = "\x1b[F"
@@ -2683,25 +2906,34 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
     """Display before/after images and diagnostics for all processing steps in one figure.
 
     The figure layout adapts to the active SHINIER mode:
-        • Row 1: before/after images.
-        • Subsequent rows: one row per processing step (e.g., luminance, histogram, spectrum).
-          Each diagnostic row shows "before" (left) and "after" (right) panels side by side.
 
-    Args:
-        processor (ImageProcessor): The SHINIER ImageProcessor instance.
-        img_idx (int, optional): Index of the image to visualize. Defaults to 0.
-        show_figure (bool): If False, return the fig object without showing it (i.e. plt.show())
-        show_initial_target (bool): If True, plots the initial target in composite modes.
+    - Row 1: before/after images.
+    - Subsequent rows: one row per processing step (for example luminance,
+      histogram, or spectrum matching).
+    - Each diagnostic row shows before and after panels side by side.
 
-    Returns:
-        matplotlib.figure.Figure: Composite figure summarizing the image transformations.
-    
-    Example usage:
-        from shinier import ImageProcessor, ImageDataset, Options
-        from shinier.utils import show_processing_overview
-            processor = ImageProcessor(dataset=ImageDataset(options=Options(mode=2)))
-            fig = show_processing_overview(processor, img_idx=0, show_figure=False)
-            fig.savefig("processing_overview.svg", format="svg")
+    Parameters
+    ----------
+    processor : ImageProcessor
+        SHINIER image processor instance.
+    img_idx : int, optional
+        Index of the image to visualize.
+    show_figure : bool, optional
+        If False, return the figure without calling ``plt.show()``.
+    show_initial_target : bool, optional
+        If True, plot the initial target in composite modes.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Composite figure summarizing the image transformations.
+
+    Examples
+    --------
+    >>> from shinier import ImageDataset, ImageProcessor, Options
+    >>> from shinier.utils import show_processing_overview
+    >>> processor = ImageProcessor(dataset=ImageDataset(options=Options(mode=2)))
+    >>> fig = show_processing_overview(processor, img_idx=0, show_figure=False)
     """
 
     import os, matplotlib
@@ -2718,6 +2950,7 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
     mode = getattr(processor.options, "mode", None)
 
     def _load_overview_image(path: Optional[Path]) -> np.ndarray:
+        """Load one overview image from disk or fall back to the initial buffer."""
         if path is None:
             return np.asarray(processor._initial_buffer[img_idx])
         path = Path(path)
@@ -2928,29 +3161,26 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
 def beta_bounds_from_ssim(gradients: np.ndarray, ssim: List[float], binary_mask: Optional[np.ndarray] = None) -> Tuple[float, float]:
     """Compute Avanaki's step-size bounds for SSIM gradient ascent.
 
-    This computes lower/upper bounds for the scalar step size β in an update
-    of the form: ``Y <- Y + β * (M ⊙ ∇_Y SSIM(I, Y))``, where ``M`` is an
-    optional binary mask.
+    This computes lower and upper bounds for the scalar step size in an SSIM
+    gradient-ascent update.
 
-    Bounds:
-      - β_max = (1 - SSIM(I, Y)) / ||G||_2^2
-      - β_min = 1 / (2 * ||G||_∞)
-    with G the (optionally masked) gradient map.
+    Parameters
+    ----------
+    gradients : np.ndarray
+        SSIM gradient map with shape ``(H, W)`` or ``(H, W, C)``.
+    ssim : List[float]
+        SSIM value for each channel.
+    binary_mask : Optional[np.ndarray], optional
+        Boolean mask. Pixels with False are frozen.
 
-    Args:
-      gradients: Gradient map ∇_Y SSIM(I, Y); shape (H, W) or (H, W, C).
-      ssim: List of SSIM(I, Y), one per channel.
-      binary_mask: Optional boolean mask of shape (H, W) or broadcastable to (H, W, n_channels).
-                   Pixels with False are frozen (no update).
+    Returns
+    -------
+    list[tuple[float, float]]
+        Lower and upper step-size bounds for each channel.
 
-    Returns:
-      A list (len = n_channels) of tuples (beta_min, beta_max) giving the lower and upper bounds. Returns zeros
-      if the gradient is zero everywhere under the mask or SSIM≈1.
-
-    Notes:
-      - See "Iterative exact global histogram specification and SSIM gradient ascent: a proof of convergence, step size and parameter selection"
-      - Norms are computed over all pixels and channels after masking.
-      - Gradients should already include the same scaling used in your SSIM implementation.
+    Notes
+    -----
+    Norms are computed over all pixels and channels after masking.
     """
     bm = im3D(binary_mask)
     G = im3D(gradients)
@@ -2985,32 +3215,39 @@ def beta_bounds_from_ssim(gradients: np.ndarray, ssim: List[float], binary_mask:
 
 
 def ssim_sens(image1: np.ndarray, image2: np.ndarray, data_range: Optional[float] = None, use_sample_covariance: bool = False, binary_mask: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Compute the Structural Similarity Index (SSIM) and its gradient.
+    """Compute Structural Similarity Index (SSIM) and its gradient.
 
-    Args:
-        image1 (np.ndarray): First image as a 3D array.
-        image2 (np.ndarray): Second image as a 3D array.
-        data_range (int, optional): Dynamic range of pixel values.
-        use_sample_covariance (bool): If True, use sample covariance when computing SSIM.
-            - Note that Avanaki (2009) and Wang et al. (2004) used population covariance.
-        binary_mask (np.ndarray): Binary mask used to zero-out all masked regions and normalize accordingly.
+    Parameters
+    ----------
+    image1 : np.ndarray
+        First image.
+    image2 : np.ndarray
+        Second image.
+    data_range : Optional[float], optional
+        Dynamic range of pixel values.
+    use_sample_covariance : bool, optional
+        If True, use sample covariance when computing SSIM.
+    binary_mask : Optional[np.ndarray], optional
+        Binary mask used to exclude pixels from SSIM averaging.
 
-    Returns:
-        Tuple[np.ndarray, np.ndarray]:
-            - Gradient of SSIM (sensitivity) as a 2D array.
-            - Mean SSIM value as a float.
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        SSIM gradient map and per-channel mean SSIM values.
 
-    References :
-        1. Avanaki, A.N. Exact global histogram specification optimized for structural similarity.
-        OPT REV 16, 613–621 (2009). https://doi.org/10.1007/s10043-009-0119-z
+    References
+    ----------
+    Avanaki, A. N. (2009). Exact global histogram specification optimized for
+    structural similarity. Optical Review, 16, 613-621.
 
-        2. Zhou Wang, A. C. Bovik, H. R. Sheikh and E. P. Simoncelli, "Image quality assessment:
-        from error visibility to structural similarity," in IEEE Transactions on Image Processing,
-        vol. 13, no. 4, pp. 600-612, April 2004, doi: 10.1109/TIP.2003.819861.
+    Wang, Z., Bovik, A. C., Sheikh, H. R., and Simoncelli, E. P. (2004). Image
+    quality assessment: from error visibility to structural similarity. IEEE
+    Transactions on Image Processing, 13(4), 600-612.
 
-    Notes:
-        - Should match scikit-image ssim computations using data_range=255, channel_axis=-1, win_size=11, gaussian_weights=True
+    Notes
+    -----
+    Intended to match scikit-image SSIM computations with ``win_size=11`` and
+    Gaussian weights when equivalent parameters are used.
     """
     # Keep original dtype for data_range inference
     orig_dtype = image1.dtype
@@ -3144,8 +3381,8 @@ class StepSizeController:
       B) If SSIM increases only slightly (stall) → restart with larger weight.
       C) If SSIM decreases → restart with smaller weight.
 
-    Attributes:
-        gain_up (float): Multiplier when escaping a stall (default=1.3).
+    Attributes
+    ----------        gain_up (float): Multiplier when escaping a stall (default=1.3).
         gain_down (float): Multiplier when correcting overshoot (default=0.6).
         stall_thresh (float): ΔSSIM below which we consider a stall (default=1e-5).
         alpha_min (float): Minimum allowed step size.
@@ -3162,6 +3399,7 @@ class StepSizeController:
         alpha_max: float = 10.0,
         max_stall_iter: int = 5
     ):
+        """Initialize adaptive step-size parameters and internal tracking state."""
         self.gain_up = gain_up
         self.gain_down = gain_down
         self.stall_thresh = stall_thresh
@@ -3181,14 +3419,14 @@ class StepSizeController:
     def update(self, alpha: float, ssim_new: float, Y_new: np.ndarray, gradient_new: np.ndarray) -> Tuple[float, np.ndarray, bool]:
         """Update step size and decide whether to restart or accept.
 
-        Args:
-            alpha (float): Current step-size weight.
+        Parameters
+        ----------            alpha (float): Current step-size weight.
             ssim_new (float): Current mean SSIM value.
             Y_new (np.ndarray): Current image.
             gradient_new (np.ndarray): Current gradient from ssim_sens()
 
-        Returns:
-            (alpha_new, Y_next, restart)
+        Returns
+        -------            (alpha_new, Y_next, restart)
                 alpha_new       : Updated step-size weight.
                 Y_next          : Either new image or reverted one.
                 gradient_next   : Either new gradient or reverted one.
@@ -3250,24 +3488,28 @@ class StepSizeController:
 
 
 def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], target_hist: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Validates the histogram matching process by comparing initial histograms of images
+    """Validate histogram matching with correlation and RMSE metrics.
+
+    Validates the histogram matching process by comparing image histograms
     to a target histogram. Uses correlation coefficients and root mean square error
     (RMSE) as metrics for validation.
 
-    Args:
-        images (ImageListIO): A list-like object containing images. Each image should
-            represent its histogram and dimensional attributes appropriately.
-        binary_masks ([np.ndarray]). A list of binary masks with same size as image.
-        target_hist (Optional[np.ndarray]). A target histogram to compare against.
-        normalize_rmse (bool): If True, return the NRMSE computed directly on
-            normalized histogram weights in [0, 1]. If False, return the raw
-            RMSE between normalized histograms.
+    Parameters
+    ----------
+    images : ImageListIO
+        Collection of images.
+    binary_masks : List[np.ndarray]
+        Binary masks with the same size as each image.
+    target_hist : Optional[np.ndarray], optional
+        Target histogram to compare against. If None, the average histogram is
+        used.
+    normalize_rmse : bool, optional
+        If True, return normalized RMSE.
 
-    Returns:
-        Tuple[np.ndarray, np.ndarray]: A tuple where the first element is an array
-            of correlation coefficients, and the second element is an array of RMS
-            values for all images compared against the target histogram.
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Correlation coefficients and RMSE values.
     """
 
     avg_target_hist, initial_hist = avg_hist(images=images, binary_masks=binary_masks, normalized=True, n_bins=256, output_list_hist=True)
@@ -3296,23 +3538,25 @@ def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], t
 
 
 def sf_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
-    """
+    """Validate spatial-frequency matching with correlation and RMSE metrics.
+
     Validates spectral match between a set of input images by comparing their
     rotational averages of magnitude spectra against a computed target spectrum.
-    The function calculates metrics such as correlation coefficients and root
-    mean square error (RMSE) to evaluate the quality of the spectral match.
 
-    Args:
-        images (ImageListIO): Array of images for which the spectral validation
-            is performed. Each image is assumed to have three channels (e.g., RGB).
-        target_spectrum (Optional[np.ndarray]). A target spectrum to compute rotational average to compare against.
-        normalize_rmse (bool): Whether to normalize the RMSE
+    Parameters
+    ----------
+    images : ImageListIO
+        Collection of images.
+    target_spectrum : Optional[np.ndarray], optional
+        Target spectrum to compare against. If None, the average spectrum is
+        used.
+    normalize_rmse : bool, optional
+        If True, return normalized RMSE.
 
-    Returns:
-        Tuple[np.ndarray, np.ndarray]: A tuple containing two arrays:
-            - Correlation coefficients (np.ndarray) between the rotational averages
-              of the input images and the target spectrum.
-            - Root mean square errors (np.ndarray) for the same comparison.
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Correlation coefficients and RMSE values.
     """
 
     x_size, y_size = images[0].shape[:2]
@@ -3359,24 +3603,28 @@ def sf_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndarra
 
 
 def spec_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
-    """
+    """Validate Fourier-spectrum matching with correlation and RMSE metrics.
+
     Validates spectral matching of input images by comparing the spectra of each
     image with a target spectrum. The target spectrum is computed as the average
     magnitude spectrum of all input images. Computes both the correlation and root
     mean square error (RMSE) between the magnitude spectra of individual images
     and the target spectrum.
 
-    Args:
-        images: List or array of images for which spectral matching needs to be
-            validated. Each image should have the same shape.
-        target_spectrum (Optional[np.ndarray]). A target spectrum to compare against.
-        normalize_rmse (Optional[bool]): Whether to normalize the RMSE
+    Parameters
+    ----------
+    images : ImageListIO
+        Collection of images.
+    target_spectrum : Optional[np.ndarray], optional
+        Target spectrum to compare against. If None, the average spectrum is
+        used.
+    normalize_rmse : bool, optional
+        If True, return normalized RMSE.
 
-    Returns:
-        Tuple[np.ndarray, np.ndarray]: A tuple containing two numpy arrays. The
-        first array contains the correlation coefficients between the magnitude
-        spectra of individual images and the target spectrum. The second array
-        contains the root mean square errors (RMSE) for the same comparison.
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Correlation coefficients and RMSE values.
     """
     magnitudes, phases = get_images_spectra(images=images)
 
@@ -3422,28 +3670,31 @@ def normalized_rmse(
 ) -> float:
     """Compute RMS error guaranteed to lie in [0, 1].
 
-    Args:
-        y_true: Reference array.
-        y_pred: Predicted or reconstructed array (same shape as y_true).
-        mode:
-            - "assume [0, 1]": assumes both arrays are already scaled to [0, 1];
-              RMSE is directly bounded to [0, 1].
-            - "actual range": divides by the actual dynamic range of y_true
-              (max(y_true) - min(y_true)).
-            - "expected range": divides by a user-specified `expected_range`
-              (e.g. 255 for 8-bit data or 1.0 for normalized floats).
-            - "histogram": for probability histograms. Divides by sqrt(2 / N). 
-              Normalization corresponds to the RMSE maximum between two 
-              histograms with N bins (i.e., two Dirac deltas on opposite bins).
-        expected_range: Known dynamic range when using "expected range".
-        eps: Small constant to avoid divide-by-zero.
-        verbose: Out-of-range value warnings if True
+    Parameters
+    ----------
+    y_true : np.ndarray
+        Reference array.
+    y_pred : np.ndarray
+        Predicted or reconstructed array with the same shape as ``y_true``.
+    mode : str, optional
+        Normalization mode: ``"assume [0, 1]"``, ``"actual range"``,
+        ``"expected range"``, or ``"histogram"``.
+    expected_range : float, optional
+        Known dynamic range when using ``mode="expected range"``.
+    eps : float, optional
+        Small constant to avoid divide-by-zero.
+    verbose : bool, optional
+        If True, warn when the normalized RMSE is outside ``[0, 1]``.
 
-    Returns:
-        float: Normalized RMSE in [0, 1].
+    Returns
+    -------
+    float
+        Normalized RMSE.
 
-    Raises:
-        ValueError: If shapes differ or `expected_range` is missing when required.
+    Raises
+    ------
+    ValueError
+        If shapes differ or ``expected_range`` is missing when required.
     """
     if y_true.shape != y_pred.shape:
         raise ValueError("Shapes must match.")
@@ -3482,23 +3733,31 @@ def get_images_spectra(
     magnitudes: Optional[ImageListIO] = None,
     phases: Optional[ImageListIO] = None,
     rescale: bool = True,
-    fft_padding_mode: Optional[Literal["reflect", "symmetric", "constant"]] = None,
-    fft_padding_value: Optional[float] = None,
+    fft_padding_mode: Literal[0, 1, 2, 3] = 0,
+    fft_padding_value: Union[int, Literal[300]] = 300,
 ) -> Tuple[ImageListIO, ImageListIO]:
-    """
-    Get spectrum over list of images
-    Args:
-        images (ImageListIO): List of images.
-        magnitudes (Optional[ImageListIO]): If provided, inserts new magnitudes into this list.
-        phases (Optional[ImageListIO]): If provided, inserts new phases into this list.
-        rescale (bool): Determines if input is stretched to [0, 1] range.
-        fft_padding_mode (Optional[Literal[1, 2, 3]]): Optional spatial padding mode before FFT.
-            1=reflect, 2=symmetric, 3=constant.
-        fft_padding_value (Optional[float]): Constant padding value in [0, 255].
+    """Compute Fourier spectra for a collection of images.
 
-    Returns:
-        magnitudes, phases (Tuple[ImageListIO, ImageListIO])
+    Parameters
+    ----------
+    images : ImageListIO
+        Collection of images.
+    magnitudes : Optional[ImageListIO], optional
+        Existing collection to receive computed magnitudes.
+    phases : Optional[ImageListIO], optional
+        Existing collection to receive computed phases.
+    rescale : bool, optional
+        If True, rescale each image to ``[0, 1]`` before FFT.
+    fft_padding_mode : int, optional
+        Spatial padding mode before FFT: 0 disabled, 1 reflect, 2 symmetric,
+        3 constant.
+    fft_padding_value : int, optional
+        Constant padding value in ``[0, 255]``, or ``300`` for mean intensity.
 
+    Returns
+    -------
+    tuple[ImageListIO, ImageListIO]
+        Magnitudes and phases for all images.
     """
     n_images = len(images)
     x_size, y_size = images[0].shape[:2]
@@ -3518,16 +3777,21 @@ def get_images_spectra(
 
 
 def rescale_image(image: np.ndarray, target_min: Optional[float] = 0, target_max: Optional[float] = 1) -> np.ndarray:
-    """
-    Rescale an image to the range: [target_min, target_max]
+    """Rescale an image to a target numeric range.
 
-    Args:
-        image (np.ndarray): Input image
-        target_min (float): Target minimum value in the output image.
-        target_max (float): Target maximum value in the output image.
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image.
+    target_min : float, optional
+        Target minimum value in the output image.
+    target_max : float, optional
+        Target maximum value in the output image.
 
-    Returns:
-        (np.ndarray): Rescaled image
+    Returns
+    -------
+    np.ndarray
+        Rescaled image.
     """
 
     # Convert to float
@@ -3548,12 +3812,16 @@ def load_images_from_folder(folder_path: str) -> List[np.ndarray]:
     (e.g., PNG, JPEG, TIFF, BMP, WEBP, GIF) and loads them into memory as NumPy arrays.
     Non-image files are ignored. Any unreadable images are skipped with an error message.
 
-    Args:
-        folder_path: Path to the folder containing images.
+    Parameters
+    ----------
+    folder_path : str
+        Path to the folder containing images.
 
-    Returns:
-        A list of NumPy arrays representing the loaded images. Returns an empty list
-        if the folder does not exist or no valid images are found.
+    Returns
+    -------
+    list[np.ndarray]
+        Loaded images. Returns an empty list if the folder does not exist or
+        no valid images are found.
     """
     folder = Path(folder_path).expanduser().resolve()
     if not folder.is_dir():
@@ -3580,18 +3848,20 @@ def load_images_from_folder(folder_path: str) -> List[np.ndarray]:
 
 
 def load_np_array(path_str: Optional[str]) -> Optional[np.ndarray]:
-    """
-    Loads a NumPy array from a specified file path. If the file path is not provided,
-    does not exist, or is not a supported file type (only `.npy` files are supported),
-    an appropriate message is logged and `None` is returned.
+    """Load a NumPy array from a ``.npy`` file path.
 
-    Args:
-        path_str (Optional[str]): The file path to the `.npy` file. If not provided
-            or invalid, the function returns `None`.
+    If the file path is not provided, does not exist, or is not a supported
+    file type, a message is logged and ``None`` is returned.
 
-    Returns:
-        Optional[np.ndarray]: Loaded NumPy array if the file exists and is
-            successfully loaded; `None` otherwise.
+    Parameters
+    ----------
+    path_str : Optional[str]
+        Path to a ``.npy`` file.
+
+    Returns
+    -------
+    Optional[np.ndarray]
+        Loaded array, or ``None``.
     """
     if not path_str:
         return None
@@ -3606,27 +3876,27 @@ def load_np_array(path_str: Optional[str]) -> Optional[np.ndarray]:
 
 
 def rescale_images255(images: ImageListIO, rescaling_option: Literal[0, 1, 2, 3] = 2, legacy_mode: bool = False) -> ImageListIO:
-    """
-    Rescales the values of images so that they fall between 0 and 255. There are 3 options:
-        1) Each image has its own min and max (no rescaling)
-        2) Each image is rescaled so that the absolute max and min values obtained across all images are between 0 and 255
-        3) Each image is rescaled so that the average max and min values obtained across all images are between 0 and 255
+    """Rescale image values to the range [0, 255].
 
-        Args:
-            images : list of images
-            rescaling_option: (optional) : Determines the type of rescaling.
-                0 : No rescaling
-                1 : Rescaling each image so that it stretches to [0, 1]
-                2 : Rescaling absolute max/min (Default)
-                3 : Rescaling average max/min
-            legacy_mode (bool): If true, only the absolute max/min values are rescaled.
-            legacy_mode (bool): If true, only the absolute max/min values are rescaled.
+    Parameters
+    ----------
+    images : ImageListIO
+        Collection of images to rescale.
+    rescaling_option : Literal[0, 1, 2, 3], optional
+        Rescaling strategy. ``0`` disables rescaling, ``1`` rescales each image
+        independently, ``2`` uses dataset absolute min/max, and ``3`` uses
+        dataset average min/max.
+    legacy_mode : bool, optional
+        If True, convert results with MATLAB-compatible uint8 behavior.
 
-        Returns :
-            A list of rescaled images
+    Returns
+    -------
+    ImageListIO
+        Rescaled images.
 
-        Notes:
-            Warning: Always returns a [0, 255] image, no matter the range of the input images.
+    Notes
+    -----
+    When rescaling is enabled, output values are mapped to ``[0, 255]``.
     """
 
     if rescaling_option not in [0, 1, 2, 3]:
@@ -3657,16 +3927,19 @@ def rescale_images255(images: ImageListIO, rescaling_option: Literal[0, 1, 2, 3]
 
 
 def uint8_plus(image: np.ndarray, verbose: bool = False) -> np.ndarray:
-    """
-    Apply clipping, banker's rounding and uint8 transformations.
+    """Clip, round, and convert an image to ``uint8``.
 
-    Args:
-        image (np.ndarray): Image to be converted. Assume that the input image is already in the proper range [0, 255].
-        verbose (bool): Warn if clipping needed.
+    Parameters
+    ----------
+    image : np.ndarray
+        Image to convert. Values are expected to be in ``[0, 255]``.
+    verbose : bool, optional
+        If True, warn when clipping is needed.
 
-    Returns:
-        image (np.ndarray)
-
+    Returns
+    -------
+    np.ndarray
+        Converted ``uint8`` image.
     """
     if verbose:
         mn, mx = image.min(), image.max()
@@ -3677,17 +3950,23 @@ def uint8_plus(image: np.ndarray, verbose: bool = False) -> np.ndarray:
 
 
 def apply_median_blur(image: np.ndarray, kernel_size: int = 3) -> np.ndarray:
-    """
-    Apply a median blur to image.
+    """Apply a median blur to an image.
 
-    Parameters:
-        image (np.ndarray): Input image (2D grayscale or 3D multi-channel).
-        kernel_size (int): Size of the square kernel (must be an odd integer).
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image, either 2D grayscale or 3D multi-channel.
+    kernel_size : int, optional
+        Size of the square kernel. Must be odd.
 
-    Returns:
-        np.ndarray: Blurred image
+    Returns
+    -------
+    np.ndarray
+        Blurred image.
 
-    Tested by Nicolas D.R.: Should provide exact same results on np.uint8 as cv2.medianBlur.
+    Notes
+    -----
+    Tested on ``np.uint8`` images against ``cv2.medianBlur``.
     """
     if kernel_size % 2 == 0:
         raise ValueError("median_blur_force must be an odd integer.")
@@ -3718,15 +3997,17 @@ def apply_median_blur(image: np.ndarray, kernel_size: int = 3) -> np.ndarray:
 
 
 def hist2list(hist: np.ndarray) -> np.ndarray:
-    """
-    Converts a luminance histogram of an image into a sorted list of luminance values.
+    """Convert a histogram into a sorted list of luminance values.
 
-    Args:
-        hist (np.ndarray): Luminance histogram (counts of each intensity) for each channel.
+    Parameters
+    ----------
+    hist : np.ndarray
+        Histogram counts of each intensity for each channel.
 
-    Returns:
-        np.ndarray: Sorted list of luminance values for each channel. It has the same number
-            of channels as hist.There is one list per channel and its size is equal to  np.sum(hist[:, channel]).
+    Returns
+    -------
+    np.ndarray
+        Sorted luminance values for each channel.
     """
     if hist.shape[1]>1 and not np.unique(np.sum(hist, axis=1)).shape[0] != 1:
         raise ValueError(f"All 3 channels of hist must have the same sum")
@@ -3737,29 +4018,42 @@ def hist2list(hist: np.ndarray) -> np.ndarray:
 
 
 def im3D(image: np.ndarray):
-    """ Forces a third dimension on grayscale image.
+    """Ensure that an image has an explicit channel dimension.
 
-    Args:
-        image (np.ndarray): 2D or 3D image.
+    Parameters
+    ----------
+    image : np.ndarray
+        2D or 3D image.
 
-    Returns:
-        image (np.ndarray) with 3D: grayscale (H, W) -> (H, W, 1); RGB (H, W, 3) stay the same.
-
+    Returns
+    -------
+    np.ndarray
+        3D image. Grayscale ``(H, W)`` becomes ``(H, W, 1)`` and RGB images
+        remain unchanged.
     """
     image = np.asarray(image)
     return np.stack((image,), axis=-1) if image.ndim != 3 else image
 
 
 def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins: int = 256, normalized: bool = False) -> np.ndarray:
-    """Computes the histogram of the image. If RGB image, it provides one hist per channel.
+    """Compute image histograms, one per channel.
 
-        Args:
-            image (np.ndarray): Image (ndarray).
-            mask (np.ndarray): If a boolean mask is provided, computes the histogram within the mask (ndarray).
-            n_bins: Number of bins for the histogram (default is 256).
-            normalized (bool): If yes, the output hist will sum to 1 (default = False)
-        Returns:
-            counts (np.ndarray): Histogram counts for each channel.
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image.
+    mask : Optional[np.ndarray], optional
+        Boolean mask. If provided, the histogram is computed only inside the
+        mask.
+    n_bins : int, optional
+        Number of histogram bins.
+    normalized : bool, optional
+        If True, normalize each histogram so it sums to 1.
+
+    Returns
+    -------
+    np.ndarray
+        Histogram counts or probabilities for each channel.
     """
 
     # Force a third dimension to image in case it only has two
@@ -3787,12 +4081,17 @@ def rounded_target_hist(target_hist: np.ndarray, n_pixels: int) -> np.ndarray:
     probabilities. This gives the closest target that an image with `n_pixels`
     pixels can actually realize.
 
-    Args:
-        target_hist: One-channel target probabilities or weights, shape (n_bins,).
-        n_pixels: Number of pixels available.
+    Parameters
+    ----------
+    target_hist : np.ndarray
+        One-channel target probabilities or weights, shape ``(n_bins,)``.
+    n_pixels : int
+        Number of pixels available.
 
-    Returns:
-        np.ndarray: Rounded one-channel target histogram, shape (n_bins,).
+    Returns
+    -------
+    np.ndarray
+        Rounded one-channel target histogram, shape ``(n_bins,)``.
     """
     if n_pixels <= 0:
         raise ValueError("n_pixels must be strictly positive.")
@@ -3821,19 +4120,30 @@ def compute_tvd_hist(
 ) -> float:
     """Compute Total Variation Distance (TVD) between two histograms.
 
-    TVD is defined as 0.5 * sum(|p_i - q_i|) for two probability distributions p and q.
+    TVD is defined as ``0.5 * sum(abs(p_i - q_i))`` for two probability
+    distributions ``p`` and ``q``.
 
-    Args:
-        image_hist (np.ndarray): Histogram of the image.
-        target_hist (np.ndarray): Target histogram.
-        n_bins (int): Number of bins in the histograms (default is 256).
-        round_target (bool): Whether to round the target histogram to the nearest realizable histogram given n_pixels.
-        n_pixels (Optional[int]): Number of pixels in the image.
+    Parameters
+    ----------
+    image_hist : np.ndarray
+        Histogram of the image.
+    target_hist : np.ndarray
+        Target histogram.
+    n_bins : int, optional
+        Number of bins in the histograms.
+    round_target : bool, optional
+        Whether to round the target histogram to the nearest realizable
+        histogram given ``n_pixels``.
+    n_pixels : Optional[int], optional
+        Number of pixels in the image.
 
-    Returns:
-        float: Total Variation Distance between the two histograms.
+    Returns
+    -------
+    float
+        Total Variation Distance between the two histograms.
     """
     def validate_hist(hist: np.ndarray, name: str) -> np.ndarray:
+        """Validate histogram shape, bounds, and normalization constraints."""
         hist = np.asarray(hist, dtype=np.float64)
 
         # Accept (n_bins,) or (n_bins,1)
@@ -3863,20 +4173,28 @@ def compute_tvd_hist(
 
 
 def avg_hist(images: ImageListIO, binary_masks: List[np.ndarray], normalized: bool = True, n_bins: int = 256, output_list_hist: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, List[np.ndarray]]]:
-    """Computes the average histogram of a set of images.
+    """Compute the average histogram of a set of images.
 
-    Args:
-        images (ImageListIO): A list of images
-        binary_masks (List[np.ndarray]): A list of binary mask.
-        normalized (bool): Indicate of the result should be normalize to sum to 1.
-        n_bins (int): Number of levels in the image (uint8 = 256)
-        output_list_hist (bool): If True, outputs a list of histogram corresponding to each image in images (along with the average)
+    Parameters
+    ----------
+    images : ImageListIO
+        Collection of images.
+    binary_masks : List[np.ndarray]
+        Binary masks, one per image.
+    normalized : bool, optional
+        If True, normalize histograms so they sum to 1.
+    n_bins : int, optional
+        Number of histogram bins.
+    output_list_hist : bool, optional
+        If True, also return the histogram for each image.
 
-    Returns:
-        average (Union[np.ndarray, Tuple[np.ndarray, List[np.ndarray]]]): Average histogram counts for each channel.
-
+    Returns
+    -------
+    Union[np.ndarray, tuple[np.ndarray, list[np.ndarray]]]
+        Average histogram, optionally with per-image histograms.
     """
     def normalize_hist(a_hist):
+        """Normalize histogram counts into channel-wise probabilities."""
         a_hist = np.float64(a_hist)
         return a_hist / (a_hist.sum(axis=0, keepdims=True) + 1e-12)
 

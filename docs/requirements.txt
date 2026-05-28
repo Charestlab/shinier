@@ -1,0 +1,9 @@
+sphinx>=8.0
+sphinx-rtd-theme>=3.0
+myst-parser>=4.0
+numpy>=1.22,<2.1
+Pillow>=9.0.0
+tqdm>=4.60
+cython>=3.0
+matplotlib>=3.9.0
+pydantic>=2.12

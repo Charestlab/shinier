@@ -10,7 +10,7 @@ import numpy as np
 # -----------------------------------------------
 # ImageListType = Union[str, Path, List[Union[str, Path]], List[np.ndarray]]
 def image_list_validator(value):
-    """Validate image list input"""
+    """Validate accepted image-list input types for Pydantic parsing."""
     if isinstance(value, (str, Path)):
         return value
     if isinstance(value, list):
@@ -46,10 +46,12 @@ class InformativeBaseModel(BaseModel):
     """
 
     def model_post_init(self, __context: Any) -> None:
+        """Execute subclass post-initialization hook with wrapped error context."""
         try:
             self.post_init(__context)
         except Exception as e:
             raise RuntimeError(f"{self.__class__.__name__} post-init failed: {e}") from e
 
     def post_init(self, __context: Any) -> None:
+        """Subclass extension point executed after validation."""
         pass  # subclasses override

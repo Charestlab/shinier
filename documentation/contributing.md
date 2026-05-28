@@ -85,7 +85,13 @@ pytest -m unit_tests
 - Keep functions small and pure when possible; avoid implicit mutation unless documented.
 
 ### Docstrings
-- Use **Google-style** docstrings for all public functions/classes/methods.
+- Use **NumPy-style** docstrings for all public functions/classes/methods.
+- Keep explicit type information in the docstring descriptions. SHINIER also uses type hints in signatures,
+  but repeated docstring types make the generated Read the Docs API pages clearer and more exhaustive.
+- Preserve scientific details, equations, valid ranges, image shapes, dtype expectations, warnings, and citations
+  when reformatting existing docstrings.
+- For classes, put user-provided constructor inputs in a `Parameters` section and runtime/public state in
+    an `Attributes` section.
 
 ```python
 import numpy as np
@@ -93,16 +99,24 @@ import numpy as np
 def lum_match(img: np.ndarray, target: float) -> np.ndarray:
     """Match the mean luminance of an image to a target.
 
-    Args:
-        img: Image array in float space, range [0, 1], shape (H, W) or (H, W, 3).
-        target: Target mean luminance in [0, 1].
+    Parameters
+    ----------
+    img : np.ndarray
+        Image array in float space, range [0, 1], shape (H, W) or (H, W, 3).
+    target : float
+        Target mean luminance in [0, 1].
 
-    Returns:
+    Returns
+    -------
+    np.ndarray
         A new image array with adjusted mean luminance (same shape as input).
 
-    Raises:
-        TypeError: If ``img`` is not a NumPy array.
-        ValueError: If ``target`` is outside [0, 1] or ``img`` range is invalid.
+    Raises
+    ------
+    TypeError
+        If ``img`` is not a NumPy array.
+    ValueError
+        If ``target`` is outside [0, 1] or ``img`` range is invalid.
     """
     if not isinstance(img, np.ndarray):
         raise TypeError("img must be a numpy.ndarray.")
@@ -119,6 +133,18 @@ def lum_match(img: np.ndarray, target: float) -> np.ndarray:
     scale = target / current
     out = np.clip(img.astype(np.float64) * scale, 0.0, 1.0)
     return out.astype(img.dtype, copy=False)
+```
+
+### Read the Docs
+- Documentation is built with Sphinx from the `docs/` folder.
+- Existing Markdown files are included in the Sphinx build rather than duplicated:
+  `README.md`, `documentation/documentation.md`, `documentation/demos.md`, `documentation/contributing.md`, and `documentation/license.md`.
+- API pages are generated from docstrings using `sphinx.ext.autodoc` and `sphinx.ext.napoleon`.
+- To build locally:
+
+```bash
+pip install ".[docs]"
+sphinx-build -b html docs docs/_build/html
 ```
 
 
@@ -202,4 +228,3 @@ pytest -m unit_tests
 pytest -q -m validation_tests
 ```
 #### 🏛️ Test README
-

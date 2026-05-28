@@ -1,61 +1,4 @@
-"""
-shinier.color.GamutControl
-==========================
-
-GamutControl implements robust gamut management for pipelines that manipulate luminance and chromaticity
-separately (e.g., processing Y while preserving xy in CIE xyY). After such operations, some colors may become
-out of gamut for the target RGB encoding: when converting back to linear RGB, one or more channels can fall
-below 0 or exceed 1. Naïve clipping fixes the bounds but introduces non-linear, content-dependent distortions
-(hue shifts, contrast changes) that can undermine the low-level statistics the pipeline is designed to control.
-
-Strategies
-----------
-GamutControl provides five strategies (see `GAMUT_STRATEGY_TYPE`):
-
-- clip:
-  Rely on the converter's clipping/safe-mode behavior only (no global constraint estimation).
-
-- constrain_image_luminance:
-  For each image independently, compute a luminance scaling factor so that reconstructed linear RGB stays
-  (mostly) within bounds, then scale Y accordingly (chromaticity is preserved).
-
-- constrain_dataset_luminance:
-  Compute a single global luminance scaling factor from the whole dataset and apply it to every image.
-  This preserves relative luminance structure across images.
-
-- constrain_image_chrominance:
-  For each image independently, compute a per-image chroma scaling factor by desaturating xy toward the
-  adapting white-point, keeping Y unchanged.
-
-- constrain_dataset_chrominance:
-  Compute one global chroma scaling factor for the dataset and apply it to all images by desaturating xy
-  toward the adapting white-point.
-
-Safeguards
-----------
-All non-trivial strategies include additional safeguards to make the estimated scaling factors robust:
-
-- [S1] Low-luminance preventive desaturation (optional):
-  In xyY, chromaticity becomes ill-conditioned near Y≈0: because x,y are normalized by (X+Y+Z), small numerical
-  noise can produce unstable colours. Low-luminance pixels are therefore gently desaturated toward the white-point 
-  chromaticity (Y unchanged).
-    Implemented in: `apply_low_Y_desaturation`.
-
-- [S2] Chroma validity mask (`chroma_ok`):
-  Excludes ill-conditioned or physically implausible chromaticities (e.g., y near 0 or x+y slightly above 1)
-  from driving the constraint estimation. These pixels may still be repaired later via clipping/safeguards.
-
-- [S3] Reliability weighting by luminance:
-  Pixels near Y≈0 and Y≈1 are down-weighted when estimating global factors because tiny xy noise at the
-  luminance extremes can produce unrealistically large RGB excursions. Mid-tones therefore dominate the estimate.
-
-- [S4] Allowed outlier clipping (`prc_clipping`):
-  Optionally use a lower-quantile instead of the strict minimum when reducing per-pixel headroom ratios.
-  This prevents a tiny fraction of extreme pixels from dictating aggressive global compression.
-
-TODO : Quantify the impact of these strategies and safeguards on the final image statistics and on the order accuracy metrics.
-    - i.e., the trade-off between gamut safety and distortion of the original statistics.
-"""
+"""Gamut management for SHINIER color-processing pipelines."""
 
 from __future__ import annotations
 
@@ -74,22 +17,87 @@ if TYPE_CHECKING:
 class GamutControl(InformativeBaseModel):
     """Manage gamut constraints and repairs for image datasets.
 
-    GamutControl is used when SHINIER modifies luminance while preserving
-    chromatic information. It estimates whether reconstructed RGB values would
-    fall outside the valid display gamut and either clips, compresses luminance,
-    or desaturates chromaticity depending on ``strategy``.
+    GamutControl implements robust gamut management for pipelines that
+    manipulate luminance and chromaticity separately, for example processing
+    ``Y`` while preserving ``xy`` in CIE xyY. After such operations, some colors
+    may become out of gamut for the target RGB encoding: when converting back
+    to linear RGB, one or more channels can fall below 0 or exceed 1. Naive
+    clipping fixes the bounds but introduces non-linear, content-dependent
+    distortions such as hue shifts and contrast changes.
 
-    Attributes:
-        color_space (Literal["xyY"]): Color space used for gamut repair.
-        strategy (GAMUT_STRATEGY_TYPE): Gamut strategy to apply.
-        rec_standard (str): RGB standard used by the internal color converters.
-        warning_threshold (float): Scaling threshold below which warnings are logged.
-        prc_clipping (float): Percentage of extreme pixels allowed to clip when
-            robust quantile reduction is used.
-        low_Y_desaturate (bool): Whether to desaturate low-luminance chroma before processing.
-        low_Y_threshold (float): Low-luminance threshold in [0, 1].
-        low_Y_fade_width (float): Width of the optional low-luminance fade ramp.
-        log_low_Y_chroma_loss (bool): Whether to log chroma-loss metrics for low-luminance desaturation.
+    Parameters
+    ----------
+    strategy : GAMUT_STRATEGY_TYPE
+        Strategy to apply when reconstructed RGB values fall outside gamut.
+
+    rec_standard : str
+        RGB standard used by the internal color converters.
+
+    color_space : Literal["xyY"]
+        Color space used for gamut repair.
+
+    Runtime Attributes
+    ------------------
+    - ``warning_threshold`` (float): Scaling threshold below which warnings are
+      logged.
+    - ``prc_clipping`` (float): Percentage of extreme pixels allowed to clip when
+      robust quantile reduction is used.
+    - ``low_Y_desaturate`` (bool): Whether to desaturate low-luminance chroma
+      before processing.
+    - ``low_Y_threshold`` (float): Low-luminance threshold in [0, 1].
+    - ``low_Y_fade_width`` (float): Width of the optional low-luminance fade ramp.
+    - ``log_low_Y_chroma_loss`` (bool): Whether to log chroma-loss metrics for
+      low-luminance desaturation.
+
+    Strategies
+    ----------
+    ``clip``
+        Rely on the converter's clipping/safe-mode behavior only, without
+        global constraint estimation.
+    ``constrain_image_luminance``
+        For each image independently, compute a luminance scaling factor so
+        reconstructed linear RGB stays mostly within bounds, then scale ``Y``.
+        Chromaticity is preserved.
+    ``constrain_dataset_luminance``
+        Compute a single global luminance scaling factor from the whole dataset
+        and apply it to every image, preserving relative luminance structure
+        across images.
+    ``constrain_image_chrominance``
+        For each image independently, compute a per-image chroma scaling factor
+        by desaturating ``xy`` toward the adapting white-point while keeping
+        ``Y`` unchanged.
+    ``constrain_dataset_chrominance``
+        Compute one global chroma scaling factor for the dataset and apply it
+        to all images by desaturating ``xy`` toward the adapting white-point.
+
+    Safeguards
+    ----------
+    ``[S1]`` Low-luminance preventive desaturation
+        In xyY, chromaticity becomes ill-conditioned near ``Y = 0`` because
+        ``x`` and ``y`` are normalized by ``X + Y + Z``. Small numerical noise
+        can produce unstable colors, so low-luminance pixels can be gently
+        desaturated toward the white-point chromaticity while keeping ``Y``
+        unchanged. Implemented in ``apply_low_Y_desaturation``.
+    ``[S2]`` Chroma validity mask
+        Excludes ill-conditioned or physically implausible chromaticities, such
+        as ``y`` near 0 or ``x + y`` slightly above 1, from driving constraint
+        estimation. These pixels may still be repaired later via clipping or
+        safeguards.
+    ``[S3]`` Reliability weighting by luminance
+        Pixels near ``Y = 0`` and ``Y = 1`` are down-weighted when estimating
+        global factors because tiny ``xy`` noise at luminance extremes can
+        produce unrealistically large RGB excursions. Mid-tones therefore
+        dominate the estimate.
+    ``[S4]`` Allowed outlier clipping
+        Optionally use a lower quantile instead of the strict minimum when
+        reducing per-pixel headroom ratios. This prevents a tiny fraction of
+        extreme pixels from dictating aggressive global compression.
+
+    Notes
+    -----
+    The remaining open question is to quantify the trade-off between gamut
+    safety and distortion of the original image statistics, including order
+    accuracy metrics.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
     # Safeguard IDs used in comments below:
@@ -112,6 +120,7 @@ class GamutControl(InformativeBaseModel):
     _converter_raw: ColorConverter = PrivateAttr(default_factory=ColorConverter)
 
     def model_post_init(self, __context):
+        """Initialize converter instances using the selected RGB standard."""
         self._converter = ColorConverter(rec_standard=self.rec_standard, safe_mode=True)
         self._converter_raw = ColorConverter(rec_standard=self.rec_standard, safe_mode=False)
 
@@ -192,12 +201,22 @@ class GamutControl(InformativeBaseModel):
     ) -> None:
         """Log a standardized per-image overflow message.
 
-        Args:
-            kind: Either 'luminance' or 'chrominance'.
-            idx: Image index. If None, logs without an index label.
-            local_min: Local minimum ratio (<=1 implies overflow).
-            quantile_threshold: Quantile threshold used for reduction, if any.
-            verbose: Whether to emit the log.
+        Parameters
+        ----------
+        kind : str
+            Either ``"luminance"`` or ``"chrominance"``.
+
+        idx : Optional[int]
+            Image index. If None, logs without an index label.
+
+        local_min : float
+            Local minimum ratio; values <= 1 imply overflow.
+
+        quantile_threshold : Optional[float]
+            Quantile threshold used for reduction, if any.
+
+        verbose : bool
+            Whether to emit the log.
         """
         if (not verbose) or (local_min >= 1.0):
             return
@@ -265,11 +284,25 @@ class GamutControl(InformativeBaseModel):
         Intended as a *preventive* step before luminance manipulation.
         Only modifies `other` (xy). Returns Y unchanged.
 
-        Args:
-            Y: Luminance image, either in [0,1] or [0,255]. Shape (H,W) or (H,W,1).
-            other: Chromaticity (xy) of shape (H,W,2).
-            idx: Optional image index for logging.
-            verbose: Whether to emit informative logs.
+        Parameters
+        ----------
+        Y : np.ndarray
+            Luminance image in [0, 1] or [0, 255], with shape (H, W) or
+            (H, W, 1).
+
+        other : np.ndarray
+            Chromaticity array with xy channels, shape (H, W, 2).
+
+        idx : Optional[int]
+            Optional image index for logging.
+
+        verbose : bool
+            Whether to emit informative logs.
+
+        Returns
+        -------
+        Tuple[np.ndarray, np.ndarray]
+            Unchanged luminance image and possibly desaturated chromaticity.
         """
         if not self.low_Y_desaturate:
             return Y, other
@@ -332,6 +365,22 @@ class GamutControl(InformativeBaseModel):
         """Apply a *dataset-level* gamut strategy.
 
         Dataset-level strategies compute a single global factor (scale or desaturation) and apply it to all images.
+
+        Parameters
+        ----------
+        buffer : ImageListIO
+            Main luminance buffer.
+
+        buffer_other : ImageListIO
+            Auxiliary chromaticity buffer.
+
+        verbose : bool
+            Whether to emit informative logs.
+
+        Returns
+        -------
+        Tuple[ImageListIO, ImageListIO]
+            Updated luminance and chromaticity buffers.
         """
         if self.strategy == 'clip' or len(buffer) == 0:
             return buffer, buffer_other
@@ -344,14 +393,25 @@ class GamutControl(InformativeBaseModel):
     def apply_image(self, Y: np.ndarray, other: np.ndarray, idx: int = None, verbose: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """Apply an *image-level* gamut strategy to a single image.
 
-        Args:
-            Y: Luminance image in [0,255] (float or uint) of shape (H,W).
-            other: Chromaticity channels (e.g., xy) of shape (H,W,2).
-            idx: Index of the image to be processed.
-            verbose: Whether to emit informative logs.
+        Parameters
+        ----------
+        Y : np.ndarray
+            Luminance image in [0, 255], with shape (H, W).
 
-        Returns:
-            (Y_out, other_out) with same shapes as inputs.
+        other : np.ndarray
+            Chromaticity channels, usually xy, with shape (H, W, 2).
+
+        idx : Optional[int]
+            Image index used for logging.
+
+        verbose : bool
+            Whether to emit informative logs.
+
+        Returns
+        -------
+        Tuple[np.ndarray, np.ndarray]
+            Updated luminance and chromaticity arrays with the same shapes as
+            the inputs.
         """
         if self.strategy == 'clip':
             return Y, other
@@ -436,8 +496,8 @@ class GamutControl(InformativeBaseModel):
         Computes one global chroma scaling factor (toward the achromatic white-point) that is safe for all images,
         while down-weighting unreliable chroma near luminance singularities (Y≈0 or Y≈1) and invalid xy pixels.
 
-        Notes:
-            - Works in xyY internally, but detects out-of-gamut in *raw* linear RGB (safe_mode=False).
+        Notes
+        -----            - Works in xyY internally, but detects out-of-gamut in *raw* linear RGB (safe_mode=False).
             - Only modifies `buffer_other` (xy chromaticity). The luminance buffer is not modified here.
         """
         min_sat_ratio = 1.0
@@ -537,8 +597,8 @@ class GamutControl(InformativeBaseModel):
     def _apply_constrain_image_luminance(self, Y: np.ndarray, other: np.ndarray, idx: int = None, verbose: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """Per-image scaling along Y with the same protections as the dataset method.
 
-        Notes:
-            This method only modifies Y (luminance). Chromaticity `other` is returned unchanged.
+        Notes
+        -----            This method only modifies Y (luminance). Chromaticity `other` is returned unchanged.
         """
         eps_y = 1e-3
         eps_sum_xy = 1e-6
@@ -655,11 +715,11 @@ class GamutControl(InformativeBaseModel):
         Builds an achromatic color defined by the current white-point
         chromaticity and the provided luminance values.
 
-        Args:
-            Y01: Luminance in [0,1], shape (H,W).
+        Parameters
+        ----------            Y01: Luminance in [0,1], shape (H,W).
 
-        Returns:
-            Neutral linear RGB array of shape (H,W,3).
+        Returns
+        -------            Neutral linear RGB array of shape (H,W,3).
         """
         W = self._converter.white_point
         W_sum = float(np.sum(W))
@@ -677,15 +737,20 @@ class GamutControl(InformativeBaseModel):
         return rgb_gray
     
     def get_max_luminance_map(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """
-        Calculates the maximum luminance Y_max for each pixel that keeps the color defined by chromaticity (x, y).
+        """Calculate the maximum in-gamut luminance for each chromaticity.
 
-        Arguments:
-            x, y (ndarray): Chromaticity x and y coordinates.
+        Parameters
+        ----------
+        x : np.ndarray
+            CIE x chromaticity coordinates.
 
-        Returns:
-            Y_max (ndarray): Maximum luminance before RGB clipping for the
-            chromaticity (x, y) at each pixel. Same shape as the input arrays.
+        y : np.ndarray
+            CIE y chromaticity coordinates.
+
+        Returns
+        -------
+        np.ndarray
+            Maximum luminance before RGB clipping for each chromaticity.
         """
         # Avoid division instability when converting xyY to XYZ
         y_safe = np.where(y <= 1e-9, 1e-9, y)
@@ -710,5 +775,6 @@ class GamutControl(InformativeBaseModel):
         return np.clip(Y_max, 0.0, 1.0)
 
     def _log_warning(self, strategy: str, factor: float, action: str, verbose: bool = False):
+        """Emit a warning when gamut correction exceeds the configured threshold."""
         if factor < self.warning_threshold:
             console_log(f"[GamutControl] Strategy '{strategy}' is {action} dataset by {100*(1-factor):.1f}%.", indent_level=1, color=Bcolors.FAIL, verbose=verbose)

@@ -534,6 +534,19 @@ class ImageProcessor:
 These helpers are implemented in `src/shinier/utils.py`.
 
 ```python
+def hist_plot(
+    hist: np.ndarray,
+    bins: int = 256,
+    figsize: Optional[tuple] = None,
+    dpi=100,
+    title: Optional[str] = None,
+    target_hist: Optional[np.ndarray] = None,
+    descriptives: bool = False,
+    ax: Optional[plt.Axes] = None,
+    show_normalized_rmse: bool = False,
+) -> Tuple[plt.Figure, Tuple[Any, Any]]:
+    """Display a histogram with optional target overlay and descriptives (μ, ±σ)."""
+
 def imhist_plot(
     img: np.ndarray,
     bins: int = 256,

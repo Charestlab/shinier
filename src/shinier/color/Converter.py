@@ -64,15 +64,21 @@ RGB2GRAY_WEIGHTS['key2int'] = dict(zip(RGB2GRAY_WEIGHTS['int2key'].values(), RGB
 class ColorConverter(InformativeBaseModel):
     """Encapsulates color-space conversions for Rec.601/709/2020 systems.
 
-    Attributes:
-        rec_standard (Literal["rec601", "rec709", "rec2020"]): Rec. standard
-            used for transfer functions and RGB/XYZ matrices.
-        gamma (float): Transfer-function exponent (approximately 2.2-2.4).
-        safe_mode (bool): If True, clip intermediate RGB values to valid ranges
-            during conversions where clipping is appropriate.
-        white_point (np.ndarray): Reference white (default: D65).
-        M_RGB2XYZ (np.ndarray): Forward RGB to XYZ conversion matrix.
-        M_XYZ2RGB (np.ndarray): Inverse XYZ to RGB conversion matrix.
+    Parameters
+    ----------
+    rec_standard : Literal["rec601", "rec709", "rec2020"]
+        Rec. standard used for transfer functions and RGB/XYZ matrices.
+
+    safe_mode : bool
+        If True, clip intermediate RGB values to valid ranges during conversions
+        where clipping is appropriate.
+
+    Runtime Attributes
+    ------------------
+    - ``gamma`` (float): Transfer-function exponent.
+    - ``white_point`` (np.ndarray): Reference white point, D65 by default.
+    - ``M_RGB2XYZ`` (np.ndarray): Forward RGB-to-XYZ conversion matrix.
+    - ``M_XYZ2RGB`` (np.ndarray): Inverse XYZ-to-RGB conversion matrix.
     """
 
     model_config = ConfigDict(
@@ -91,6 +97,7 @@ class ColorConverter(InformativeBaseModel):
     # --- Pydantic-setting of attributes as a function of rec_standard ---
     @model_validator(mode="after")
     def apply_standard_config(self) -> "ColorConverter":
+        """Apply matrix and transfer-function settings from the selected Rec. standard."""
         cfg = COLOR_STANDARDS[self.rec_standard]
         object.__setattr__(self, "gamma", cfg["gamma"])
         object.__setattr__(self, "white_point", cfg["white"].copy())
@@ -102,18 +109,24 @@ class ColorConverter(InformativeBaseModel):
     # sRGB ↔ linRGB
     # ------------------------------------------------------------------
     def sRGB_to_linRGB(self, rgb: np.ndarray) -> np.ndarray:
-        """
-            Convert non-linear R'G'B' into linear RGB.
+        """Convert non-linear R'G'B' values to linear RGB.
 
-            Transfer functions:
-            - "rec2020": ITU-R BT.2020 inverse OETF.
-            - "rec709": IEC 61966-2-1 sRGB transfer function.
-            - "rec601": sRGB-style piecewise transfer function (γ ≈ 2.2),
-                        chosen to replicate MATLAB's rgb2gray behaviour
-                        in modern digital workflows.
-            Resources :
-            - http://www.color.org/sRGB.pdf
-            - https://colour.readthedocs.io/
+        Parameters
+        ----------
+        rgb : np.ndarray
+            Gamma-encoded RGB array in [0, 1].
+
+        Returns
+        -------
+        np.ndarray
+            Linear RGB array.
+
+        Notes
+        -----
+        - ``rec2020`` uses the ITU-R BT.2020 inverse OETF.
+        - ``rec709`` uses the IEC 61966-2-1 sRGB transfer function.
+        - ``rec601`` uses an sRGB-style piecewise transfer function for
+          consistency with MATLAB-like SDR workflows.
         """
         rgb = np.clip(rgb, 0, 1) if self.safe_mode else rgb
         if self.rec_standard == "rec2020":
@@ -123,14 +136,17 @@ class ColorConverter(InformativeBaseModel):
             return np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** self.gamma)
 
     def linRGB_to_sRGB(self, linRGB: np.ndarray) -> np.ndarray:
-        """
-            Convert linear RGB into non-linear R'G'B'.
+        """Convert linear RGB values to non-linear R'G'B'.
 
-            Transfer functions:
-            - "rec2020": ITU-R BT.2020 OETF.
-            - "rec709": IEC 61966-2-1 sRGB transfer function.
-            - "rec601": sRGB-style piecewise transfer function (γ ≈ 2.2),
-                        used for consistency with MATLAB and common SDR pipelines.
+        Parameters
+        ----------
+        linRGB : np.ndarray
+            Linear RGB array in [0, 1].
+
+        Returns
+        -------
+        np.ndarray
+            Gamma-encoded RGB array.
         """
         linRGB = np.clip(linRGB, 0, 1) if self.safe_mode else linRGB
         if self.rec_standard == "rec2020":
@@ -143,17 +159,24 @@ class ColorConverter(InformativeBaseModel):
     # linRGB ↔ XYZ
     # ------------------------------------------------------------------
     def linRGB_to_xyz(self, linRGB: np.ndarray) -> np.ndarray:
-        """
-            Convert linear RGB into CIE XYZ (device-independent tristimulus space).
+        """Convert linear RGB into CIE XYZ.
 
-            XYZ is the standard CIE “reference” colour space (CIE 1931).
+        Parameters
+        ----------
+        linRGB : np.ndarray
+            Linear RGB array.
+
+        Returns
+        -------
+        np.ndarray
+            CIE XYZ tristimulus values.
         """
         out = np.empty_like(linRGB)
         np.matmul(linRGB.reshape(-1, 3), self.M_RGB2XYZ.T, out=out.reshape(-1, 3))  # linRGB @ self.M_RGB2XYZ.T
         return out
 
     def xyz_to_linRGB(self, xyz: np.ndarray) -> np.ndarray:
-        """Convert CIE XYZ  into linear RGB."""
+        """Convert CIE XYZ into linear RGB."""
         out = np.empty_like(xyz)
         np.matmul(xyz.reshape(-1, 3), self.M_XYZ2RGB.T, out=out.reshape(-1, 3))  # xyz @ self.M_XYZ2RGB.T
         return np.clip(out, 0, 1, out=out) if self.safe_mode else out
@@ -163,10 +186,9 @@ class ColorConverter(InformativeBaseModel):
     # ------------------------------------------------------------------
     @staticmethod
     def xyz_to_xyY(xyz: np.ndarray) -> np.ndarray:
-        """
-            Convert CIE XYZ into CIE xyY.
+        """Convert CIE XYZ into CIE xyY.
 
-            The x and y encode chromaticity, while Y encode ONLY the luminance information.        
+        The x and y channels encode chromaticity; Y stores luminance.
         """
         X, Y, Z = xyz[..., 0], xyz[..., 1], xyz[..., 2]
         denom = X + Y + Z
@@ -176,20 +198,23 @@ class ColorConverter(InformativeBaseModel):
 
     @staticmethod
     def xyY_to_xyz(xyY: np.ndarray, safe_mode: bool = True) -> np.ndarray:
+        """Convert CIE xyY into CIE XYZ.
+
+        Parameters
+        ----------
+        xyY : np.ndarray
+            xyY array with channels ``x``, ``y``, and ``Y``.
+
+        safe_mode : bool
+            If True, replaces near-zero ``y`` values with 1.0 to avoid numerical
+            explosions. If False, preserves tiny ``y`` values so gamut-control
+            code can detect out-of-gamut reconstructions.
+
+        Returns
+        -------
+        np.ndarray
+            CIE XYZ tristimulus values.
         """
-            Convert CIE xyY into CIE 1931 XYZ. 
-            X = xY / y 
-            Z = (1-x-y)Y / y
-            
-            Safe mode : bool, default=True
-            ---------
-                Standard Conversion (True):
-                    Prevents numerical instability when y ≈ 0 by substituting y = 1.
-                    This avoids X/Z explosion for near-black or noisy pixels.
-                Gamut Control (False):
-                    very small y values are preserved (≈1e-9), allowing large
-                    XYZ values to appear, which can help detect gamut violations.
-            """
         x, y, Y = xyY[..., 0], xyY[..., 1], xyY[..., 2]
         if safe_mode:
             # Safe Mode: Standard conversion
@@ -209,15 +234,18 @@ class ColorConverter(InformativeBaseModel):
     # ------------------------------------------------------------------
     @staticmethod
     def _f_lab(t: np.ndarray) -> np.ndarray:
+        """Apply the CIE Lab forward piecewise nonlinearity."""
         epsilon, kappa = 216 / 24389, 24389 / 27
         return np.where(t > epsilon, np.cbrt(t), (kappa * t + 16) / 116)
 
     @staticmethod
     def _f_lab_inv(t: np.ndarray) -> np.ndarray:
+        """Apply the inverse CIE Lab piecewise nonlinearity."""
         epsilon, kappa = 216 / 24389, 24389 / 27
         return np.where(t > (kappa * epsilon + 16) / 116, t**3, (116 * t - 16) / kappa)
 
     def xyz_to_lab(self, xyz: np.ndarray) -> np.ndarray:
+        """Convert CIE XYZ values to CIE Lab coordinates."""
         xyz_n = xyz / self.white_point
         f = self._f_lab(xyz_n)
         L = 116 * f[..., 1] - 16
@@ -226,6 +254,7 @@ class ColorConverter(InformativeBaseModel):
         return np.stack([L, a, b], axis=-1)
 
     def lab_to_xyz(self, lab: np.ndarray) -> np.ndarray:
+        """Convert CIE Lab values to CIE XYZ coordinates."""
         L, a, b = lab[..., 0], lab[..., 1], lab[..., 2]
         fy = (L + 16) / 116
         fx, fz = fy + a / 500, fy - b / 200
@@ -237,21 +266,27 @@ class ColorConverter(InformativeBaseModel):
     # Full pipelines (unchanged)
     # ------------------------------------------------------------------
     def sRGB_to_xyz(self, rgb: np.ndarray) -> np.ndarray:
+        """Convert gamma-encoded sRGB values directly to CIE XYZ."""
         return self.linRGB_to_xyz(self.sRGB_to_linRGB(rgb))
 
     def xyz_to_sRGB(self, xyz: np.ndarray) -> np.ndarray:
+        """Convert CIE XYZ values directly to gamma-encoded sRGB."""
         return self.linRGB_to_sRGB(self.xyz_to_linRGB(xyz))
 
     def sRGB_to_lab(self, rgb: np.ndarray) -> np.ndarray:
+        """Convert gamma-encoded sRGB values directly to CIE Lab."""
         return self.xyz_to_lab(self.sRGB_to_xyz(rgb))
 
     def lab_to_sRGB(self, lab: np.ndarray) -> np.ndarray:
+        """Convert CIE Lab values directly to gamma-encoded sRGB."""
         return self.xyz_to_sRGB(self.lab_to_xyz(lab))
 
     def sRGB_to_xyY(self, rgb: np.ndarray) -> np.ndarray:
+        """Convert gamma-encoded sRGB values directly to CIE xyY."""
         return self.xyz_to_xyY(self.sRGB_to_xyz(rgb))
 
     def xyY_to_sRGB(self, xyY: np.ndarray) -> np.ndarray:
+        """Convert CIE xyY values directly to gamma-encoded sRGB."""
         return self.xyz_to_sRGB(self.xyY_to_xyz(xyY))
 
 
@@ -264,9 +299,10 @@ class ColorTreatment(ColorConverter):
     and chromaticity channels are stored in an auxiliary buffer. The backward
     treatment reconstructs display-ready sRGB images after processing.
 
-    Attributes:
-        Y_desaturation_threshold (ClassVar[float]): Low-luminance threshold used
-            when preventive chroma desaturation is enabled.
+    Runtime Attributes
+    ------------------
+    - ``Y_desaturation_threshold`` (ClassVar[float]): Low-luminance threshold
+      used when preventive chroma desaturation is enabled.
     """
 
     model_config = ConfigDict(
@@ -288,38 +324,57 @@ class ColorTreatment(ColorConverter):
             desaturate_chroma_on_low_luminance: bool = False,
             legacy_mode: bool = False,
             verbose: bool = False) -> Tuple[ImageListIO, Optional[ImageListIO]]:
-        """
-        Processes a list of images with an optional color treatment conversion or transformation.
+        """Apply the forward color-treatment step to an image collection.
 
         This static method performs a forward pass based on the specified color treatment, grayscale
         conversion, and color space transformation. Depending on the input parameters, the images
         may undergo various treatments such as conversion to grayscale, transformation into a different
         color space (sRGB to xyY or sRGB to Lab), or extracting specific channels for processing.
 
-        Args:
-            rec_standard (REC_STANDARD): Reference color standard for the image processing.
-            input_images (ImageListType): List of input images to process.
-            output_images (ImageListType): Temporary buffer to store the processed image data, must match the
-                structure of `images`.
-            output_other (Optional[ImageListType]): Secondary buffer to store optional components (if applicable).
-            linear_luminance (bool): Defines whether the color treatment is applied.
-                If False, color treatment is enabled.
-            as_gray (bool): Determines whether output should be a grayscale
-                image (True) or a color image (False).
-            conversion_type (Literal['sRGB_to_xyY', 'sRGB_to_lab']): Specifies the type of color space
-                conversion to apply. Defaults to 'sRGB_to_xyY'.
-            desaturate_chroma_on_low_luminance (bool): When true, it will desaturate chroma on low-luminance in order to
-                prevent chromatic noise being inflated by luminance manipulation.
-            legacy_mode (bool): If True, uses matlab rgb2gray converter.
-            verbose (bool): If True, prints out messages.
+        Parameters
+        ----------
+        rec_standard : REC_STANDARD
+            Reference color standard for image processing.
 
-        Returns:
-            ImageListType: Processed set of images after the selected transformation or treatment. If
-            color treatment is enabled and `as_gray` is 0, two buffers are returned: one containing the
-            luminance channel and the other containing auxiliary channels.
+        input_images : ImageListIO
+            Input image collection to process.
 
-        Raises:
-            ValueError: If `linear_luminance` is False and `output_other` is not provided.
+        output_images : ImageListIO
+            Buffer receiving the main processed channel or channels.
+
+        linear_luminance : bool
+            If True, skips perceptual color-space conversion and processes
+            channels directly.
+
+        as_gray : bool
+            If True, output is grayscale. If False, color channels are preserved
+            through an auxiliary buffer when needed.
+
+        output_other : Optional[ImageListIO]
+            Secondary buffer receiving auxiliary chromatic channels.
+
+        conversion_type : Literal["sRGB_to_xyY", "sRGB_to_lab"]
+            Forward color conversion to apply.
+
+        desaturate_chroma_on_low_luminance : bool
+            If True, desaturates chroma for very low-luminance pixels to prevent
+            chromatic noise from being inflated by luminance manipulation.
+
+        legacy_mode : bool
+            If True, uses MATLAB-compatible grayscale conversion behavior.
+
+        verbose : bool
+            If True, prints processing messages.
+
+        Returns
+        -------
+        Tuple[ImageListIO, Optional[ImageListIO]]
+            Main processed buffer and optional auxiliary chromatic buffer.
+
+        Raises
+        ------
+        ValueError
+            If color treatment requires ``output_other`` but it is not provided.
         """
         if as_gray == 0 and desaturate_chroma_on_low_luminance:
             from shinier.color.GamutControl import GamutControl  # local import avoids circularity
@@ -411,43 +466,50 @@ class ColorTreatment(ColorConverter):
             conversion_type: Literal['xyY_to_sRGB', 'lab_to_sRGB'] = 'xyY_to_sRGB',
             gamut_strategy: str = 'clip',
             verbose: bool = False) -> ImageListIO:
-        """
-        Reverts color treatments applied previously to a set of images. This operation is
-        performed based on the defined color treatment type and conversion method.
+        """Apply the backward color-treatment step to an image collection.
 
         The function processes the provided input images and optionally incorporates
         additional data (input_other) depending on the context, ensuring that images are
         returned to their original color or grayscale representations.
 
-        Static Method:
-            backward_color_treatment
+        Parameters
+        ----------
+        rec_standard : REC_STANDARD
+            Color standard used for processing.
 
-        Args:
-            rec_standard (REC_STANDARD): The color space standard used for processing
-                (e.g., REC709, REC2020).
-            input_images (ImageListType): A list or array of images that have undergone prior
-                color treatment and need restoration.
-            output_images (ImageListType): Temporary buffer to store the processed image data, must match the
-                structure of `images`.
-            input_other (Optional[ImageListType]): Additional arrays containing auxiliary
-                data required for certain reconversions. Mandatory if `linear_luminance=1`.
-            linear_luminance (bool): Indicator of whether color treatment was
-                applied; 0 means no treatment, 1 means treatment was applied.
-            as_gray (bool): Determines whether output should be a grayscale
-                image (True) or a color image (False).
-            conversion_type (Literal['xyY_to_sRGB', 'lab_to_sRGB']): Specifies the method
-                for reconverting colors: either 'xyY_to_sRGB' to transform xyY to sRGB,
-                or 'lab_to_sRGB' to transform Lab to sRGB. Defaults to 'xyY_to_sRGB'.
-            gamut_strategy (str): Local strategy for handling out-of-gamut pixels during conversion.
-                ('constrain_image_chrominance', 'constrain_image_luminance', or 'clip'). For global strategies, see GamutControl.
-            verbose (bool): If True, prints out messages.
+        input_images : ImageListIO
+            Main processed buffer to convert back.
 
-        Raises:
-            ValueError: If `linear_luminance` is False and `input_other` is None.
+        output_images : ImageListIO
+            Buffer receiving reconstructed output images.
 
-        Returns:
-            ImageListType: The processed set of images converted back to their original
-            color space or gamma-encoded representation.
+        linear_luminance : bool
+            If True, no perceptual color treatment needs to be undone.
+
+        as_gray : bool
+            If True, reconstructs grayscale output.
+
+        input_other : Optional[ImageListIO]
+            Auxiliary chromatic data required for color reconstruction.
+
+        conversion_type : Literal["xyY_to_sRGB", "lab_to_sRGB"]
+            Backward color conversion to apply.
+
+        gamut_strategy : str
+            Strategy for repairing out-of-gamut pixels during conversion.
+
+        verbose : bool
+            If True, prints processing messages.
+
+        Raises
+        ------
+        ValueError
+            If color reconstruction requires ``input_other`` but it is missing.
+
+        Returns
+        -------
+        ImageListIO
+            Output images converted back to display-ready representation.
         """
         safe_mode = True
         converter = ColorConverter(rec_standard=rec_standard, safe_mode=safe_mode)
@@ -504,30 +566,31 @@ class ColorTreatment(ColorConverter):
 
 
 def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: RGB_STANDARD = 'equal', matlab_601: bool = False) -> np.ndarray:
-    """
-    Convert an R'G'B' image to grayscale (luma, Y′) using ITU luma coefficients.
+    """Convert an R'G'B' image to grayscale luma.
 
-    Args:
-        image (np.ndarray or Image.Image):
-            RGB image array with last dimension = 3. Assumed to be gamma-encoded R′G′B′ (i.e., not linear light), which
-            matches typical sRGB/Rec.709-style images loaded from files (e.g. png or jpg images).
-        conversion_type : {"equal", "rec601", "rec709", "rec2020"}, default "rec709"
-            Choice of luma standard:
-              - "equal" → Y′ = 0.333 R′ + 0.333 G′ + 0.333 B′
-              - "rec601" → Y′ = 0.299 R′ + 0.587 G′ + 0.114 B′
-              - "rec709" → Y′ = 0.2125 R′ + 0.7154 G′ + 0.0721 B′
-              - "rec2020" → Y′ = 0.2627 R′ + 0.6780 G′ + 0.0593 B′
-        matlab_601 (bool, optional): If true, uses weights for Matlab's rgb2gray Rec.ITU-R BT.601-7 version.
+    Parameters
+    ----------
+    image : Union[np.ndarray, Image.Image]
+        RGB image array with a final channel dimension of 3. The image is
+        assumed to be gamma-encoded, as with typical sRGB files.
 
-    Returns:
-        gray : np.ndarray
-            Grayscale image (same shape as input but last channel removed).
+    conversion_type : RGB_STANDARD
+        Luma standard to use: ``"equal"``, ``"rec601"``, ``"rec709"``, or
+        ``"rec2020"``.
 
-    Notes:
-        - This computes luma (Y′) from gamma-encoded components, as defined by the ITU
-          matrices for Y′CbCr / Y′CbcCrc. For physical linear luminance, you would need
-          to first linearize R′G′B′ using the appropriate transfer function,
-          mix with linear-light coefficients, then re-encode if desired.
+    matlab_601 : bool
+        If True and ``conversion_type="rec601"``, uses MATLAB's BT.601 weights.
+
+    Returns
+    -------
+    np.ndarray
+        Grayscale image with the final color channel removed.
+
+    Notes
+    -----
+    This computes luma (Y') from gamma-encoded components. For physical linear
+    luminance, first linearize RGB, combine linear-light coefficients, then
+    re-encode if needed.
     """
     if isinstance(image, Image.Image):
         image = np.array(image)
@@ -551,14 +614,17 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: RGB_STANDAR
 
 
 def gray2rgb(image: Union[np.ndarray, Image.Image]) -> np.ndarray:
-    """
-    Convert a grayscale image to RGB.
+    """Convert a grayscale image to RGB.
 
-    Args:
-        image (Union[np.ndarray, Image.Image]): The input grayscale image.
+    Parameters
+    ----------
+    image : Union[np.ndarray, Image.Image]
+        Input grayscale image.
 
-    Returns:
-        np.ndarray: The RGB image.
+    Returns
+    -------
+    np.ndarray
+        RGB image with three identical channels.
     """
     if isinstance(image, Image.Image):
         image = np.array(image).astype(np.float32)

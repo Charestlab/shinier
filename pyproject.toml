@@ -43,6 +43,11 @@ dev = [
     "build>=1.2.1",
     "pytest-xdist>=3.8.0"
 ]
+docs = [
+    "sphinx>=8.0",
+    "sphinx-rtd-theme>=3.0",
+    "myst-parser>=4.0",
+]
 
 [project.scripts]
 shinier = "shinier.SHINIER:main"
@@ -100,4 +105,3 @@ markers = [
     "validation_tests: full combinatorial sweep (slow)",
     "test_all_options: test all option combinations"
 ]
-

@@ -468,6 +468,7 @@ class ImageProcessor(InformativeBaseModel):
         background_operator = '<' if self.options.whole_image == 3 and self.options.background == 300 else '=='
 
         def _prepare_mask(image, mask=None):
+            """Build the boolean ROI mask for the current image index."""
             if self.options.whole_image == 2:
                 self.bool_masks[idx], _, _ = separate(image, background=background, background_operator=background_operator)
             elif self.options.whole_image == 3:
@@ -500,6 +501,7 @@ class ImageProcessor(InformativeBaseModel):
             self._sum_bool_masks[idx] = [self.bool_masks[idx][..., ch].sum() for ch in range(self.bool_masks[idx].shape[2])]
 
     def _validate_ssim(self, ssim: List[float]):
+        """Validate that SSIM progression is monotonic during optimization."""
         out = np.array(ssim)
         if out.shape[0] > 1:
             for ch in range(out.shape[1]):
@@ -565,12 +567,14 @@ class ImageProcessor(InformativeBaseModel):
 
         Notes
         -----
-            - ``legacy_mode`` switches several sub-steps to MATLAB-compatible
-                behavior.
-            - ``conserve_memory`` and the input storage mode affect how much data is
-                kept in memory during processing.
-            - Fourier-based modes reuse the padding configuration from
-                ``options.fft_padding_mode`` and ``options.fft_padding_value``.
+        ``legacy_mode`` switches several sub-steps to MATLAB-compatible
+        behavior.
+
+        ``conserve_memory`` and the input storage mode affect how much data is
+        kept in memory during processing.
+
+        Fourier-based modes reuse the padding configuration from
+        ``options.fft_padding_mode`` and ``options.fft_padding_value``.
         """
 
         # Set a seed for the random generator used in exact histogram specification

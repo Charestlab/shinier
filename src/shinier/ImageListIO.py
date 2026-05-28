@@ -21,13 +21,18 @@ _LIVE_DIRS: set[Path] = set()
 
 
 def cleanup_all_temp_dirs(max_age_hours: int = 0) -> None:
-    """
-    Force-remove all shinier temp roots (/tmp/shinier-<pid>) regardless of ownership.
-    Optionally keep very recent ones by setting max_age_hours > 0.
+    """Remove SHINIER temporary roots from the system temp directory.
 
-    Args:
-        max_age_hours (int): Minimum age (in hours) for folders to be removed.
-                             0 means remove everything immediately.
+    Parameters
+    ----------
+    max_age_hours : int
+        Minimum folder age in hours required for deletion. Set to ``0`` to
+        remove all matching roots immediately.
+
+    Notes
+    -----
+    This utility scans ``/tmp`` (or platform equivalent) for directories named
+    ``shinier-<pid>`` and removes each eligible directory recursively.
     """
     tmp_root = Path(tempfile.gettempdir())
     now = time.time()
@@ -78,10 +83,12 @@ def _ensure_temp_root() -> Path:
 
 
 def _register_temp_dir(p: Path) -> None:
+    """Track a live temporary directory for process-level cleanup."""
     _LIVE_DIRS.add(p)
 
 
 def _unregister_temp_dir(p: Path) -> None:
+    """Remove a temporary directory from the live cleanup registry."""
     _LIVE_DIRS.discard(p)
 
 
@@ -94,35 +101,47 @@ def _cleanup_process_root() -> None:
 
 
 class ImageListIO(InformativeBaseModel):
-    """
-    Class to manage a list of images with read and write capabilities.
-    Inspired by the skimage.io.ImageCollection class.
+    """Manage an image collection with optional disk-backed memory conservation.
 
-    Args:
-        input_data (ImageListType):
-            File pattern, list of file paths, or list of in-memory NumPy arrays.
-        conserve_memory (Optional[bool]): If True (default), uses a temporary directory to store images
-            and keeps only one image in memory at a time.
-        as_gray (Optional[int]): Images are converted into grayscale then uint8 on load only.
-            0 = No conversion
-            1 = Equal weighted sum of R,G,B
-            2 = Rec. ITU-R 601
-            3 = Rec. ITU-R 709
-            4 = Rec. ITU-R 2020
-        save_dir (Optional[str]): Directory to save final images. Defaults to cwd.
+    This class supports file-based and in-memory image collections and provides
+    list-like access with validation, grayscale conversion, and controlled
+    temporary storage.
 
-    Notes:
-        Validity of the collection's image attributes (i.e. dtype, n_dims, n_channels, reference_size) is only guaranteed
-            after first initialization. Then, only reference_size is checked. This provides flexibility to update the
-            collection with different data type and different channels (e.g. bool -> float). See more information below.
-        __getitem__:
-            - Height and width of the item should match reference_size.
-            - Item will be automatically casted to float if collection dtype is float
-            - n_channels is neither validated nor checked.
-        __setitem__:
-            - Height and width of the new item should match reference_size.
-            - New item dtype is accepted as is and determines collection dtype.
-            - n_channels is neither validated nor checked.
+    Parameters
+    ----------
+    input_data : ImageListType
+        File pattern, list of file paths, or list of in-memory NumPy arrays.
+
+    conserve_memory : bool
+        If True, use a temporary directory as backing storage and keep only one
+        image in memory at a time.
+
+    as_gray : Literal[0, 1, 2, 3, 4]
+        Grayscale conversion mode applied at load time.
+
+        - 0 = no conversion
+        - 1 = ``equal-weight RGB`` average
+        - 2 = ``ITU-R BT.601`` weights
+        - 3 = ``ITU-R BT.709`` weights
+        - 4 = ``ITU-R BT.2020`` weights
+
+    save_dir : Optional[Path]
+        Output directory used by :meth:`final_save_all`. Defaults to the current
+        working directory.
+
+    Notes
+    -----
+    Collection-level attributes (for example ``dtype``, ``n_dims``,
+    ``n_channels``, ``reference_size``) are established during initialization.
+    After initialization, shape compatibility is enforced primarily through
+    ``reference_size`` when replacing entries.
+
+    Access and assignment contracts:
+
+    - ``__getitem__`` validates spatial size and may cast values to the current
+      floating collection dtype when required.
+    - ``__setitem__`` validates spatial size, accepts the new dtype as-is, and
+      updates collection metadata accordingly.
     """
 
     # --- Pydantic config ---
@@ -164,7 +183,19 @@ class ImageListIO(InformativeBaseModel):
     # Post-init constructor (replaces manual __init__)
     # ------------------------------------------------------------------
     def post_init(self, __context: Any) -> None:
-        """Perform initialization and collection setup after Pydantic validation."""
+        """Initialize runtime state after Pydantic validation.
+
+        Parameters
+        ----------
+        __context : Any
+            Pydantic post-initialization context. Not used directly.
+
+        Notes
+        -----
+        This method initializes in-memory storage placeholders and then delegates
+        collection population and attribute initialization to
+        :meth:`_initialize_collection`.
+        """
         self.data = []
         self.save_dir = Path(self.save_dir or Path.cwd())
         self._initialize_collection(self.input_data)  # This also runs _initial_validation
@@ -173,7 +204,33 @@ class ImageListIO(InformativeBaseModel):
     # Core methods
     # ------------------------------------------------------------------
     def __getitem__(self, idx: int) -> np.ndarray:
-        """ Access an image by index from list or store_paths. Cast to collection dtype if necessary."""
+        """Return an image by index, loading from backing storage when needed.
+
+        Parameters
+        ----------
+        idx : int
+            Image index. Negative indexing is supported.
+
+        Returns
+        -------
+        np.ndarray
+            Requested image array.
+
+        Raises
+        ------
+        IndexError
+            If ``idx`` is outside the valid range.
+
+        ValueError
+            If lazy data loading is required while ``conserve_memory`` is False
+            and the backing entry is unexpectedly missing.
+
+        Notes
+        -----
+        In memory-conserving mode, loading one image resets other cached entries.
+        If the collection dtype is floating and differs from the loaded image
+        dtype, the returned image is cast to the collection dtype.
+        """
         if idx < -self.n_images or idx >= self.n_images:
             raise IndexError("Index out of range.")
         if idx < 0:
@@ -200,7 +257,34 @@ class ImageListIO(InformativeBaseModel):
         return self.data[idx]
 
     def __setitem__(self, idx: int, new_image: np.ndarray) -> None:
-        """Modify an image at a given index. Do not cast to current dtype — modify dataset dtype with new image.dtype"""
+        """Replace an image at a given index and update collection metadata.
+
+        Parameters
+        ----------
+        idx : int
+            Target image index.
+
+        new_image : np.ndarray
+            Replacement image. Height and width must match
+            ``reference_size``.
+
+        Raises
+        ------
+        RuntimeError
+            If the instance is read-only.
+
+        IndexError
+            If ``idx`` is outside the valid range.
+
+        ValueError
+            If the replacement image does not satisfy required size
+            constraints.
+
+        Notes
+        -----
+        The collection does not force the previous dtype; instead, dtype-related
+        attributes are updated based on ``new_image``.
+        """
         if getattr(self, "_read_only", False):
             raise RuntimeError("This ImageListIO fork is read-only; cannot modify items.")
 
@@ -222,16 +306,40 @@ class ImageListIO(InformativeBaseModel):
         self.data[idx] = new_image
 
     def __len__(self) -> int:
-        """ Get the number of images in the collection. """
+        """Return the number of images in the collection.
+
+        Returns
+        -------
+        int
+            Number of images tracked by the collection.
+        """
         return self.n_images
 
     def __iter__(self) -> Iterator[np.ndarray]:
-        """ Iterate over the images in the collection. """
+        """Iterate over images in index order.
+
+        Returns
+        -------
+        Iterator[np.ndarray]
+            Iterator yielding image arrays one by one.
+        """
         for idx in range(self.n_images):
             yield self[idx]
 
     def readonly_copy(self):
-        """Produce a read-only copy of the instance."""
+        """Return a deep read-only clone of this collection.
+
+        Returns
+        -------
+        ImageListIO
+            Deep-copied instance configured as read-only.
+
+        Notes
+        -----
+        The copy clears in-memory pixel arrays for memory efficiency and does
+        not retain temporary staging or finalizer state from the original
+        instance.
+        """
         # Use Pydantic's safe model duplication
         new = self.model_copy(deep=True)
 
@@ -253,6 +361,20 @@ class ImageListIO(InformativeBaseModel):
         return new
 
     def new_copy(self, to_list: bool = False) -> ImageListIO:
+        """Create a new collection initialized from this instance.
+
+        Parameters
+        ----------
+        to_list : bool
+            If True, initialize the new instance from in-memory image arrays
+            produced by :meth:`to_list`. If False, initialize from the original
+            ``input_data`` and then copy pixel data.
+
+        Returns
+        -------
+        ImageListIO
+            New collection instance with copied content.
+        """
         # Construct a new instance with or without list of images.
         # This will run normal model validation and initialization.
         input_data = self.to_list() if to_list else self.input_data
@@ -267,12 +389,25 @@ class ImageListIO(InformativeBaseModel):
         return new_instance
 
     def copy_with_image_list(self) -> ImageListIO:
+        """Return a new copy explicitly backed by an in-memory image list.
+
+        Returns
+        -------
+        ImageListIO
+            Collection copy initialized from concrete image arrays.
+        """
         # Construct a new instance. This will run normal model validation and initialization.
         # return self.__class__(input_data=self.to_list(), conserve_memory=False)
         return self.new_copy(to_list=True)
 
     def to_list(self):
-        """Produce a list of numpy arrays, one for each image in the collection."""
+        """Return all images as a Python list of NumPy arrays.
+
+        Returns
+        -------
+        List[np.ndarray]
+            Materialized image arrays in collection order.
+        """
         return list(self)
 
     def _ensure_temp_dir(self):
@@ -286,6 +421,7 @@ class ImageListIO(InformativeBaseModel):
 
     @staticmethod
     def _cleanup_finalizer(path: Path):
+        """Best-effort finalizer that removes a temp directory and unregisters it."""
         try:
             shutil.rmtree(path, ignore_errors=True)
         finally:
@@ -329,11 +465,17 @@ class ImageListIO(InformativeBaseModel):
         return image
 
     def to_gray(self):
-        """Public-facing version of _to_gray() that converts all images to grayscale."""
+        """Convert all images in-place to grayscale according to ``as_gray``.
+
+        Notes
+        -----
+        This method mutates the current collection.
+        """
         for idx, img in enumerate(self.images):
             self.images[idx] = self._to_gray(img)
 
     def _to_gray(self, image: np.ndarray) -> np.ndarray:
+        """Convert an RGB image to grayscale according to the configured mode."""
         if image.ndim == 3:
             if self.as_gray > 0:
                 image = rgb2gray(image, conversion_type=RGB2GRAY_WEIGHTS['int2key'][self.as_gray])
@@ -551,7 +693,19 @@ class ImageListIO(InformativeBaseModel):
 
     @staticmethod
     def get_file_format(image_path: Path) -> str:
-        """ Get the file format based on the file extension. """
+        """Resolve the output format identifier from a file extension.
+
+        Parameters
+        ----------
+        image_path : Path
+            Path whose suffix determines the format.
+
+        Returns
+        -------
+        str
+            Pillow-compatible format string. Unknown extensions default to
+            ``"PNG"``.
+        """
         ext = image_path.suffix.lower()
         format_mapping = {
             '.jpg': 'JPEG', '.jpeg': 'JPEG', '.png': 'PNG',
@@ -560,7 +714,13 @@ class ImageListIO(InformativeBaseModel):
         return format_mapping.get(ext, 'PNG')
 
     def final_save_all(self) -> None:
-        """ Save images to save_dir. If needed (self.conserve_memory) loads images and clears up temp files. """
+        """Save all images to ``save_dir`` and clean temporary storage.
+
+        Notes
+        -----
+        In memory-conserving mode, images are loaded on demand during saving.
+        After writing all outputs, the instance temporary directory is removed.
+        """
         for idx in range(self.n_images):
             self._save_image(idx, self[idx], save_dir=self.save_dir)
 
@@ -568,8 +728,14 @@ class ImageListIO(InformativeBaseModel):
         self._cleanup_temp_dir()
 
     def close(self) -> None:
+        """Release temporary resources associated with this collection.
+
+        Notes
+        -----
+        This operation is idempotent and safe to call multiple times.
+        """
         self._cleanup_temp_dir()
 
     def __del__(self) -> None:
-        """ Clean up the temporary directory upon object destruction. """
+        """Clean up temporary resources when the instance is garbage-collected."""
         self._cleanup_temp_dir()

@@ -20,13 +20,16 @@ class ChromaInfoLossResult:
     This container is kept for backward compatibility with earlier chroma-loss
     analyses.
 
-    Attributes:
-        y1 (float): Low-luminance threshold or tested Y value.
-        h_before_bpp (float): Chroma entropy before treatment, in bits per pixel.
-        h_after_bpp (float): Chroma entropy after treatment, in bits per pixel.
-        loss_bpp (float): Entropy loss in bits per pixel.
-        frac_pixels_affected (float): Fraction of pixels affected, in [0, 1].
-        n_pixels_measured (int): Number of pixels included in the measurement.
+    Runtime Attributes
+    ------------------
+    - ``y1`` (float): Low-luminance threshold or tested Y value.
+    - ``h_before_bpp`` (float): Chroma entropy before treatment, in bits per
+      pixel.
+    - ``h_after_bpp`` (float): Chroma entropy after treatment, in bits per
+      pixel.
+    - ``loss_bpp`` (float): Entropy loss in bits per pixel.
+    - ``frac_pixels_affected`` (float): Fraction of pixels affected, in [0, 1].
+    - ``n_pixels_measured`` (int): Number of pixels included in the measurement.
     """
 
     y1: float
@@ -41,18 +44,22 @@ class ChromaInfoLossResult:
 class ChromaMetrics:
     """Chroma-related metrics for one image at one ``y1`` value.
 
-    Attributes:
-        y1 (float): Low-luminance threshold or tested Y value.
-        affected_fraction (float): Fraction of pixels affected, in [0, 1].
-        entropy_before_bpp (float): Chroma entropy before treatment, in bits per pixel.
-        entropy_after_bpp (float): Chroma entropy after treatment, in bits per pixel.
-        rel_entropy_loss_pct (float): Relative entropy loss, in percent.
-        mean_chroma_before (float): Mean chroma before treatment.
-        mean_chroma_after (float): Mean chroma after treatment.
-        rel_mean_chroma_loss_pct (float): Relative mean chroma loss, in percent.
-        delta_e76_mean (float): Mean CIE76 color difference.
-        delta_e76_p95 (float): 95th percentile CIE76 color difference.
-        n_pixels_measured (int): Number of pixels included in the measurement.
+    Runtime Attributes
+    ------------------
+    - ``y1`` (float): Low-luminance threshold or tested Y value.
+    - ``affected_fraction`` (float): Fraction of pixels affected, in [0, 1].
+    - ``entropy_before_bpp`` (float): Chroma entropy before treatment, in bits
+      per pixel.
+    - ``entropy_after_bpp`` (float): Chroma entropy after treatment, in bits per
+      pixel.
+    - ``rel_entropy_loss_pct`` (float): Relative entropy loss, in percent.
+    - ``mean_chroma_before`` (float): Mean chroma before treatment.
+    - ``mean_chroma_after`` (float): Mean chroma after treatment.
+    - ``rel_mean_chroma_loss_pct`` (float): Relative mean chroma loss, in
+      percent.
+    - ``delta_e76_mean`` (float): Mean CIE76 color difference.
+    - ``delta_e76_p95`` (float): 95th percentile CIE76 color difference.
+    - ``n_pixels_measured`` (int): Number of pixels included in the measurement.
     """
 
     y1: float
@@ -72,9 +79,10 @@ class ChromaMetrics:
 class AggregateMetric:
     """Mean and standard deviation summary for a metric across images.
 
-    Attributes:
-        mean (float): Mean value across images.
-        std (float): Standard deviation across images.
+    Runtime Attributes
+    ------------------
+    - ``mean`` (float): Mean value across images.
+    - ``std`` (float): Standard deviation across images.
     """
 
     mean: float
@@ -85,15 +93,21 @@ class AggregateMetric:
 class AggregateRow:
     """Aggregate chroma metrics for one ``y1`` value.
 
-    Attributes:
-        y1 (float): Low-luminance threshold or tested Y value.
-        affected_pct (AggregateMetric): Percentage of affected pixels.
-        entropy_before_bpp (AggregateMetric): Entropy before treatment, in bits per pixel.
-        entropy_after_bpp (AggregateMetric): Entropy after treatment, in bits per pixel.
-        rel_entropy_loss_pct (AggregateMetric): Relative entropy loss, in percent.
-        rel_mean_chroma_loss_pct (AggregateMetric): Relative mean chroma loss, in percent.
-        delta_e76_mean (AggregateMetric): Mean CIE76 color difference.
-        delta_e76_p95 (AggregateMetric): 95th percentile CIE76 color difference.
+    Runtime Attributes
+    ------------------
+    - ``y1`` (float): Low-luminance threshold or tested Y value.
+    - ``affected_pct`` (AggregateMetric): Percentage of affected pixels.
+    - ``entropy_before_bpp`` (AggregateMetric): Entropy before treatment, in bits
+      per pixel.
+    - ``entropy_after_bpp`` (AggregateMetric): Entropy after treatment, in bits
+      per pixel.
+    - ``rel_entropy_loss_pct`` (AggregateMetric): Relative entropy loss, in
+      percent.
+    - ``rel_mean_chroma_loss_pct`` (AggregateMetric): Relative mean chroma loss,
+      in percent.
+    - ``delta_e76_mean`` (AggregateMetric): Mean CIE76 color difference.
+    - ``delta_e76_p95`` (AggregateMetric): 95th percentile CIE76 color
+      difference.
     """
 
     y1: float
@@ -110,11 +124,14 @@ class AggregateRow:
 class ChromaInfoRetention:
     """Information-theoretic chroma retention statistics.
 
-    Attributes:
-        h_before_bpp (float): Chroma entropy before treatment, in bits per pixel.
-        h_after_bpp (float): Chroma entropy after treatment, in bits per pixel.
-        mi_bpp (float): Mutual information estimate, in bits per pixel.
-        cir (float): Chroma information retention in [0, 1].
+    Runtime Attributes
+    ------------------
+    - ``h_before_bpp`` (float): Chroma entropy before treatment, in bits per
+      pixel.
+    - ``h_after_bpp`` (float): Chroma entropy after treatment, in bits per
+      pixel.
+    - ``mi_bpp`` (float): Mutual information estimate, in bits per pixel.
+    - ``cir`` (float): Chroma information retention in [0, 1].
     """
     h_before_bpp: float
     h_after_bpp: float
@@ -145,14 +162,14 @@ def _quantize_ab(
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     """Quantize Lab a*,b* into integer bins.
 
-    Args:
-        a: Array of a* values.
+    Parameters
+    ----------        a: Array of a* values.
         b: Array of b* values.
         nbits_per_axis: Bits per axis (e.g., 8 -> 256 bins per axis).
         ab_range: (min,max) clipping range for a* and b*.
 
-    Returns:
-        (a_q, b_q, bins) with a_q,b_q in [0, bins-1].
+    Returns
+    -------        (a_q, b_q, bins) with a_q,b_q in [0, bins-1].
     """
     a_min, a_max = ab_range
     bins = int(2 ** int(nbits_per_axis))
@@ -184,14 +201,14 @@ def relative_mean_chroma_loss_pct_global_lab(
     where:
         C* = sqrt(a*^2 + b*^2)
 
-    Args:
-        converter: ColorTreatment instance (used for sRGB->Lab).
+    Parameters
+    ----------        converter: ColorTreatment instance (used for sRGB->Lab).
         srgb_before_01: Original sRGB image in [0,1], shape (H, W, 3).
         srgb_after_01: Processed sRGB image in [0,1], shape (H, W, 3).
         eps: Small constant to avoid division by zero.
 
-    Returns:
-        A tuple: (loss_pct, mean_c_before, mean_c_after).
+    Returns
+    -------        A tuple: (loss_pct, mean_c_before, mean_c_after).
     """
     lab0 = converter.sRGB_to_lab(srgb_before_01)
     lab1 = converter.sRGB_to_lab(srgb_after_01)
@@ -277,14 +294,14 @@ def _validate_srgb_01(srgb: np.ndarray) -> np.ndarray:
     This function is intentionally strict to avoid silent bugs (e.g., uint8 [0..255]
     being clipped to [0..1]).
 
-    Args:
-        srgb: Image array of shape (H, W, 3). Expected range [0, 1].
+    Parameters
+    ----------        srgb: Image array of shape (H, W, 3). Expected range [0, 1].
 
-    Returns:
-        Float64 sRGB in [0, 1].
+    Returns
+    -------        Float64 sRGB in [0, 1].
 
-    Raises:
-        ValueError: If shape is wrong or values are outside [0,1] by a non-trivial margin.
+    Raises
+    ------        ValueError: If shape is wrong or values are outside [0,1] by a non-trivial margin.
     """
     if srgb.ndim != 3 or srgb.shape[-1] != 3:
         raise ValueError(f"Expected sRGB image shape (H,W,3). Got {srgb.shape}")
@@ -344,15 +361,15 @@ def _joint_entropy_lab_ab_bpp(
 ) -> Tuple[float, int]:
     """Compute joint entropy H(a*,b*) in bits/pixel for an sRGB image.
 
-    Args:
-        converter: ColorTreatment instance.
+    Parameters
+    ----------        converter: ColorTreatment instance.
         srgb_01: sRGB image in [0,1], shape (H,W,3), float.
         mask: Optional boolean mask (H,W). If provided, only masked pixels are measured.
         nbits_per_axis: Quantization bits per axis for a* and b* (e.g., 8 -> 256 bins).
         ab_range: Clipping range for a* and b* before quantization.
 
-    Returns:
-        Tuple of (entropy_bits_per_pixel, n_pixels_used).
+    Returns
+    -------        Tuple of (entropy_bits_per_pixel, n_pixels_used).
     """
     lab = converter.sRGB_to_lab(srgb_01)
     a = lab[..., 1]
@@ -403,14 +420,14 @@ def _delta_e76_stats(
 ) -> Tuple[float, float]:
     """Compute ΔE76 mean and p95 between two sRGB images, optionally within a mask.
 
-    Args:
-        converter: ColorTreatment instance.
+    Parameters
+    ----------        converter: ColorTreatment instance.
         srgb_before: sRGB image in [0,1], shape (H,W,3).
         srgb_after: sRGB image in [0,1], shape (H,W,3).
         mask: Optional boolean mask (H,W).
 
-    Returns:
-        (mean_delta_e76, p95_delta_e76)
+    Returns
+    -------        (mean_delta_e76, p95_delta_e76)
     """
     lab0 = converter.sRGB_to_lab(srgb_before)
     lab1 = converter.sRGB_to_lab(srgb_after)
@@ -450,7 +467,7 @@ def compute_chroma_metrics_for_image(
     measure_mask: Optional[np.ndarray] = None,
     shadow_only: bool = False,
 ) -> ChromaMetrics:
-    """Compute interpretable chroma-loss metrics for a single image at one Y1.
+    """Compute chroma-loss metrics for a single image at one ``y1`` value.
 
     Strategy: desaturate xy toward the D65 white point using a smoothstep strength s(Y_orig)
     applied on low luminance only, with Y_orig computed from the ORIGINAL image.
@@ -461,17 +478,33 @@ def compute_chroma_metrics_for_image(
       - mean chroma C* before/after, and relative loss
       - ΔE76 mean and p95 (optionally within a measurement mask)
 
-    Args:
-        srgb_01: sRGB image in [0,1], shape (H,W,3).
-        y1: Threshold Y1 controlling the desaturation range.
-        rec_standard: 'rec601' | 'rec709' | 'rec2020'.
-        nbits_per_axis: Quantization bits per axis for Lab (a*,b*) joint entropy.
-        ab_range: Clipping range for a* and b* before quantization.
-        measure_mask: Optional boolean mask (H,W) to restrict all measurements.
-        shadow_only: If True, further restrict measurements to pixels where Y_orig < y1.
+    Parameters
+    ----------
+    srgb_01 : np.ndarray
+        sRGB image in [0, 1], shape (H, W, 3).
 
-    Returns:
-        ChromaMetrics for this image and y1.
+    y1 : float
+        Threshold controlling the low-luminance desaturation range.
+
+    rec_standard : REC_STANDARD
+        Color standard: ``"rec601"``, ``"rec709"``, or ``"rec2020"``.
+
+    nbits_per_axis : int
+        Quantization bits per Lab a* and b* axis for joint entropy.
+
+    ab_range : Tuple[float, float]
+        Clipping range for a* and b* before quantization.
+
+    measure_mask : Optional[np.ndarray]
+        Optional boolean mask with shape (H, W) restricting all measurements.
+
+    shadow_only : bool
+        If True, further restricts measurements to pixels where ``Y_orig < y1``.
+
+    Returns
+    -------
+    ChromaMetrics
+        Chroma metrics for the image and threshold.
     """
     srgb = _validate_srgb_01(srgb_01)
     converter = ColorTreatment(rec_standard=rec_standard)
@@ -575,18 +608,33 @@ def aggregate_chroma_metrics(
 ) -> List[AggregateRow]:
     """Aggregate chroma-loss metrics across a list of images.
 
-    Args:
-        images_srgb_01: Sequence of sRGB images in [0,1], each shape (H,W,3).
-        y1_values: Iterable of Y1 thresholds.
-        rec_standard: 'rec601' | 'rec709' | 'rec2020'.
-        nbits_per_axis: Quantization bits per axis for Lab (a*,b*) entropy.
-        ab_range: Clipping range for a* and b* before quantization.
-        measure_mask: Optional boolean mask (H,W) applied to ALL images. If images vary in shape,
-            do not use this (or pass per-image masks in a custom loop).
-        shadow_only: If True, measurements are restricted to Y_orig < Y1.
+    Parameters
+    ----------
+    images_srgb_01 : Sequence[np.ndarray]
+        Sequence of sRGB images in [0, 1], each with shape (H, W, 3).
 
-    Returns:
-        List of AggregateRow, one per Y1.
+    y1_values : Union[np.ndarray, Iterable[float]]
+        Iterable of low-luminance thresholds.
+
+    rec_standard : REC_STANDARD
+        Color standard: ``"rec601"``, ``"rec709"``, or ``"rec2020"``.
+
+    nbits_per_axis : int
+        Quantization bits per Lab a* and b* axis for entropy.
+
+    ab_range : Tuple[float, float]
+        Clipping range for a* and b* before quantization.
+
+    measure_mask : Optional[np.ndarray]
+        Optional boolean mask with shape (H, W) applied to every image.
+
+    shadow_only : bool
+        If True, measurements are restricted to pixels where ``Y_orig < y1``.
+
+    Returns
+    -------
+    List[AggregateRow]
+        One aggregate row per threshold.
     """
     if len(images_srgb_01) == 0:
         raise ValueError("images_srgb_01 is empty.")
@@ -681,26 +729,43 @@ def generate_chroma_loss_report(
     report_dir: Optional[Union[str, Path]] = None,
     report_filename: str = "chroma_loss_report.md",
 ) -> Path:
-    """Generate an English Markdown report + plots for chroma-loss vs Y1.
+    """Generate a Markdown report and plots for chroma-loss vs ``y1``.
 
     This function creates:
       - Aggregate report (mean ± std across images)
       - Shadow-only report (measurement restricted to Y_orig < Y1)
       - Plots saved under: shinier/color/assets/graphics/ (by default)
 
-    Args:
-        images_srgb_01: Sequence of sRGB images in [0,1], each shape (H,W,3).
-        y1_values: Iterable of Y1 thresholds.
-        rec_standard: 'rec601' | 'rec709' | 'rec2020'.
-        nbits_per_axis: Quantization bits per axis for Lab (a*,b*) entropy.
-        ab_range: Clipping range for a* and b* before quantization.
-        graphics_dir: Output directory for plots and report. If None, uses
-            shinier/color/assets/graphics relative to this module.
-        report_dir: Output directory for reports. If None, uses
-            shinier/color/assets/reports relative to this module.
-        report_filename: Name of the Markdown report file.
+    Parameters
+    ----------
+    images_srgb_01 : Sequence[np.ndarray]
+        Sequence of sRGB images in [0, 1], each with shape (H, W, 3).
 
-    Returns:
+    y1_values : Union[np.ndarray, Iterable[float]]
+        Iterable of low-luminance thresholds.
+
+    rec_standard : REC_STANDARD
+        Color standard: ``"rec601"``, ``"rec709"``, or ``"rec2020"``.
+
+    nbits_per_axis : int
+        Quantization bits per Lab a* and b* axis for entropy.
+
+    ab_range : Tuple[float, float]
+        Clipping range for a* and b* before quantization.
+
+    graphics_dir : Optional[Union[str, Path]]
+        Output directory for plots. If None, uses the package graphics folder.
+
+    report_dir : Optional[Union[str, Path]]
+        Output directory for the Markdown report. If None, uses the package
+        assets folder.
+
+    report_filename : str
+        Name of the Markdown report file.
+
+    Returns
+    -------
+    Path
         Path to the generated Markdown report.
     """
     out_dir = _default_graphics_dir() if graphics_dir is None else Path(graphics_dir)
@@ -730,6 +795,7 @@ def generate_chroma_loss_report(
     y = np.array([r.y1 for r in agg_rows], dtype=np.float64)
 
     def arr(metric_name: str, rows: List[AggregateRow]) -> Tuple[np.ndarray, np.ndarray]:
+        """Extract mean and standard-deviation vectors for one aggregate metric."""
         m = np.array([getattr(r, metric_name).mean for r in rows], dtype=np.float64)
         s = np.array([getattr(r, metric_name).std for r in rows], dtype=np.float64)
         return m, s
@@ -827,6 +893,7 @@ def generate_chroma_loss_report(
     rel = lambda p: p.name  # keep links relative within the graphics directory
 
     def md_table(rows: List[AggregateRow]) -> str:
+        """Render aggregated chroma metrics as a Markdown table."""
         header = (
             "| Y1 | Affected% | Entropy before/after (bpp) | Rel entropy loss% | "
             "Rel mean chroma loss% | ΔE76 mean | ΔE76 p95 |\n"
@@ -989,11 +1056,13 @@ def chroma_info_loss_bits_per_pixel_vs_y1(
     measure_mask: Optional[np.ndarray] = None,
     low_y_only: bool = False,
 ) -> List[ChromaInfoLossResult]:
-    """Legacy API: entropy-only loss vs Y1.
+    """Compute legacy entropy-only chroma information loss vs ``y1``.
 
-    Notes:
-        - Input must be float in [0,1]. This function is strict and will raise if not.
-        - For a richer report (ΔE, mean chroma, plots, Markdown), use `generate_chroma_loss_report`.
+    Notes
+    -----
+    - Input must be float in [0, 1]. This function is strict and raises on
+      uint8-style [0, 255] input.
+    - For richer metrics, use ``generate_chroma_loss_report``.
     """
     srgb = _validate_srgb_01(srgb_01)
 
