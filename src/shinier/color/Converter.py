@@ -1,24 +1,4 @@
-"""
-shinier.color.converter
-=======================
-
-Core color-space conversion class for Shinier.
-
-Implements reversible pipelines:
-    sRGB → linRGB → XYZ → CIELAB
-    CIELAB → XYZ → linRGB → sRGB
-
-Validation tests: /tests/validation_tests/Converter_validation_tests.py
-    - Results replicate the colour-science package (https://pypi.org/project/colour-science/)
-    across all tested colour standards (Rec.601, Rec.709, Rec.2020).
-
-    - Slight deviation observed for Rec.601 arises from our use of a piecewise
-    sRGB/Rec.709-style transfer function (γ ≈ 2.2) instead of the historical
-    pure power-law (γ = 2.8) applied in older analog-era Rec.601 specifications.
-    This choice ensures consistency with MATLAB’s rgb2gray and modern digital
-    workflows, where Rec.601 luminance weights are paired with an sRGB-like TRC.
-"""
-
+"""Color conversion utilities for SHINIER."""
 from __future__ import annotations
 
 import numpy as np
@@ -63,6 +43,23 @@ RGB2GRAY_WEIGHTS['key2int'] = dict(zip(RGB2GRAY_WEIGHTS['int2key'].values(), RGB
 
 class ColorConverter(InformativeBaseModel):
     """Encapsulates color-space conversions for Rec.601/709/2020 systems.
+
+    This class implements reversible conversion pipelines:
+
+    - ``sRGB -> linRGB -> XYZ -> CIELAB``
+    - ``CIELAB -> XYZ -> linRGB -> sRGB``
+
+    Validation reference: ``tests/validation_tests/Converter_validation_tests.py``.
+    Results replicate the colour-science package (https://pypi.org/project/colour-science/)
+    across all tested colour standards (Rec.601, Rec.709, Rec.2020).
+
+    Slight deviation observed for Rec.601 arises from our use of a piecewise
+    sRGB/Rec.709-style transfer function (γ ≈ 2.2) instead of the historical
+    pure power-law (γ = 2.8) applied in older analog-era Rec.601 specifications.
+    This choice ensures consistency with MATLAB’s rgb2gray and modern digital
+    workflows, where Rec.601 luminance weights are paired with an sRGB-like TRC.
+
+    Core color-space conversion class for SHINIER.
 
     Parameters
     ----------

@@ -117,9 +117,7 @@ class Options(InformativeBaseModel):
         - 8 = spec_match and hist_match.
         - 9 = only dithering.
 
-        See also
-        --------
-        Mode-specific processing functions live in :class:`shinier.ImageProcessor`:
+        Related methods in :class:`shinier.ImageProcessor`:
 
         - Luminance matching: :meth:`shinier.ImageProcessor.lum_match`
         - Histogram matching: :meth:`shinier.ImageProcessor.hist_match`
