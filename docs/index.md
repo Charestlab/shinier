@@ -14,6 +14,7 @@ Documentation <documentation/documentation>
 Demos <documentation/demos>
 Contributing <documentation/contributing>
 License <documentation/license>
+Project Links <project-links>
 ```
 
 ```{toctree}

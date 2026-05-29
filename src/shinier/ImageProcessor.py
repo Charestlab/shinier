@@ -37,6 +37,9 @@ class ImageProcessor(InformativeBaseModel):
     and all processing steps and important information (e.g. seed) are logged in the output_folder.
 
     Only ``dataset`` and ``options`` are expected as participant/user inputs.
+    The functions are not meant to be called directly by users. See the
+    ``demos.md`` for example usage, ``documentation.md`` for more details,
+    and the ``README.md`` for a quick-start overview.
 
     Parameters
     ----------
