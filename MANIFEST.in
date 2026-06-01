@@ -5,7 +5,6 @@ exclude src/shinier/_cconvolve.pyx
 # --- Documentation and assets ---
 recursive-include assets *
 recursive-include documentation *
-recursive-include INPUT *
-recursive-include MASK *
 
-include OUTPUT/.gitkeep
+prune documentation/readthedocs/_build
+global-exclude .DS_Store

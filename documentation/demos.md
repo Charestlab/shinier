@@ -7,12 +7,13 @@
    ╚══════╝╚═╝  ╚═╝╚═╝╚═╝  ╚══╝╚═╝╚══════╝╚═╝  ╚═╝
 ```
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](../LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)]()
 [![PyPI version](https://img.shields.io/pypi/v/shinier.svg)](https://pypi.org/project/shinier/)
 ---
 
 # Demos / How-to-use
+<!-- readthedocs-content-start -->
 
 > The package can be used in two ways:  
 > • via the **command-line interface (CLI)**  

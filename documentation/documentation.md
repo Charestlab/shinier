@@ -7,12 +7,13 @@
    ╚══════╝╚═╝  ╚═╝╚═╝╚═╝  ╚══╝╚═╝╚══════╝╚═╝  ╚═╝
 ```
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](../LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)]()
 [![PyPI version](https://img.shields.io/pypi/v/shinier.svg)](https://pypi.org/project/shinier/)
 ---
 
 # Documentation
+<!-- readthedocs-content-start -->
 
 ## 📋 Table of Contents
 
@@ -807,5 +808,5 @@ Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum m
 
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-    <em>Version 0.1.9 - Complete technical documentation</em>
+    <em>Version 0.2.0 - Complete technical documentation</em>
 </p>

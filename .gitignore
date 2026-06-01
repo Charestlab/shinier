@@ -21,6 +21,7 @@ __pycache__/
 
 # Local Sphinx/ReadTheDocs build output
 docs/_build/
+documentation/readthedocs/_build/
 
 # -------------------------------
 # PACKAGE DATA

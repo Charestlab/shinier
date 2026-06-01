@@ -7,12 +7,13 @@
    ╚══════╝╚═╝  ╚═╝╚═╝╚═╝  ╚══╝╚═╝╚══════╝╚═╝  ╚═╝
 ```
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](../LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)]()
 [![PyPI version](https://img.shields.io/pypi/v/shinier.svg)](https://pypi.org/project/shinier/)
 ---
 
 # Contributing to SHINIER
+<!-- readthedocs-content-start -->
 
 Thanks for your interest in improving **SHINIER**. This document explains how to set up a development environment, coding standards, testing strategy (unit vs. validation), and the pull-request process. Please read it fully before opening a PR.
 
@@ -136,15 +137,25 @@ def lum_match(img: np.ndarray, target: float) -> np.ndarray:
 ```
 
 ### Read the Docs
-- Documentation is built with Sphinx from the `docs/` folder.
-- Existing Markdown files are included in the Sphinx build rather than duplicated:
-  `README.md`, `documentation/documentation.md`, `documentation/demos.md`, `documentation/contributing.md`, and `documentation/license.md`.
-- API pages are generated from docstrings using `sphinx.ext.autodoc` and `sphinx.ext.napoleon`.
-- To build locally:
+SHINIER documentation is built with Sphinx and published with Read the Docs. The
+Sphinx project lives in `documentation/readthedocs/`.
+
+The documentation combines:
+- narrative Markdown files from `documentation/`;
+- the project `README.md`;
+- API pages generated from docstrings with `sphinx.ext.autodoc` and
+  `sphinx.ext.napoleon`.
+
+Install the development environment before building the documentation:
 
 ```bash
-pip install ".[docs]"
-sphinx-build -b html docs docs/_build/html
+pip install -e ".[dev]"
+```
+
+Then build the documentation locally:
+
+```bash
+python -m sphinx -b html documentation/readthedocs documentation/readthedocs/_build/html
 ```
 
 

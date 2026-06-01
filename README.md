@@ -9,7 +9,7 @@
 ```
 > Spectrum, Histogram, and Intensity Normalization, Equalization, and Refinement.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](LICENSE)
 [![Python versions](https://img.shields.io/pypi/pyversions/shinier)](https://pypi.org/project/shinier/)
 [![PyPI version](https://img.shields.io/pypi/v/shinier.svg)](https://pypi.org/project/shinier/)
 [![Tests](https://github.com/Charestlab/shinier/actions/workflows/tests.yml/badge.svg)](https://github.com/Charestlab/shinier/actions/workflows/tests.yml)
@@ -38,7 +38,7 @@ For detailed technical documentation (algorithms, numerical choices, and MATLAB 
 
 ### Installation
 
-##### Pip Install (recommended):
+#### Pip Install (recommended):
 
 ```bash
 pip install shinier
@@ -54,14 +54,14 @@ pip install shinier
 > 
 > Windows: *Visual Studio C++ Build Tools*
 
-##### Install from source (development version):
+#### Install from source (development version):
 ```bash
 git clone https://github.com/Charestlab/shinier.git
 cd shinier
 pip install -e ".[dev]"
 ```
 
-##### Verify the install:
+#### Verify the install:
 ```python
 import shinier, sys
 print("shinier version:", getattr(shinier, "__version__", "unknown"))
@@ -142,7 +142,7 @@ See [CONTRIBUTING.md](documentation/contributing.md) for guidelines (coding stan
 
 ---
 ## 📄 License
-See [LICENSE](documentation/license.md) for more information.
+See [LICENSE](LICENSE) for more information.
 
 ---
 ## 🛠️ Troubleshooting
@@ -153,5 +153,5 @@ See [LICENSE](documentation/license.md) for more information.
 ---
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-  <em>Version 0.1.9 - Complete technical documentation</em>
+  <em>Version 0.2.0 - Complete technical documentation</em>
 </p>

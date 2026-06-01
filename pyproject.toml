@@ -1,13 +1,14 @@
 [build-system]
-requires = ["setuptools>=68", "wheel", "numpy>=1.22"]
+requires = ["setuptools>=77", "wheel", "numpy>=1.22"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "shinier"
-version = "0.1.9"
+version = "0.2.0"
 description = "Python port of the SHINE toolbox with added options (color management, dithering, EHS), optimized for large image sets."
 readme = "README.md"
-license = { text = "MIT" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [
     { name = "Nicolas Dupuis-Roy", email = "nicolas.dupuis.roy@umontreal.ca" },
     { name = "Mathias Salvas-Hébert", email = "mathias.salvas-hebert@umontreal.ca" }
@@ -26,7 +27,6 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 
@@ -37,13 +37,11 @@ Homepage = "https://github.com/Charestlab/shinier"
 dev = [
     "pytest>=8.3.0",
     "wheel>=0.44.0",
-    "setuptools>=74.1",
+    "setuptools>=77",
     "scikit-image>=0.24.0",
     "colour-science >= 0.4.0",
     "build>=1.2.1",
-    "pytest-xdist>=3.8.0"
-]
-docs = [
+    "pytest-xdist>=3.8.0",
     "sphinx>=8.0",
     "sphinx-rtd-theme>=3.0",
     "myst-parser>=4.0",

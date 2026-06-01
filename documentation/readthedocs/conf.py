@@ -4,10 +4,10 @@ import sys
 import os
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
-os.environ.setdefault("MPLCONFIGDIR", str(ROOT / "docs" / "_build" / "matplotlib"))
+os.environ.setdefault("MPLCONFIGDIR", str(ROOT / "documentation" / "readthedocs" / "_build" / "matplotlib"))
 
 project = "SHINIER"
 author = "Nicolas Dupuis-Roy and Mathias Salvas-Hebert"
@@ -16,7 +16,7 @@ copyright = "2026, Nicolas Dupuis-Roy and Mathias Salvas-Hebert"
 try:
     from shinier import __version__
 except Exception:
-    __version__ = "0.1.9"
+    __version__ = "0.2.0"
 
 version = __version__
 release = __version__
@@ -70,3 +70,7 @@ myst_enable_extensions = [
     "substitution",
 ]
 myst_heading_anchors = 3
+suppress_warnings = [
+    "myst.xref_missing",
+    "misc.highlighting_failure",
+]
