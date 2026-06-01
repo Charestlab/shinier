@@ -107,6 +107,10 @@ class ImageListIO(InformativeBaseModel):
     list-like access with validation, grayscale conversion, and controlled
     temporary storage.
 
+    Only ``input_data``, ``conserve_memory``, ``as_gray``, and ``save_dir`` are 
+    user-provided attributes. The classic workflow of SHINIER doesn't require
+    users to interact with this class directly.
+
     Parameters
     ----------
     input_data : ImageListType
@@ -128,6 +132,47 @@ class ImageListIO(InformativeBaseModel):
     save_dir : Optional[Path]
         Output directory used by :meth:`final_save_all`. Defaults to the current
         working directory.
+
+    Runtime Attributes
+    ------------------
+    data : List[Optional[np.ndarray]]
+        In-memory pixel arrays. Entries are ``None`` when an image has been
+        evicted to backing storage (``conserve_memory=True``).
+
+    src_paths : List[Optional[Path]]
+        Original source file paths. ``None`` for images supplied as in-memory
+        arrays.
+
+    store_paths : List[Optional[Path]]
+        Backing-store paths used for lazy loading. For file-backed collections
+        these are the source files; for in-memory collections with
+        ``conserve_memory=True`` these point to temporary ``.npy`` files.
+
+    reference_size : Optional[Tuple[int, int]]
+        ``(height, width)`` of the first image, used to enforce spatial
+        consistency across the collection.
+
+    n_channels : Optional[int]
+        Number of color channels (1 for grayscale, 3 for RGB).
+
+    n_dims : Optional[int]
+        Number of array dimensions (2 for grayscale, 3 for color).
+
+    n_images : int
+        Total number of images in the collection.
+
+    dtype : Optional[np.dtype]
+        NumPy dtype of the collection, inferred from the first image.
+
+    drange : Optional[Tuple[Any, Any]]
+        ``(min, max)`` dynamic range derived from ``dtype``.
+        Set to ``(0, 1)`` for boolean, to the full integer range for integer
+        dtypes (e.g. ``(0, 255)`` for ``uint8``), and doesn't assume anything
+        for floating-point dtypes since no fixed range is assumed.
+
+    has_list_array : bool
+        ``True`` when the collection was initialised from a list of NumPy
+        arrays with ``conserve_memory=False``.
 
     Notes
     -----

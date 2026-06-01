@@ -223,6 +223,7 @@ documentation remains in the Markdown files under `documentation/`.
 
 ```{eval-rst}
 .. autoclass:: shinier.ImageListIO
-   :members:
+   :members: readonly_copy, new_copy, copy_with_image_list, to_list, to_gray, get_file_format, final_save_all, close
+   :exclude-members: __init__, __new__
    :show-inheritance:
 ```
