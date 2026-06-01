@@ -239,3 +239,5 @@ pytest -m unit_tests
 pytest -q -m validation_tests
 ```
 #### 🏛️ Test README
+For complete testing procedures (markers, sharding, replay/debug workflow), see the dedicated
+Testing Guide in `tests/README.md`.

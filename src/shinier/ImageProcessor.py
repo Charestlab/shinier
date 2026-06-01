@@ -788,10 +788,21 @@ class ImageProcessor(InformativeBaseModel):
             original minimum and maximum values based on the provided target mean and standard deviation.
             The transformation is performed using the Z-score normalization formula.
             """
+            original_means = np.asarray(original_means, dtype=float)
+            original_stds = np.asarray(original_stds, dtype=float)
+            original_min_max = np.asarray(original_min_max, dtype=float)
+
             target_mean = np.asarray(target_mean, dtype=float)
             target_std = np.asarray(target_std, dtype=float)
-            predicted_min = (original_min_max[:, 0] - original_means) / original_stds * target_std + target_mean
-            predicted_max = (original_min_max[:, 1] - original_means) / original_stds * target_std + target_mean
+
+            safe_stds = np.where(original_stds == 0, 1.0, original_stds)
+
+            predicted_min = (original_min_max[:, 0] - original_means) / safe_stds * target_std + target_mean
+            predicted_max = (original_min_max[:, 1] - original_means) / safe_stds * target_std + target_mean
+
+            predicted_min = np.where(original_stds == 0, target_mean, predicted_min)
+            predicted_max = np.where(original_stds == 0, target_mean, predicted_max)
+
             predicted_range = predicted_max - predicted_min
             return predicted_min, predicted_max, predicted_range
 

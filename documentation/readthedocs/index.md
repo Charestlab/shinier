@@ -20,7 +20,15 @@ README <self>
 
 user_guide/documentation
 user_guide/demos
-user_guide/contributing
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Contributors Guide
+:hidden:
+
+contributors_guide/contributing
+contributors_guide/testing
 ```
 
 ```{toctree}

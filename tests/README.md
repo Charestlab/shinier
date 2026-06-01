@@ -38,7 +38,7 @@ Use markers to select subsets of tests:
 |--------------------|-----------------------------------------|-------------------------------|
 | `unit_tests`       | Fast functional unit tests              | `pytest -m unit_tests`        |
 | `validation_tests` | Exhaustive validation (slow)            | `pytest -m validation_tests`  |
-| `test_all_options` | Exhaustive unit tests on Options (slow) | `pytest -m tests_all_options` |
+| `test_all_options` | Exhaustive unit tests on Options (slow) | `pytest -m test_all_options` |
 
 --- 
 
