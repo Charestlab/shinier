@@ -237,9 +237,11 @@ class Options(InformativeBaseModel):
 
         Local repairs (applies a single transform to all pixels of a given image): best to maximize image contrast.
 
-            - ``constrain_image_chrominance``: Darkens all pixels so that there are no out-of-gamut pixels.
+            - ``constrain_image_luminance``: Scales down the luminance of all pixels of an image so the most saturated pixel fits.
+                Preserves hue and saturation; compresses contrast/luminance.
 
-            - ``constrain_image_luminance``: Desaturates all pixels so that there are not out-of-gamut pixels.
+            - ``constrain_image_chrominance``: Scales down the saturation of all pixels of an image so the brightest pixel fits.
+                Preserves contrast/luminance; compresses saturation.
 
             - ``clip``: Default color conversion behavior, numpy ``safe_mode`` (not recommended unless you know what are you doing).
 
@@ -290,11 +292,13 @@ class Options(InformativeBaseModel):
 
         Semantics:
 
-        - ``0`` uses the dataset average for that statistic.
-        - ``None`` leaves that statistic unchanged per image.
+        - ``0`` uses a dataset-level automatic target for that statistic.
+        - ``None`` preserves the original per-image statistic when possible.
 
-        Mean and standard deviation can be controlled independently by setting
-        either value to ``None``.
+        With ``safe_lum_match=True``, the resolved targets may be adjusted to
+        avoid out-of-range luminance values. Explicit targets are preserved when
+        possible, while automatic or preserved targets (i.e. ``0`` or ``None``)
+        are relaxed first.
 
     hist_optim : bool
         [7] HISTOGRAM matching.
