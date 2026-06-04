@@ -34,7 +34,7 @@ def prompt(
     """Prompt user input with type casting, validation, and defaults.
 
     Parameters
-    ----------        
+    ----------
         label: str
             Message displayed to the user.
         default:  Optional[Any]
@@ -53,15 +53,14 @@ def prompt(
             Console text color.
 
     Returns
-    -------        
+    -------
         The validated and type-converted user input.
     """
-
     def print_answer(answer: str = '', prefix: str = 'Selected'):
         """
         Prints the given answer with a custom prefix and updates the console output.
         Parameters
-        ----------            
+        ----------
             answer (str): The string representing the answer to be displayed.
             prefix (str): A custom prefix to precede the answer.
         """
@@ -81,31 +80,32 @@ def prompt(
     # Check args and set choices
     if kind == 'choice' and choices is None:
         raise ValueError('Must provide `choices` when kind == "choice"')
+    default_idx = default
+    default_value = default
+    display_choices = choices
     if kind == 'bool':
         accepted_choices = ['yes', 'no', 'y', 'n']
         if choices is not None:
             warnings.warn("choices are ignored for kind 'bool'")
         if not isinstance(default, str) or default.lower().strip() not in accepted_choices:
             raise ValueError('`default` should be a string ("y" or "n") for kind "bool"')
+        default_value = default.lower().strip() in ('yes', 'y')
+        default_idx = 1 if default_value else 2
 
-    if kind == "choice" and choices:
-        for i, c in enumerate(choices, 1):
-            new_default_str = f" [{default_str}]" if default == i else ""
-            choice_color = Bcolors.DEFAULT_TEXT if default == i else Bcolors.CHOICE_VALUE
+    if kind == "choice" and display_choices:
+        for i, c in enumerate(display_choices, 1):
+            new_default_str = f" [{default_str}]" if default_idx == i else ""
+            choice_color = Bcolors.DEFAULT_TEXT if default_idx == i else Bcolors.CHOICE_VALUE
             choice_nb = colorize(str(i), choice_color)
             console_log(f"[{choice_nb}] {c}{new_default_str}", indent_level=0, color=Bcolors.BOLD)
     if kind == 'bool':
-        choices = ['Yes', 'No']
-        new_default = None
-        for i, c in enumerate(choices):
-            is_default = c[0].lower() in default.lower()
+        display_choices = ['Yes', 'No']
+        for i, c in enumerate(display_choices):
+            is_default = default_idx == i + 1
             new_default_str = f" [{default_str}]" if is_default else ""
-            if new_default is None and is_default:
-                new_default = i + 1
             choice_color = Bcolors.DEFAULT_TEXT if is_default else Bcolors.CHOICE_VALUE
             choice_str = f"{colorize(str(c[0].lower()), choice_color)}"
-            console_log(f"[{choice_str}] {choices[i]}{new_default_str}", indent_level=0, color=Bcolors.BOLD)
-        default = new_default
+            console_log(f"[{choice_str}] {display_choices[i]}{new_default_str}", indent_level=0, color=Bcolors.BOLD)
 
     if IS_TTY:
         print("> ", end="", flush=True)
@@ -120,9 +120,9 @@ def prompt(
     # ---- Default ----
     if raw == "":
         if default is not None:
-            default_ = choices[default-1] if kind in ['bool', 'choice'] else default
+            default_ = display_choices[default_idx-1] if kind in ['bool', 'choice'] else default
             print_answer(default_, prefix="Default selected")
-            return default
+            return default_value
         console_log("Please enter a value or specify a default.", indent_level=1, color=Bcolors.FAIL)
         return prompt(label, default, kind, choices, validator, min_v, max_v, color)
 
@@ -167,9 +167,13 @@ def prompt(
             console_log(f"✗ {msg}", indent_level=1, color=Bcolors.FAIL)
             return prompt(label, default, kind, choices, validator, min_v, max_v, color)
 
-    if kind in ['bool', 'choice']:
-        prefix = 'Default selected' if val == default else 'Selected'
-        print_answer(answer=choices[val-1], prefix=prefix)
+    if kind == 'bool':
+        val_idx = 1 if val else 2
+        prefix = 'Default selected' if val == default_value else 'Selected'
+        print_answer(answer=display_choices[val_idx-1], prefix=prefix)
+    elif kind == 'choice':
+        prefix = 'Default selected' if val == default_idx else 'Selected'
+        print_answer(answer=display_choices[val-1], prefix=prefix)
     else:
         print_answer(answer=val, prefix="Answered")
 
@@ -180,7 +184,7 @@ def options_display(opts):
     """Display the options after images are processed.
 
     Parameters
-    ----------        
+    ----------
         opts (Options): Options object
     """
     types = ['io']
@@ -322,7 +326,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
 
         if not opts.as_gray and not opts.linear_luminance:
             gamut_mode = prompt(
-                "Out-of-gamut control strategy: how to handle pixel values falling outside the valid RGB range after transformation?",
+                "Out-of-gamut control strategy: How to handle pixel values falling outside the valid RGB range after transformation?",
                 default=2,
                 kind="choice",
                 choices=[
