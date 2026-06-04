@@ -9,6 +9,7 @@ from tests import utils as utils_test
 
 pytestmark = pytest.mark.unit_tests
 
+
 def _prepare_temp_images(test_tmpdir: Path, n: int = 3) -> Path:
     """Populate temporary folder with a few symlinked test PNGs."""
     inp = test_tmpdir / "INPUT"
@@ -17,6 +18,7 @@ def _prepare_temp_images(test_tmpdir: Path, n: int = 3) -> Path:
     for img in src_images[:n]:
         (inp / img.name).symlink_to(img.resolve())
     return inp
+
 
 def _prepare_temp_dataset(test_tmpdir: Path) -> ImageDataset:
     """Helper to prepare a temporary dataset with a few small images."""
@@ -30,6 +32,7 @@ def _prepare_temp_dataset(test_tmpdir: Path) -> ImageDataset:
 
     opt = Options(input_folder=inp, output_folder=out)
     return ImageDataset(options=opt)
+
 
 def _make_rgb(h: int = 64, w: int = 64, seed: int = 0) -> np.ndarray:
     """Create a random RGB NumPy image."""
@@ -168,6 +171,38 @@ def test_lum_match_partial_std_only_keeps_mean(test_tmpdir: Path) -> None:
         assert std_after == pytest.approx(20.0, abs=1e-3)
 
 
+def test_lum_match_safe_partial_std_relaxes_original_means_to_preserve_requested_std(test_tmpdir: Path) -> None:
+    """target_lum=(None, x) should relax original means only when they are unsafe."""
+    img1 = np.tile(np.linspace(10, 50, 64, dtype=np.float64), (64, 1))
+    img2 = np.tile(np.linspace(200, 240, 64, dtype=np.float64), (64, 1))
+    proc = _build_lum_match_processor(test_tmpdir, [img1, img2], target_lum=(None, 40.0), safe_lum_match=True)
+
+    means_before = [float(im.mean()) for im in proc.dataset.buffer]
+
+    proc.lum_match()
+
+    for idx, im in enumerate(proc.dataset.buffer):
+        mean_after, std_after = _stats(im)
+        assert mean_after != pytest.approx(means_before[idx], abs=1e-3)
+        assert std_after == pytest.approx(40.0, abs=1e-3)
+        assert im.min() >= -1e-6
+        assert im.max() <= 255 + 1e-6
+
+
+def test_lum_match_safe_partial_std_reduces_std_when_relaxed_mean_cannot_preserve_it(test_tmpdir: Path) -> None:
+    """target_lum=(None, x) may reduce std when no safe mean can preserve it."""
+    img = np.tile(np.linspace(10, 50, 64, dtype=np.float64), (64, 1))
+    proc = _build_lum_match_processor(test_tmpdir, [img], target_lum=(None, 80.0), safe_lum_match=True)
+
+    proc.lum_match()
+
+    mean_after, std_after = _stats(proc.dataset.buffer[0])
+    assert mean_after != pytest.approx(float(img.mean()), abs=1e-3)
+    assert std_after < 80.0
+    assert proc.dataset.buffer[0].min() >= -1e-6
+    assert proc.dataset.buffer[0].max() <= 255 + 1e-6
+
+
 def test_lum_match_partial_mean_only_keeps_std(test_tmpdir: Path) -> None:
     """target_lum=(x, None) should preserve std and control mean."""
     img1 = np.tile(np.linspace(95, 175, 64, dtype=np.float64), (64, 1))
@@ -187,13 +222,138 @@ def test_lum_match_partial_mean_only_keeps_std(test_tmpdir: Path) -> None:
         assert std_after == pytest.approx(stds_before[idx], abs=1e-3)
 
 
-def test_lum_match_safe_partial_mean_raises_when_out_of_range(test_tmpdir: Path) -> None:
-    """safe_lum_match should reject (mean, None) requests that force clipping."""
+def test_lum_match_safe_partial_mean_reduces_contrast_when_needed(test_tmpdir: Path) -> None:
+    """target_lum=(x, None) should keep requested mean and lower unsafe contrast."""
     img = np.tile(np.linspace(180, 250, 64, dtype=np.float64), (64, 1))
     proc = _build_lum_match_processor(test_tmpdir, [img], target_lum=(240.0, None), safe_lum_match=True)
 
-    with pytest.raises(ValueError, match=r"safe_lum_match cannot keep values within \[0, 255\]"):
-        proc.lum_match()
+    std_before = float(img.std())
+
+    proc.lum_match()
+
+    mean_after, std_after = _stats(proc.dataset.buffer[0])
+    assert mean_after == pytest.approx(240.0, abs=1e-6)
+    assert std_after < std_before
+    assert proc.dataset.buffer[0].min() >= -1e-6
+    assert proc.dataset.buffer[0].max() <= 255 + 1e-6
+
+
+def test_lum_match_safe_explicit_mean_with_average_std_preserves_mean(test_tmpdir: Path) -> None:
+    """target_lum=(x, 0) should prioritize the explicit mean over average std."""
+    img1 = np.tile(np.linspace(0, 150, 64, dtype=np.float64), (64, 1))
+    img2 = np.tile(np.linspace(20, 200, 64, dtype=np.float64), (64, 1))
+    proc = _build_lum_match_processor(test_tmpdir, [img1, img2], target_lum=(50.0, 0), safe_lum_match=True)
+
+    average_std = float(np.mean([img1.std(), img2.std()]))
+
+    proc.lum_match()
+
+    for im in proc.dataset.buffer:
+        mean_after, std_after = _stats(im)
+        assert mean_after == pytest.approx(50.0, abs=1e-6)
+        assert std_after < average_std
+        assert im.min() >= -1e-6
+        assert im.max() <= 255 + 1e-6
+
+
+def test_lum_match_safe_two_explicit_targets_keep_mean_and_reduce_std(test_tmpdir: Path, capsys) -> None:
+    """target_lum=(x, y) should explicitly keep mean and reduce unsafe std."""
+    img = np.tile(np.linspace(180, 250, 64, dtype=np.float64), (64, 1))
+    proc = _build_lum_match_processor(test_tmpdir, [img], target_lum=(240.0, 80.0), safe_lum_match=True)
+    proc.verbose = 3
+
+    proc.lum_match()
+
+    mean_after, std_after = _stats(proc.dataset.buffer[0])
+    captured = capsys.readouterr()
+    assert mean_after == pytest.approx(240.0, abs=1e-6)
+    assert std_after < 80.0
+    assert proc.dataset.buffer[0].min() >= -1e-6
+    assert proc.dataset.buffer[0].max() <= 255 + 1e-6
+    assert "requested mean and standard deviation are both explicit; mean kept" in captured.out
+
+
+def test_lum_match_safe_logs_warning_when_adjusting_targets(test_tmpdir: Path, capsys) -> None:
+    """safe_lum_match should explain target relaxations in verbose modes."""
+    img = np.tile(np.linspace(180, 250, 64, dtype=np.float64), (64, 1))
+    proc = _build_lum_match_processor(test_tmpdir, [img], target_lum=(240.0, None), safe_lum_match=True)
+    proc.verbose = 3
+
+    proc.lum_match()
+
+    captured = capsys.readouterr()
+    assert "safe_lum_match: requested mean kept; standard deviation reduced" in captured.out
+
+
+def test_lum_match_safe_logs_warning_for_local_mean_adjustment(test_tmpdir: Path, capsys) -> None:
+    """safe_lum_match should report when local means preserve requested std."""
+    img1 = np.zeros((64, 64), dtype=np.float64)
+    img1[:, :6] = 100.0
+    img2 = np.full((64, 64), 255.0, dtype=np.float64)
+    img2[:, :6] = 155.0
+    proc = _build_lum_match_processor(test_tmpdir, [img1, img2], target_lum=(0, 50.0), safe_lum_match=True)
+    proc.verbose = 3
+
+    proc.lum_match()
+
+    captured = capsys.readouterr()
+    assert "safe_lum_match: requested standard deviation kept; means adjusted per image" in captured.out
+
+
+def test_lum_match_safe_average_mean_with_explicit_std_preserves_std(test_tmpdir: Path) -> None:
+    """target_lum=(0, x) should prioritize the explicit std over average mean."""
+    img = np.tile(np.linspace(10, 50, 64, dtype=np.float64), (64, 1))
+    proc = _build_lum_match_processor(test_tmpdir, [img], target_lum=(0, 40.0), safe_lum_match=True)
+
+    proc.lum_match()
+
+    mean_after, std_after = _stats(proc.dataset.buffer[0])
+    assert mean_after != pytest.approx(float(img.mean()), abs=1e-3)
+    assert std_after == pytest.approx(40.0, abs=1e-3)
+    assert proc.dataset.buffer[0].min() >= -1e-6
+    assert proc.dataset.buffer[0].max() <= 255 + 1e-6
+
+
+def test_lum_match_safe_average_mean_with_explicit_std_uses_local_means_before_reducing_std(test_tmpdir: Path) -> None:
+    """target_lum=(0, x) should try local means before relaxing requested std."""
+    img1 = np.zeros((64, 64), dtype=np.float64)
+    img1[:, :6] = 100.0
+    img2 = np.full((64, 64), 255.0, dtype=np.float64)
+    img2[:, :6] = 155.0
+    proc = _build_lum_match_processor(test_tmpdir, [img1, img2], target_lum=(0, 50.0), safe_lum_match=True)
+
+    proc.lum_match()
+
+    means_after, stds_after = [], []
+    for im in proc.dataset.buffer:
+        mean_after, std_after = _stats(im)
+        means_after.append(mean_after)
+        stds_after.append(std_after)
+        assert std_after == pytest.approx(50.0, abs=1e-3)
+        assert im.min() >= -1e-6
+        assert im.max() <= 255 + 1e-6
+    assert means_after[0] != pytest.approx(means_after[1], abs=1e-3)
+    assert stds_after[0] == pytest.approx(stds_after[1], abs=1e-6)
+
+
+def test_lum_match_safe_explicit_std_reduces_std_when_local_means_cannot_preserve_it(test_tmpdir: Path) -> None:
+    """target_lum=(0, x) should reduce std only when local means cannot preserve it."""
+    img1 = np.zeros((64, 64), dtype=np.float64)
+    img1[:, :6] = 100.0
+    img2 = np.full((64, 64), 255.0, dtype=np.float64)
+    img2[:, :6] = 155.0
+    proc = _build_lum_match_processor(test_tmpdir, [img1, img2], target_lum=(0, 120.0), safe_lum_match=True)
+
+    proc.lum_match()
+
+    stds_after = []
+    for im in proc.dataset.buffer:
+        mean_after, std_after = _stats(im)
+        stds_after.append(std_after)
+        assert std_after < 120.0
+        assert im.min() >= -1e-6
+        assert im.max() <= 255 + 1e-6
+    assert stds_after[0] == pytest.approx(stds_after[1], abs=1e-6)
 
 
 def test_lum_match_constant_image_zero_std_is_stable(test_tmpdir: Path) -> None:
