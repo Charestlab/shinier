@@ -38,7 +38,7 @@ Use markers to select subsets of tests:
 |--------------------|-----------------------------------------|-------------------------------|
 | `unit_tests`       | Fast functional unit tests              | `pytest -m unit_tests`        |
 | `validation_tests` | Exhaustive validation (slow)            | `pytest -m validation_tests`  |
-| `test_all_options` | Exhaustive unit tests on Options (slow) | `pytest -m test_all_options` |
+| `test_all_options` | Exhaustive unit tests on Options (⚠ very slow; can take a few hours) | `pytest -m test_all_options` |
 
 --- 
 
@@ -69,6 +69,7 @@ Shards divide the exhaustive test space across multiple processes.
 | `SHARDS`           | Total number of shards                     | `1`     |
 | `SHARD_INDEX`      | Index of current shard (0-based)           | `0`     |
 | `SHOW_PROGRESS`    | Enable tqdm progress bars                  | `0`     |
+| `PERCENT_SAMPLED`  | Fraction of combinations to sample         | `1`     |
 | `DUMP_FILE_FORMAT` | Format for failure dumps (`json` or `pkl`) | `json`  |
 | `START_AT`         | Resume testing from given combo index      | `0`     |
 
@@ -168,4 +169,3 @@ This will rebuild the same `Options`, reload selected images, and re-run the fai
    ```bash
    python -m tests.tools.replay_failure path/to/failure_xxxxx.pkl
    ```
-
