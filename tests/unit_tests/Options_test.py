@@ -23,7 +23,7 @@ from tests.tools import utils as utils_test
 START_AT = int(os.getenv("START_AT", "0"))
 SHARDS = int(os.getenv("SHARDS", "1"))
 SHARD_INDEX = int(os.getenv("SHARD_INDEX", "0"))
-SHOW_PROGRESS = os.getenv("SHOW_PROGRESS", "1") == "1"
+SHOW_PROGRESS = os.getenv("SHOW_PROGRESS", "0") == "1"
 PERCENT_SAMPLED = float(os.getenv("PERCENT_SAMPLED", "1"))
 
 # =============================================================================
@@ -343,4 +343,5 @@ def test_all_combo(tmp_dirs):
         if params['mode'] == 9 and params['dithering'] == 0:
             params['dithering'] = 1
         Options(**params)
-        pbar.update(1)
+        if pbar is not None:
+            pbar.update(1)
