@@ -767,10 +767,23 @@ class ImageProcessor(InformativeBaseModel):
         - ``target_lum[0]`` controls the mean.
         - ``target_lum[1]`` controls the standard deviation.
 
-        A value of ``0`` means "use the dataset average" for that statistic, while
-        ``None`` leaves the statistic unchanged. When ``safe_lum_match`` is enabled,
-        the method searches for nearby statistics that avoid values outside
-        ``[0, 255]``.
+        Target values can be explicit numbers (for example, ``(127, 20)``
+        or ``(100, 15)``), or special reserved values: ``0`` and ``None``.
+
+        - ``0`` requests a dataset-level automatic target for that statistic
+          (for example, ``(0, 20)`` uses one automatic mean for the dataset and
+          requests a standard deviation of ``20``);
+        - ``None`` requests preservation of each image's original statistic
+          (for example, ``(None, 20)`` keeps each image's original mean and
+          requests a standard deviation of ``20``).
+
+        When ``safe_lum_match`` is enabled, SHINIER keeps explicit targets as
+        long as possible while avoiding luminance values outside ``[0, 255]``.
+        It first relaxes the automatic or preserved statistic, trying a global
+        correction before per-image corrections. If no safe solution exists, the
+        explicit target may also be relaxed. For example, ``(50, 0)`` keeps
+        mean ``50`` and adjusts the standard deviation first, whereas ``(0, 50)``
+        keeps standard deviation ``50`` and adjusts the mean first.
 
         Notes
         -----
@@ -825,8 +838,8 @@ class ImageProcessor(InformativeBaseModel):
             binary_mask = im3D(binary_mask)
             M = MatlabOperators.mean2(im[binary_mask]) if self.options.legacy_mode else np.mean(im[binary_mask])
             SD = MatlabOperators.std2(im[binary_mask]) if self.options.legacy_mode else np.std(im[binary_mask])
-            min = np.min(im[binary_mask])
-            max = np.max(im[binary_mask])
+            im_min = np.min(im[binary_mask])
+            im_max = np.max(im[binary_mask])
             # if self.options.as_gray != 0:
             #     M = MatlabOperators.mean2(im[binary_mask]) if self.options.legacy_mode else np.mean(im[binary_mask])
             #     SD = MatlabOperators.mean2(im[binary_mask]) if self.options.legacy_mode else np.mean(im[binary_mask])
@@ -838,7 +851,7 @@ class ImageProcessor(InformativeBaseModel):
             #     M = np.sum(ch_means * ch_weights)
             #     SD = np.sqrt(np.sum((ch_weights ** 2) * (ch_stds ** 2)))
 
-            return M, SD, min, max
+            return M, SD, im_min, im_max
 
         def resolve_target(value, originals):
             """Map None to original values, 0 to dataset average, and numbers to themselves."""
@@ -847,6 +860,119 @@ class ImageProcessor(InformativeBaseModel):
         def as_target_array(value, n_images):
             """Ensures 1 target value per image."""
             return np.full(n_images, value, dtype=float) if np.ndim(value) == 0 else np.asarray(value, dtype=float)
+
+        def is_explicit_target(value):
+            """True when a target is a user-specified statistic, not an automatic placeholder."""
+            return value is not None and value != 0
+
+        def safe_std_limits_for_mean(target_mean):
+            """Largest safe SD per image when the target mean is fixed."""
+            target_means = as_target_array(target_mean, len(original_means))
+            limits = np.full(len(original_means), np.inf, dtype=float)
+            for idx, (original_mean, original_std, (original_min, original_max)) in enumerate(zip(original_means, original_stds, original_min_max)):
+                if original_std == 0:
+                    continue
+
+                image_limits = []
+                lower_span = original_mean - original_min
+                upper_span = original_max - original_mean
+                if lower_span > 0:
+                    image_limits.append(target_means[idx] * original_std / lower_span)
+                if upper_span > 0:
+                    image_limits.append((255 - target_means[idx]) * original_std / upper_span)
+                if image_limits:
+                    limits[idx] = np.max([0, np.min(image_limits)])
+            return limits
+
+        def constrain_std_to_mean(target_mean, target_std):
+            """Lower target SD just enough to keep a fixed target mean safe."""
+            safe_margin = 1e-6
+            limits = safe_std_limits_for_mean(target_mean)
+            if np.ndim(target_std) == 0:
+                max_safe_std = np.min(limits)
+                if np.isinf(max_safe_std):
+                    return target_std
+                return np.min([target_std, np.max([0, max_safe_std - safe_margin])])
+
+            target_stds = as_target_array(target_std, len(original_stds))
+            return np.minimum(target_stds, np.maximum(0, limits - safe_margin))
+
+        def mean_intervals_for_std(target_std):
+            """Safe target-mean interval per image when the target SD is fixed."""
+            target_stds = as_target_array(target_std, len(original_stds))
+            lower_bounds = np.zeros(len(original_means), dtype=float)
+            upper_bounds = np.full(len(original_means), 255.0, dtype=float)
+            for idx, (original_mean, original_std, (original_min, original_max)) in enumerate(zip(original_means, original_stds, original_min_max)):
+                if original_std == 0:
+                    continue
+
+                lower_z = (original_min - original_mean) / original_std
+                upper_z = (original_max - original_mean) / original_std
+                lower_bounds[idx] = -lower_z * target_stds[idx]
+                upper_bounds[idx] = 255 - upper_z * target_stds[idx]
+            return lower_bounds, upper_bounds
+
+        def constrain_mean_to_std(target_mean, target_std):
+            """Move target mean into the safe interval while preserving target SD."""
+            lower_bounds, upper_bounds = mean_intervals_for_std(target_std)
+            if np.ndim(target_mean) == 0:
+                lower_bound = np.max(lower_bounds)
+                upper_bound = np.min(upper_bounds)
+                if lower_bound > upper_bound:
+                    return None
+                return np.clip(target_mean, lower_bound, upper_bound)
+
+            target_means = as_target_array(target_mean, len(original_means))
+            if np.any(lower_bounds > upper_bounds):
+                return None
+            return np.clip(target_means, lower_bounds, upper_bounds)
+
+        def constrain_mean_per_image_to_std(target_mean, target_std):
+            """Move each image's target mean into its own safe interval."""
+            lower_bounds, upper_bounds = mean_intervals_for_std(target_std)
+            if np.any(lower_bounds > upper_bounds):
+                return None
+
+            target_means = as_target_array(target_mean, len(original_means))
+            return np.clip(target_means, lower_bounds, upper_bounds)
+
+        def log_safe_lum_warning(message):
+            console_log(msg=message, indent_level=0, color=Bcolors.WARNING, verbose=self.verbose > 1)
+
+        def constrain_std_for_relaxed_per_image_mean(target_std):
+            """Lower SD when no per-image mean can safely preserve the requested contrast."""
+            safe_margin = 1e-6
+            limits = np.full(len(original_stds), np.inf, dtype=float)
+            for idx, (original_std, (original_min, original_max)) in enumerate(zip(original_stds, original_min_max)):
+                original_range = original_max - original_min
+                if original_std == 0 or original_range == 0:
+                    continue
+                limits[idx] = 255 * original_std / original_range
+
+            if np.ndim(target_std) == 0:
+                max_safe_std = np.min(limits)
+                if np.isinf(max_safe_std):
+                    return target_std
+                return np.min([target_std, np.max([0, max_safe_std - safe_margin])])
+
+            target_stds = as_target_array(target_std, len(original_stds))
+            return np.minimum(target_stds, np.maximum(0, limits - safe_margin))
+
+        def constrain_std_for_global_mean(target_std):
+            """Lower a global SD until one global target mean can keep all images safe."""
+            safe_margin = 1e-6
+            lower_coefficients, upper_coefficients = [], []
+            for original_mean, original_std, (original_min, original_max) in zip(original_means, original_stds, original_min_max):
+                if original_std == 0:
+                    continue
+                lower_coefficients.append((original_mean - original_min) / original_std)
+                upper_coefficients.append((original_max - original_mean) / original_std)
+
+            if not lower_coefficients or not upper_coefficients:
+                return target_std
+
+            max_safe_std = 255 / (np.max(lower_coefficients) + np.max(upper_coefficients))
+            return np.min([target_std, np.max([0, max_safe_std - safe_margin])])
 
         buffer_collection = self.dataset.buffer
 
@@ -862,43 +988,75 @@ class ImageProcessor(InformativeBaseModel):
         original_means, original_stds, original_min_max = [], [], []
         self._processed_channel = None
         for idx, im in enumerate(buffer_collection):
-            M, SD, min, max = compute_stats(im=im, binary_mask=self.bool_masks[idx])
+            M, SD, im_min, im_max = compute_stats(im=im, binary_mask=self.bool_masks[idx])
             original_means.append(M)
             original_stds.append(SD)
-            original_min_max.append((min, max))
+            original_min_max.append((im_min, im_max))
 
         original_means, original_stds = np.array(original_means, dtype=float), np.array(original_stds, dtype=float)
         partial_mean,   partial_std   = target_lum[0] is None, target_lum[1] is None
+        explicit_mean,  explicit_std  = is_explicit_target(target_lum[0]), is_explicit_target(target_lum[1])
         target_mean,    target_std    = resolve_target(target_lum[0], original_means), resolve_target(target_lum[1], original_stds)
 
         original_min_max = np.array(original_min_max, dtype=float)
         predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
 
         if safe_values and (any(predicted_min < 0) or any(predicted_max > 255)):
-            if partial_std:
-                raise ValueError(
-                    "safe_lum_match cannot keep values within [0, 255] for target_lum=(mean, None) "
-                    "without changing the original contrasts."
-                )
-            if partial_mean:
-                safe_std_limits = []
-                for original_mean, original_std, (original_min, original_max) in zip(original_means, original_stds, original_min_max):
-                    # Find largest std that keeps values within [0, 255] for this image, given the target mean.
-                    if original_min < original_mean:
-                        safe_std_limits.append(original_mean * original_std / (original_mean - original_min))
-                    if original_max > original_mean:
-                        safe_std_limits.append((255 - original_mean) * original_std / (original_max - original_mean))
-                # Use most constraining std limit across images to ensure all values are within [0, 255]
-                max_safe_std = min(safe_std_limits)
-                scaling_factor = min(1, (max_safe_std - 1e-6) / target_std)
+            if explicit_mean and explicit_std:
+                requested_std = target_std
+                target_std = constrain_std_to_mean(target_mean, target_std)
+                if np.any(as_target_array(target_std, len(original_stds)) < as_target_array(requested_std, len(original_stds))):
+                    log_safe_lum_warning(
+                        "safe_lum_match: requested mean and standard deviation are both explicit; mean kept, standard deviation reduced to avoid values outside [0, 255]."
+                    )
+                predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
+            elif explicit_mean:
+                requested_std = target_std
+                target_std = constrain_std_to_mean(target_mean, target_std)
+                if np.any(as_target_array(target_std, len(original_stds)) < as_target_array(requested_std, len(original_stds))):
+                    log_safe_lum_warning(
+                        "safe_lum_match: requested mean kept; standard deviation reduced to avoid values outside [0, 255]."
+                    )
+                predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
+            elif explicit_std:
+                adjusted_mean = constrain_mean_to_std(target_mean, target_std)
+                if adjusted_mean is None:
+                    adjusted_mean = constrain_mean_per_image_to_std(target_mean, target_std)
+                    if adjusted_mean is not None:
+                        log_safe_lum_warning(
+                            "safe_lum_match: requested standard deviation kept; means adjusted per image to avoid values outside [0, 255]."
+                        )
+                if adjusted_mean is None:
+                    requested_std = target_std
+                    target_std = constrain_std_for_global_mean(target_std)
+                    adjusted_mean = constrain_mean_to_std(target_mean, target_std)
+                    if adjusted_mean is None:
+                        adjusted_mean = constrain_mean_per_image_to_std(target_mean, target_std)
+                    if adjusted_mean is None:
+                        target_std = constrain_std_for_relaxed_per_image_mean(requested_std)
+                        adjusted_mean = constrain_mean_per_image_to_std(target_mean, target_std)
+                    if np.any(as_target_array(target_std, len(original_stds)) < as_target_array(requested_std, len(original_stds))):
+                        log_safe_lum_warning(
+                            "safe_lum_match: no safe mean could preserve the requested standard deviation for all images; standard deviation reduced."
+                        )
+                elif not partial_mean:
+                    log_safe_lum_warning(
+                        "safe_lum_match: requested standard deviation kept; global mean adjusted to avoid values outside [0, 255]."
+                    )
+                target_mean = adjusted_mean
+                predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
             else:
+                requested_mean, requested_std = target_mean, target_std
                 max_range = predicted_max.max() - predicted_min.min()
                 scaling_factor = np.min([1, (255 - 1e-6) / max_range])  # Safety margin of 1e-6 to avoid precision issues
-            target_std *= scaling_factor
-            predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
-            if not partial_mean:
+                target_std *= scaling_factor
+                predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
                 target_mean = target_mean + (255 - np.max(predicted_max))
                 predicted_min, predicted_max, predicted_range = predict_values(original_means, original_stds, original_min_max, target_mean, target_std)
+                if target_mean != requested_mean or target_std != requested_std:
+                    log_safe_lum_warning(
+                        "safe_lum_match: automatic mean and standard deviation adjusted to avoid values outside [0, 255]."
+                    )
             target_mean_log = np.mean(target_mean) if np.ndim(target_mean) else target_mean
             target_std_log = np.mean(target_std) if np.ndim(target_std) else target_std
             console_log(msg=f"Adjusted target values for safe values: M = {target_mean_log:.4f}, SD = {target_std_log:.4f}", indent_level=0,color=Bcolors.WARNING, verbose=self.verbose > 2)
@@ -913,7 +1071,7 @@ class ImageProcessor(InformativeBaseModel):
         )
         for idx, im in enumerate(buffer_collection):
             im2 = im3D(im.copy())
-            M, SD, min, max = compute_stats(im=im2, binary_mask=self.bool_masks[idx])
+            M, SD, im_min, im_max = compute_stats(im=im2, binary_mask=self.bool_masks[idx])
             target_mean_i = target_means[idx]
             target_std_i = target_stds[idx]
 
@@ -927,7 +1085,7 @@ class ImageProcessor(InformativeBaseModel):
             else:
                 im2[self.bool_masks[idx]] = target_mean_i
 
-            M, SD, min, max = compute_stats(im=im2, binary_mask=self.bool_masks[idx])
+            M, SD, im_min, im_max = compute_stats(im=im2, binary_mask=self.bool_masks[idx])
 
             # Save resulting image
             console_log(msg=f"Target values: M = {target_mean_i:.4f}, SD = {target_std_i:.4f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
