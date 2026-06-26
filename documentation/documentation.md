@@ -192,25 +192,48 @@ The choice between N and N-1 divisors depends on the **statistical context**:
 
 ### 4. **RGB to Grayscale Conversion**
 
-#### MATLAB `rgb2gray()` - Legacy Standard
+#### MATLAB `rgb2gray()` / NTSC-YIQ Intensity
+
+MATLAB-compatible grayscale conversion follows the Y channel of the historical
+NTSC/YIQ transform. Although this conversion is often written with rounded
+Rec.601-style coefficients,
+
 ```matlab
 % Uses Rec.ITU-R BT.601-7 (SD monitors)
-Y' = 0.299 * R + 0.587 * G + 0.114 * B
+Y = 0.298936021293775 * R + 0.587043074451121 * G + 0.114020904255103 * B
 ```
-- **Rec.ITU-R BT.601-7**: Standard-Definition television (1982)
-- **Legacy standard** optimized for CRT monitors
+
+In SHINIER, this MATLAB/NTSC-compatible intensity image can be obtained with:
+
+```python
+gray = rgb2gray(image, weighting_standard="rec601", matlab_601=True)
+```
+
+or, equivalently:
+
+```python
+gray = rgb2ntsc_intensity(image)
+```
+
+This path is mainly useful for MATLAB compatibility and NTSC/YIQ intensity
+workflows. SHINIER's default modern grayscale preprocessing instead uses the CIE
+`xyY` luminance channel after RGB linearization. When `legacy_mode=True` is set
+in `Options`, SHINIER's color preprocessing automatically switches to this
+MATLAB-compatible path (`rgb2gray(..., weighting_standard="rec601", matlab_601=True)`,
+equivalent to `rgb2ntsc_intensity`) for grayscale images.
 
 #### SHINIER `rgb2gray()` - Modern Standards Support
 ```python
-def rgb2gray(image, recommendation='rec709'):
+def rgb2gray(image, weighting_standard='rec709', matlab_601=False):
     """RGB to grayscale conversion with multiple luma coefficient standards"""
     rgb_luma_coefficients = {
         'equal': [0.333, 0.333, 0.333],  # Equal weighting (not perceptually accurate)
-        'rec601': [0.298936021293775, 0.587043074451121, 0.114020904255103],  # SD legacy
-        'rec709': [0.2126, 0.7152, 0.0722],  # HD standard (recommended)
-        'rec2020': [0.2627, 0.6780, 0.0593]   # UHD standard
+        'rec601': [0.222004309998231, 0.706654765925283, 0.0713409240764864],
+        'rec709': [0.21263900587151, 0.715168678767756, 0.0721923153607337],
+        'rec2020': [0.262700212011267, 0.677998071518871, 0.059301716469862],
     }
-    weights = rgb_luma_coefficients[recommendation]
+    matlab_rgb2gray_weights = [0.298936021293775, 0.587043074451121, 0.114020904255103]
+    weights = matlab_rgb2gray_weights if weighting_standard == 'rec601' and matlab_601 else rgb_luma_coefficients[weighting_standard]
     return np.dot(image.astype(np.float64), weights)
 ```
 
@@ -232,6 +255,12 @@ Different luma coefficients are optimized for different **display technologies**
 
 **WARNING AND REMINDER**: Ajusting for the luminance transfer functions implemented in image-capturing devices 
 and the precise calibration of display monitors are essential for accurate visual stimuli presentation.
+
+### 5. **Convolution — FMA and Unit in the Last Place (ULP)**
+
+MATLAB's `filter2` delegates to Intel MKL / Apple Accelerate, which uses **Fused Multiply-Add (FMA)** instructions. FMA computes `a × b + c` with a **single rounding step** instead of two, producing intermediate float64 values that can differ by ±1–2 ULP from NumPy's vectorised equivalent.
+
+At half-integer boundaries this shifts ~0.1 % of pixels by ±1 gray level. There is **no solution** in pure Python: the exact accumulation order inside MKL's `filter2` is undocumented and platform-dependent.
 
 ---
 
@@ -325,10 +354,26 @@ mode = 8  # spec_match → hist_match
 - Composite modes use temporary floating-point precision
 - Reduces rounding errors in multi-step calculations
 
-### Mode 9: Dithering Only
+### Mode 9: Standalone Per-Image Transform
 ```python
-mode = 9  # only dithering
+mode = 9 #  standalone_op = "ie_methods" or "dithering"
+
+standalone_op = "ie_methods" # Image enhancement (default)
+ie_methods = "tidhe"         # Available algorithms: "tidhe", "rdfhe", "nfldice", "betce", "sfcef", "classic_he"
+
+standalone_op = "dithering"
+dithering = 1  # Dithering method (0 = none, 1 = Noisy-bit, 2 = Floyd-Steinberg)
 ```
+
+Applies a standalone transform to each image independently — no inter-image target is computed.
+
+---
+
+### Histogram Equalization: Exact Specification and Histogram-Derived Remapping
+
+**Exact histogram specification (EHS)** (`target_hist="equal"`, `mode=2` or modes 5–8) ranks individual pixels and assigns them to a uniform target, achieving an exactly flat histogram on the discrete image.
+
+**Histogram-derived methods** (`mode=9`, `standalone_op="ie_methods"`) apply a gray-level mapping computed from the image's own CDF — optionally after partitioning, clipping, or fuzzifying the histogram (`classic_he`, `tidhe`, `rdfhe`, …). Because all pixels at the same input level map to the same output, an exactly uniform histogram is not generally achievable.
 
 ---
 
@@ -440,6 +485,10 @@ class Options:
     fft_padding_mode: Literal[0, 1, 2, 3] = 0
     fft_padding_value: Union[int, Literal[300]] = 300
 
+    # --- Mode 9 ---
+    standalone_op: Literal["dithering", "ie_methods"] = "ie_methods"
+    ie_methods: Literal["classic_he", "tidhe", "rdfhe", "nfldice", "betce", "sfcef"] = "tidhe"
+
     # --- Misc ---
     verbose: Literal[-1, 0, 1, 2, 3] = 0
 ```
@@ -492,7 +541,7 @@ class ImageProcessor:
     verbose: Literal[-1, 0, 1, 2, 3] = 0
 
     # --- Private attributes ---
-    _backward_conversion_type: str = PrivateAttr(default=None)
+    _backward_color_conversion: str = PrivateAttr(default=None)
     _color_space: Literal['uvw01', 'xyY'] = PrivateAttr(default='xyY')
     _complete: bool = PrivateAttr(default=False)
     _dataset_map: dict = PrivateAttr(default_factory=dict)
@@ -687,6 +736,75 @@ mask_from_gui = masker.interactive_mask(image)
 2. Quantize with rounding
 3. Preserve overall image structure
 
+### 5. Classic Global Histogram Equalization (Classic HE)
+
+**Algorithm:**
+1. Compute the intensity histogram of the image
+2. Compute the cumulative distribution function (CDF)
+3. Map each intensity level *y* to `round(255 × CDF(y))`
+4. Apply the look-up table to every pixel and cast to uint8
+
+The output histogram is approximately flat over [0, 255]. Maximizes contrast globally but can over-enhance noise on natural images. Implemented by `shinier.utils.classic_he_gray`.
+
+### 6. Tripartite Image Decomposition-Based Histogram Equalization (TIDHE)
+**Reference:** [Rahman, H., & Shimamura, T. (2026). Tripartite image decomposition-based histogram equalization to enhance slightly low-contrast and low-contrast images. ICIC Express Letters, 20(3), 321-332.](https://doi.org/10.24507/icicel.20.03.321)
+
+**Algorithm:**
+1. Find two partitioning levels where the cumulative histogram reaches ~1/3 and ~2/3 of total pixels (Eqs. 1-2)
+2. Split the histogram into three equal-mass sub-bands: lower, middle, upper
+3. Clip each sub-histogram at the average of its mean and median to control enhancement rate (Eqs. 3-5)
+4. Equalize each sub-band independently via its clipped CDF (Eqs. 9-11)
+
+### 7. Recursive Dualistic Fuzzy Histogram Equalization (RDFHE)
+**Reference:** [Rahman, H., Mostofa, S., Akter, T., & Rashedunnabi, A. H. M. (2026, April). Efficient enhancement of images using recursive dualistic fuzzy histogram equalization. In *2026 IEEE 2nd International Conference on Quantum Photonics, Artificial Intelligence & Networking (QPAIN)* (pp. 1–6). IEEE.](https://doi.org/10.1109/QPAIN69676.2026.11546014)
+
+**Algorithm:**
+1. Compute a fuzzy image histogram using the reference fuzziness parameter `p=10`
+2. Find three recursive dualistic partitioning levels at ~25%, ~50%, and ~75% of fuzzy histogram mass
+3. Split the fuzzy histogram into four sub-histograms
+4. Equalize each fuzzy sub-histogram independently
+
+Implemented by `shinier.utils.rdfhe_gray`.
+
+### 8. Nonlinear Fuzzification–Linear Defuzzification-Based ICE (NFLDICE)
+**Reference:** [Rahman, H. (2025). A Time-Efficient and Effective Image Contrast Enhancement Technique Using Fuzzification and Defuzzification. In *Proceedings of Trends in Electronics and Health Informatics* (Lecture Notes in Networks and Systems, vol. 1034, pp. 45–58). Springer.](https://doi.org/10.1007/978-981-97-3937-0_4)
+
+Unlike the fuzzy-histogram methods (DFHE/RDFHE), NFLDICE is a fuzzy **set-theoretic** technique: it operates directly on gray levels as fuzzy sets rather than on the histogram.
+
+**Algorithm:**
+1. Fuzzify each gray level with the nonlinear (logistic) fuzzifier `F_X(I_o) = 1 / (1 + B^(−E_l·((I_o − P_l)/(L−1))))`, producing a membership value in (0, 1) (Eqs. 1-2)
+2. Defuzzify the membership with the linear defuzzifier `D_L(I_f) = I_f × (L − 1)`, rescaling back to the gray-level range (Eqs. 3-4)
+3. Apply the resulting monotonic look-up table to every pixel and cast to uint8
+
+Reference parameters: `B=10`, `E_l=5`, `P_l=127.5`, `L=256`. Implemented by `shinier.utils.nfldice_gray`.
+
+### 9. Bi-Entropy Curve Equalization (BETCE)
+**Reference:** [Rahman, H. (2025). Bi-Entropy Curve Equalization for Enhancement of Images. In *2025 7th International Conference on Electrical Information and Communication Technology (EICT)* (pp. 1–6). IEEE.](https://doi.org/10.1109/EICT68394.2025.11355632)
+
+BETCE is a state-of-the-art curve-based algorithm for very low-contrast grayscale images. It replaces the image histogram with an entropy curve, partitions that curve into lower and upper sub-curves, and equalizes each sub-curve independently.
+
+**Algorithm:**
+1. Compute the entropy curve `ET(i) = -p_y(i) log2(p_y(i))` from the image intensity probabilities (Eq. 1)
+2. Compute the partitioning level `pl` as the weighted arithmetic mean of gray levels using `ET(i)` as weights (Eq. 2)
+3. Split `ET` into lower and upper sub-entropy curves `ET_l` and `ET_u` (Eqs. 3-4)
+4. Equalize each sub-entropy curve independently and apply the resulting look-up table to every pixel (Eq. 5)
+
+Implemented by `shinier.utils.betce_gray`.
+
+### 10. Sakaguchi-Type Function-Based Cost-Effective Filtering (SFCEF)
+**Reference:** [Rahman, H., Sugiura, Y., & Shimamura, T. (2025). Enhancement of low-light images using Sakaguchi-type function-based cost-effective filtering. *Pattern Analysis and Applications*, 28, 193.](https://doi.org/10.1007/s10044-025-01578-8)
+
+SFCEF is a state-of-the-art filtering-based algorithm for low-light grayscale images. It builds one 3x3 convolution filter from coefficient bounds of a Sakaguchi/Gegenbauer geometric function class, then filters the input image directly.
+
+**Algorithm:**
+1. Set `phi=0.5`, `x=1`, and `t=0.5` for low-light images (`t=-1` is reported for low-contrast images)
+2. Compute the coefficient bounds `a1`, `a2`, and `a3` of `G_S(phi)` (Eqs. 1-3)
+3. Compute `c1` and `c2` from the fixed linear-combination weights `d1=d3=1/8`, `d2=d4=d6=0`, and `d5=1` (Eqs. 4-5)
+4. Build the proposed 3x3 filter with `c1` around the center and `c2` at the center
+5. Convolve the image with the 3x3 filter and cast to uint8
+
+Implemented by `shinier.utils.sfcef_gray`.
+
 ---
 
 <a id="memory-management-and-performance"></a>
@@ -727,18 +845,24 @@ class ImageListIO:
 - `Options`: Parameter validation
 - `ImageListIO`: Image loading/saving
 - `ImageDataset`: Collection management
-- `ImageProcessor`: Image processing
-- `Converter`: Luminance preservation and minimal chroma distortion.
-- `GamutControl`: Chroma-loss minimization.
+- `ImageProcessor`: Image processing pipeline and CLI
+- `Converter`: Luminance preservation and minimal chroma distortion
+- `GamutControl`: Chroma-loss minimization
+- `Utils`: Utility functions (`rescale_images255`, histogram helpers, etc.)
 
 **Test Images:**
 - Noise-generated images for testing
 - Binary masks for figure-ground separation
 - Reference images for validation
 
-### MATLAB Validation
+### Validation Tests
 
-**TODO**
+`ImageProcessor_validation_test.py` runs a combinatorial sweep over all `Options` parameters in three coverage modes (`sampled`, `pruned`, `exhaustive`).
+It distinguishes **hard failures** (unexpected exceptions, broken internal invariants, SSIM final regression, RMSE more than doubled) from **soft failures** (minor RMSE regression expected in composite modes, SSIM sub-iteration rollback artifacts).
+See `tests/README.md` for a detailed breakdown.
+
+`ImageEnhancement_validation_test.py` validates each image-enhancement algorithm (TIDHE, RDFHE, NFLDICE, BETCE, SFCEF) against pixel-exact MATLAB reference outputs stored as SHA-256 hashes in `tests/assets/image_enhancement_matlab_sha256.json`.
+SFCEF uses a pixel-difference bound (`max_diff ≤ 1`) instead of exact hash equality due to FMA-induced rounding differences between MATLAB and NumPy.
 
 ---
 

@@ -55,5 +55,5 @@ from .ImageDataset import ImageDataset
 from .ImageListIO import ImageListIO
 from .ImageProcessor import ImageProcessor
 from .SHINIER import SHINIER_CLI
-from .utils import StimulusMasker
+from .utils import StimulusMasker, imstats, ImageStats
 from . import color

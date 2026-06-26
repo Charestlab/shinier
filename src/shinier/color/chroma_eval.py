@@ -187,28 +187,41 @@ def _quantize_ab(
     return a_q, b_q, bins
 
 
-def relative_mean_chroma_loss_pct_global_lab(
+def mean_chroma_loss_pct_lab(
     *,
     converter: ColorTreatment,
     srgb_before_01: np.ndarray,
     srgb_after_01: np.ndarray,
     eps: float = 1e-12,
 ) -> Tuple[float, float, float]:
-    """Compute global relative mean chroma loss in CIE Lab.
+    """Compute the global relative mean chroma loss percentage in CIELAB.
 
-    The metric is:
-        100 * (E[C*_before] - E[C*_after]) / E[C*_before]
-    where:
-        C* = sqrt(a*^2 + b*^2)
+    Both sRGB images are converted to CIE Lab, and chroma is computed for each
+    pixel as ``C* = sqrt(a*^2 + b*^2)``..
+
+    The relative mean chroma loss percentage is defined as::
+
+   ``100 * (E[C*_before] - E[C*_after]) / E[C*_before]``
+
+    where ``E`` denotes the mean across all image pixels. A positive percentage
+    indicates a reduction in mean chroma, whereas a negative percentage indicates
+    an increase.
 
     Parameters
-    ----------        converter: ColorTreatment instance (used for sRGB->Lab).
-        srgb_before_01: Original sRGB image in [0,1], shape (H, W, 3).
-        srgb_after_01: Processed sRGB image in [0,1], shape (H, W, 3).
-        eps: Small constant to avoid division by zero.
+    ----------
+    converter : ColorTreatment
+        Converter used for sRGB-to-Lab conversion.
+    srgb_before_01 : np.ndarray
+        Original sRGB image in [0, 1], shape ``(H, W, 3)``.
+    srgb_after_01 : np.ndarray
+        Processed sRGB image in [0, 1], shape ``(H, W, 3)``.
+    eps : float
+        Small constant to avoid division by zero.
 
     Returns
-    -------        A tuple: (loss_pct, mean_c_before, mean_c_after).
+    -------
+    tuple
+        ``(loss_pct, mean_c_before, mean_c_after)``.
     """
     lab0 = converter.sRGB_to_lab(srgb_before_01)
     lab1 = converter.sRGB_to_lab(srgb_after_01)
@@ -223,7 +236,7 @@ def relative_mean_chroma_loss_pct_global_lab(
     return float(loss_pct), mean_c0, mean_c1
 
 
-def chroma_information_retention_lab_ab(
+def lab_chroma_retention(
     converter: ColorTreatment,
     srgb_before_01: np.ndarray,
     srgb_after_01: np.ndarray,
@@ -232,7 +245,54 @@ def chroma_information_retention_lab_ab(
     nbits_per_axis: int = 8,
     ab_range: Tuple[float, float] = (-128.0, 127.0),
 ) -> ChromaInfoRetention:
-    """Compute chroma information retention (CIR) using sparse MI on quantized Lab (a*,b*)."""
+    """""Compute Chroma Information Retention (CIR) in quantized CIELAB ab* space.
+
+    Both sRGB images are converted to CIELAB, and their a* and b* components
+    are jointly quantized into discrete chroma states. The function computes
+    chroma entropy before and after processing, as well as the mutual
+    information between the original and processed chroma states.
+
+    Chroma information retention is defined as::
+
+        CIR = I(X; Y) / H(X)
+
+    where ``X`` represents the original Lab a*b* chroma states, ``Y`` represents
+    the processed Lab a*b* chroma states, ``I(X; Y)`` is their mutual
+    information, and ``H(X)`` is the entropy of the original chroma states.
+
+    The retention value is clipped to [0, 1]. Values near 1 indicate that most
+    of the original chroma information is retained, whereas values near 0
+    indicate low retention.
+
+    Parameters
+    ----------
+    converter : ColorTreatment
+        Converter used to transform sRGB images to CIE Lab.
+    srgb_before_01 : np.ndarray
+        Original sRGB image in [0, 1], with shape ``(H, W, 3)``.
+    srgb_after_01 : np.ndarray
+        Processed sRGB image in [0, 1], with shape ``(H, W, 3)``.
+    mask : np.ndarray, optional
+        Boolean mask with shape ``(H, W)`` restricting the calculation to
+        selected pixels.
+    nbits_per_axis : int, optional
+        Number of quantization bits used independently for the Lab a* and b*
+        components.
+    ab_range : tuple of float, optional
+        Minimum and maximum Lab a* and b* values retained before quantization.
+        Values outside this range are clipped.
+
+    Returns
+    -------
+    ChromaInfoRetention
+        Lab chroma entropy before and after processing, mutual information,
+        and chroma information retention.
+
+    Raises
+    ------
+    ValueError
+        If ``mask`` does not match the spatial dimensions of the images.
+    """
     lab0 = converter.sRGB_to_lab(srgb_before_01)
     lab1 = converter.sRGB_to_lab(srgb_after_01)
 
@@ -280,6 +340,7 @@ def chroma_information_retention_lab_ab(
     # safe: denom > 0 by construction, but guard anyway
     valid = (pxy > 0.0) & (denom > 0.0)
 
+    # MI: mutual information, in bits per pixel
     mi = float(np.sum(pxy[valid] * np.log2(pxy[valid] / denom[valid])))
 
     cir = float(mi / h_x)
@@ -295,13 +356,16 @@ def _validate_srgb_01(srgb: np.ndarray) -> np.ndarray:
     being clipped to [0..1]).
 
     Parameters
-    ----------        srgb: Image array of shape (H, W, 3). Expected range [0, 1].
+    ----------        
+        srgb: Image array of shape (H, W, 3). Expected range [0, 1].
 
     Returns
-    -------        Float64 sRGB in [0, 1].
+    -------      
+        Float64 sRGB in [0, 1].
 
     Raises
-    ------        ValueError: If shape is wrong or values are outside [0,1] by a non-trivial margin.
+    ------        
+        ValueError: If shape is wrong or values are outside [0,1] by a non-trivial margin.
     """
     if srgb.ndim != 3 or srgb.shape[-1] != 3:
         raise ValueError(f"Expected sRGB image shape (H,W,3). Got {srgb.shape}")
@@ -457,7 +521,7 @@ def _mean_chroma(
     return float(np.mean(c))
 
 
-def compute_chroma_metrics_for_image(
+def chroma_metrics_for_image(
     srgb_01: np.ndarray,
     *,
     y1: float,
@@ -642,7 +706,7 @@ def aggregate_chroma_metrics(
     rows: List[AggregateRow] = []
     for y1 in y1_values:
         metrics = [
-            compute_chroma_metrics_for_image(
+            chroma_metrics_for_image(
                 img,
                 y1=float(y1),
                 rec_standard=rec_standard,
@@ -718,7 +782,7 @@ def _save_errorbar_plot(
     plt.close()
 
 
-def generate_chroma_loss_report(
+def build_chroma_loss_report(
     images_srgb_01: Sequence[np.ndarray],
     *,
     y1_values: Union[np.ndarray, Iterable[float]],
@@ -1045,8 +1109,8 @@ def generate_chroma_loss_report(
 # =============================================================================
 # Backward-compatible function (entropy-only)
 # =============================================================================
-
-def chroma_info_loss_bits_per_pixel_vs_y1(
+    
+def chroma_info_loss_bpp(
     srgb_01: np.ndarray,
     *,
     rec_standard: REC_STANDARD = "rec709",
@@ -1056,13 +1120,49 @@ def chroma_info_loss_bits_per_pixel_vs_y1(
     measure_mask: Optional[np.ndarray] = None,
     low_y_only: bool = False,
 ) -> List[ChromaInfoLossResult]:
-    """Compute legacy entropy-only chroma information loss vs ``y1``.
+    """Compute entropy-based chroma information loss in bits per pixel vs ``y1``.
+
+    For each y1 value, the function applies the current low-luminance
+    desaturation treatment and measures the resulting chroma information loss.
+    Chroma information is quantified as the joint Shannon entropy before and 
+    after processing.
+
+    Information loss is defined as::
+
+    ``loss_bpp = H_before - H_after``
+
+    A positive value indicates a reduction in chroma information after
+    processing, whereas a negative value indicates an increase.
+
+    Parameters
+    ----------
+    srgb_01 : np.ndarray
+        sRGB image in [0, 1], with shape (H, W, 3).
+    rec_standard : REC_STANDARD
+        Color standard: "rec601", "rec709", or "rec2020".
+    y1_values : iterable of float
+        Low-luminance thresholds to evaluate.
+    nbits_per_axis : int
+        Quantization bits per CIE Lab a* and b* axis.
+    ab_range : tuple of float
+        Clipping range for CIE Lab a* and b* before quantization.
+    measure_mask : np.ndarray, optional
+        Boolean mask with shape (H, W) restricting the measurements.
+    low_y_only : bool
+        If True, restrict measurements to pixels where Y_orig < y1.
+
+    Returns
+    -------
+    list of ChromaInfoLossResult
+        Entropy before and after processing, information loss in bits per pixel,
+        affected-pixel fraction, and number of measured pixels for each y1
+        value.
 
     Notes
     -----
     - Input must be float in [0, 1]. This function is strict and raises on
       uint8-style [0, 255] input.
-    - For richer metrics, use ``generate_chroma_loss_report``.
+    - For richer metrics, use ``build_chroma_loss_report``.
     """
     srgb = _validate_srgb_01(srgb_01)
 

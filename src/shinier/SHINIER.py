@@ -9,7 +9,8 @@ from shinier.Options import ACCEPTED_IMAGE_FORMATS, OPTION_TYPES
 from shinier import ImageDataset, Options, ImageProcessor, REPO_ROOT
 from shinier.utils import (
     Bcolors, console_log, load_np_array, colorize,
-    print_shinier_header, generate_pydantic_key_value_dict
+    print_shinier_header, pydantic_model_choices,
+    IMAGE_ENHANCEMENT_METHODS,
 )
 
 # Compute repo root as parent of /src/shinier/
@@ -191,6 +192,8 @@ def options_display(opts):
     if opts.whole_image != 1:
         types.append('mask')
     types += ['mode', 'color', 'dithering_memory']
+    if opts.mode == 9:
+        types.append('mode9')
     if opts.mode == 1:
         types.append('luminance')
     if opts.mode in (2, 5, 6, 7, 8):
@@ -306,7 +309,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
         "Histogram + Spectrum",
         "Spatial frequency + Histogram",
         "Spectrum + Histogram",
-        "Dithering only"
+        "Dithering or HE"
     ])
     opts.mode = mode
 
@@ -316,6 +319,31 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
 
     # --------- Custom Profile ---------
     if prof == 3:
+        if mode == 9:
+            _op = prompt("Standalone operation (mode 9)", default=2,
+                         kind="choice", choices=[
+                             "Dithering — apply dithering then uint8 cast",
+                             "Image enhancement — transform each image independently",
+                         ])
+            if _op == 1:
+                _dith = prompt("Which dithering method?", default=1,
+                               kind="choice", choices=["Noisy-bit dithering", "Floyd–Steinberg dithering"])
+                opts.dithering = _dith
+                opts.standalone_op = "dithering"
+            else:
+                _ie_method_names = list(IMAGE_ENHANCEMENT_METHODS)
+                _he = prompt("Image enhancement algorithm", default=2,
+                             kind="choice", choices=[
+                                 "Classic HE — global histogram equalization (CDF mapping)",
+                                 "TIDHE — tripartite histogram equalization per image",
+                                 "RDFHE — recursive dualistic fuzzy histogram equalization",
+                                 "NFLDICE — nonlinear fuzzification–linear defuzzification ICE",
+                                 "BETCE — bi-entropy curve equalization",
+                                 "SFCEF — Sakaguchi-type cost-effective filtering",
+                             ])
+                opts.standalone_op = "ie_methods"
+                opts.ie_methods = _ie_method_names[_he - 1]
+
         as_gray = prompt("Load images as grayscale?", default="No", kind="bool")
         opts.as_gray = as_gray == 1
         linear_luminance = prompt("Are pixel values linearly related to luminance?", default=2, kind='choice', choices=[
@@ -373,17 +401,12 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             opts.rec_standard = rec_standard
 
         opts.conserve_memory = prompt("Conserve memory (creates a temporary directory and keep only one image in RAM)?", default='y', kind="bool")
-
         # Dithering
         dith_choices = ["No dithering", "Noisy-bit dithering", "Floyd–Steinberg dithering"]
         if mode != 9:
             dith = prompt("Apply dithering before final uint8 cast?", default=1,
                           kind="choice", choices=dith_choices)
             opts.dithering = dith - 1
-        else:
-            dith = prompt("Which dithering is going to be applied?", default=1,
-                          kind="choice", choices=dith_choices[1:])
-            opts.dithering = dith
 
         # Seed
         now = datetime.now()
@@ -413,7 +436,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
             image_exts = "/".join(f".{ext}" for ext in ACCEPTED_FORMATS)
             thp1 = prompt("How should the target histogram be defined?", default=1, kind="choice", choices=[
                 'Average histogram of input images [default]',
-                'Flat histogram a.k.a. `histogram equalization`',
+                'Equal target histogram (a.k.a. flat histogram or `histogram equalization`)',
                 'Derive histogram from an input image file',
                 'Load histogram from a precomputed array (.npy)'
             ])
@@ -551,7 +574,12 @@ def main():
             fig.savefig(args.save_path, dpi=150)
             print(f"Processing overview figure saved successfully at: {args.save_path}")
         else:
-            plt.show()
+            import matplotlib
+            if matplotlib.get_backend().lower() == "agg":
+                print("Non-interactive backend detected — use --save-path to save the figure to a file.")
+                plt.close(fig)
+            else:
+                plt.show()
 
 
 if __name__ == "__main__":

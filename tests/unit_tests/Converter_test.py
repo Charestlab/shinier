@@ -13,7 +13,8 @@ Run via:
 
 import numpy as np
 import pytest
-from shinier.color import ColorConverter, WHITE_D65, COLOR_STANDARDS
+from shinier.ImageListIO import ImageListIO
+from shinier.color import ColorConverter, ColorTreatment, WHITE_D65, COLOR_STANDARDS, rgb2gray, rgb2ntsc_intensity
 
 pytestmark = pytest.mark.unit_tests
 
@@ -141,3 +142,86 @@ def test_repr_and_assignment_behavior():
     c.rec_standard = "rec601"
     assert np.isclose(c.gamma, COLOR_STANDARDS["rec601"]["gamma"])
     assert np.allclose(c.M_RGB2XYZ, COLOR_STANDARDS["rec601"]["M_RGB2XYZ"])
+
+
+def test_rgb2ntsc_intensity_uses_matlab_yiq_weights(rgb_sample: np.ndarray):
+    """NTSC intensity is the Y channel from MATLAB's rgb2ntsc/YIQ transform."""
+    weights = np.array([0.298936021293775, 0.587043074451121, 0.114020904255103])
+    direct = rgb2gray(rgb_sample, weighting_standard="rec601", matlab_601=True)
+
+    np.testing.assert_allclose(direct, np.tensordot(rgb_sample, weights, axes=([-1], [0])))
+    np.testing.assert_allclose(rgb2ntsc_intensity(rgb_sample), direct)
+
+
+def test_legacy_grayscale_forward_uses_matlab_ntsc_intensity(rgb_sample: np.ndarray):
+    """Legacy grayscale color treatment uses MATLAB-compatible NTSC/YIQ intensity."""
+    image = (rgb_sample * 255).astype(np.float64)
+    images = ImageListIO(input_data=[image], conserve_memory=False)
+
+    result, other = ColorTreatment.forward_color_treatment(
+        rec_standard="rec601",
+        input_images=images,
+        output_images=images,
+        linear_luminance=False,
+        as_gray=True,
+        legacy_mode=True,
+    )
+
+    np.testing.assert_allclose(result[0], rgb2ntsc_intensity(image))
+    assert other is None
+
+
+def test_legacy_grayscale_backward_does_not_gamma_encode() -> None:
+    """Legacy grayscale output keeps MATLAB-compatible intensities unchanged."""
+    gray = np.array([[0.0, 64.0], [128.0, 255.0]], dtype=np.float64)
+    images = ImageListIO(input_data=[gray], conserve_memory=False)
+
+    result = ColorTreatment.backward_color_treatment(
+        rec_standard="rec601",
+        input_images=images,
+        output_images=images,
+        linear_luminance=False,
+        as_gray=True,
+        legacy_mode=True,
+    )
+
+    np.testing.assert_allclose(result[0], np.dstack([gray, gray, gray]))
+
+
+def test_legacy_grayscale_backward_skips_gamma_non_legacy_applies_it() -> None:
+    """Explicitly verify that legacy_mode controls gamma encoding in the grayscale backward pass.
+
+    legacy_mode=True must return Y values unchanged (no sRGB transfer function).
+    legacy_mode=False must apply linRGB_to_sRGB, producing different values for mid-range inputs.
+    If the legacy_mode branch is missing or broken both results would be identical.
+    """
+    from shinier.color.Converter import ColorConverter
+    # Mid-range linear values where gamma makes a measurable difference (not 0 or 1)
+    gray = np.array([[50.0, 100.0], [150.0, 200.0]], dtype=np.float64)
+
+    images_legacy = ImageListIO(input_data=[gray.copy()], conserve_memory=False)
+    images_non_legacy = ImageListIO(input_data=[gray.copy()], conserve_memory=False)
+
+    result_legacy = ColorTreatment.backward_color_treatment(
+        rec_standard="rec601", input_images=images_legacy, output_images=images_legacy,
+        linear_luminance=False, as_gray=True, legacy_mode=True,
+    )
+    result_non_legacy = ColorTreatment.backward_color_treatment(
+        rec_standard="rec601", input_images=images_non_legacy, output_images=images_non_legacy,
+        linear_luminance=False, as_gray=True, legacy_mode=False,
+    )
+
+    # legacy_mode=True: output must equal input replicated (no gamma applied)
+    np.testing.assert_allclose(result_legacy[0], np.dstack([gray, gray, gray]), atol=1e-6,
+                               err_msg="legacy_mode=True must leave Y values unchanged")
+
+    # legacy_mode=False: output must equal gamma-encoded Y replicated
+    converter = ColorConverter(rec_standard="rec601")
+    Y_linear = gray / 255.0
+    Y_gamma = converter.linRGB_to_sRGB(Y_linear[..., np.newaxis])[..., 0] * 255
+    np.testing.assert_allclose(result_non_legacy[0], np.dstack([Y_gamma, Y_gamma, Y_gamma]), atol=1e-6,
+                               err_msg="legacy_mode=False must apply sRGB gamma encoding")
+
+    # The two must differ — if the branch was missing this would fail
+    assert not np.allclose(result_legacy[0], result_non_legacy[0]), \
+        "legacy_mode=True and legacy_mode=False must produce different outputs for mid-range values"

@@ -105,6 +105,36 @@ def test_processor_init_from_folder(test_tmpdir: Path):
     assert len(proc.dataset.images) > 0
 
 
+def test_print_log_results_records_options(test_tmpdir: Path) -> None:
+    """Processing logs should include the selected options."""
+    inp = _prepare_temp_images(test_tmpdir)
+    out = test_tmpdir / "OUTPUT"
+    out.mkdir()
+    opt = Options(input_folder=inp, output_folder=out, mode=9, standalone_op="ie_methods", ie_methods="tidhe")
+    proc = ImageProcessor(dataset=ImageDataset(options=opt), options=opt, verbose=0, from_unit_test=True)
+    proc.validation.append({
+        "iter": 0,
+        "step": 0,
+        "processing_function": "hist_match",
+        "image": "test.png",
+        "channel": None,
+        "valid_result": True,
+        "log_result": "RMS error = 0",
+    })
+
+    proc.print_log_results()
+
+    logs = sorted(out.glob("log_*.txt"))
+    assert len(logs) == 1
+    text = logs[0].read_text()
+    assert "[Options]" in text
+    assert "mode: 9" in text
+    assert "standalone_op: 'ie_methods'" in text
+    assert "ie_methods: 'tidhe'" in text
+    assert f"output_folder: {out}" in text
+    assert "channel=all; processing function=hist_match" in text
+
+
 def test_processor_log_and_results(test_tmpdir: Path) -> None:
     """Processor should produce log entries and valid result arrays."""
     arrays = [_make_rgb(seed=s) for s in range(2)]
@@ -365,3 +395,155 @@ def test_lum_match_constant_image_zero_std_is_stable(test_tmpdir: Path) -> None:
     mean_after, std_after = _stats(proc.dataset.buffer[0])
     assert mean_after == pytest.approx(140.0, abs=1e-6)
     assert std_after == pytest.approx(0.0, abs=1e-9)
+
+
+def _build_hist_match_processor(
+    test_tmpdir: Path,
+    images: list[np.ndarray],
+    target_hist: str,
+    as_gray: bool = True,
+) -> ImageProcessor:
+    """Build a processor wired for direct hist_match unit tests."""
+    inp, out = _make_input_output_dirs(test_tmpdir)
+    opt = Options(
+        input_folder=inp,
+        output_folder=out,
+        mode=2,
+        target_hist=target_hist,
+        as_gray=as_gray,
+        hist_optim=False,
+        verbose=-1,
+    )
+    io = ImageListIO(input_data=images, conserve_memory=True)
+    ds = ImageDataset(images=io, options=opt)
+    ds.buffer = ImageListIO(
+        input_data=[im.astype(np.float64) for im in images], conserve_memory=True
+    )
+    proc = ImageProcessor(dataset=ds, options=opt, verbose=-1, from_unit_test=True)
+    proc.bool_masks = [np.ones(im.shape[:2], dtype=bool) for im in images]
+    proc._sum_bool_masks = [
+        np.ones((*im.shape[:2], 1), dtype=bool) for im in images
+    ]
+    proc._is_first_operation = True
+    proc._is_last_operation = True
+    proc._initial_buffer = ds.buffer
+    proc._compute_initial_target_histogram()
+    return proc
+
+
+def _build_ie_processor(
+    test_tmpdir: Path,
+    images: list[np.ndarray],
+    ie_algorithm: str = "classic_he",
+) -> ImageProcessor:
+    """Build a processor wired for direct ie_methods unit tests (mode=9)."""
+    inp, out = _make_input_output_dirs(test_tmpdir)
+    opt = Options(
+        input_folder=inp,
+        output_folder=out,
+        mode=9,
+        standalone_op="ie_methods",
+        ie_methods=ie_algorithm,
+        as_gray=True,
+        verbose=-1,
+    )
+    io = ImageListIO(input_data=images, conserve_memory=True)
+    ds = ImageDataset(images=io, options=opt)
+    ds.buffer = ImageListIO(
+        input_data=[im.astype(np.float64) for im in images], conserve_memory=True
+    )
+    proc = ImageProcessor(dataset=ds, options=opt, verbose=-1, from_unit_test=True)
+    proc.bool_masks = [np.ones(im.shape[:2], dtype=bool) for im in images]
+    proc._sum_bool_masks = [
+        np.ones((*im.shape[:2], 1), dtype=bool) for im in images
+    ]
+    proc._is_first_operation = True
+    proc._is_last_operation = True
+    proc._initial_buffer = ds.buffer
+    return proc
+
+
+def _make_gray(h: int = 64, w: int = 64, seed: int = 0) -> np.ndarray:
+    """Create a random grayscale image with float64 values in [0, 255]."""
+    rng = np.random.default_rng(seed)
+    return rng.integers(0, 256, (h, w), dtype=np.uint8).astype(np.float64)
+
+
+@pytest.mark.parametrize("ie_algorithm", ["classic_he", "tidhe", "rdfhe", "nfldice", "betce", "sfcef"])
+def test_image_enhancement_output_shape_preserved(test_tmpdir: Path, ie_algorithm: str) -> None:
+    """ie_methods must preserve image shape for each image-enhancement algorithm."""
+    img3d = _make_gray()[:, :, np.newaxis]
+    proc = _build_ie_processor(test_tmpdir, [img3d], ie_algorithm=ie_algorithm)
+    proc.ie_methods()
+    assert proc.dataset.buffer[0].shape == img3d.shape
+
+
+@pytest.mark.parametrize("ie_algorithm", ["classic_he", "tidhe", "rdfhe", "nfldice", "betce", "sfcef"])
+def test_image_enhancement_output_range(test_tmpdir: Path, ie_algorithm: str) -> None:
+    """ie_methods output must stay within [0, 255]."""
+    img3d = _make_gray()[:, :, np.newaxis]
+    proc = _build_ie_processor(test_tmpdir, [img3d], ie_algorithm=ie_algorithm)
+    proc.ie_methods()
+    result = proc.dataset.buffer[0]
+    assert result.min() >= -1e-6
+    assert result.max() <= 255 + 1e-6
+
+
+def test_image_enhancement_records_article_metrics(test_tmpdir: Path) -> None:
+    """ie_methods should log diagnostic metrics used to evaluate enhancement."""
+    img3d = _make_gray()[:, :, np.newaxis]
+    proc = _build_ie_processor(test_tmpdir, [img3d], ie_algorithm="tidhe")
+
+    proc.ie_methods()
+
+    log_result = proc.validation[-1]["log_result"]
+    assert proc.validation[-1]["processing_function"] == "ie_methods"
+    assert proc.validation[-1]["channel"] == "all"
+    for metric in ("AMBE=", "MSSIM=", "PSNR=", "BP2BPSIM=", "CI=", "Entropy="):
+        assert metric in log_result
+
+
+@pytest.mark.parametrize("ie_algorithm", ["classic_he", "tidhe", "rdfhe", "nfldice", "betce", "sfcef"])
+def test_image_enhancement_multiple_images_independent(test_tmpdir: Path, ie_algorithm: str) -> None:
+    """ie_methods must process each image independently."""
+    img1 = np.full((64, 64, 1), 80.0, dtype=np.float64)
+    img1[10:30, 10:30] = 200.0
+    img2 = _make_gray(seed=7)[:, :, np.newaxis]
+    proc = _build_ie_processor(test_tmpdir, [img1, img2], ie_algorithm=ie_algorithm)
+    proc.ie_methods()
+    for r in (proc.dataset.buffer[0], proc.dataset.buffer[1]):
+        assert r.min() >= -1e-6
+        assert r.max() <= 255 + 1e-6
+
+
+@pytest.mark.parametrize("ie_algorithm", ["classic_he", "tidhe", "rdfhe", "nfldice", "betce", "sfcef"])
+def test_image_enhancement_runs_with_mask_present(test_tmpdir: Path, ie_algorithm: str) -> None:
+    """ie_methods must still run when masks are attached to the processor."""
+    img = _make_gray()[:, :, np.newaxis]
+    proc = _build_ie_processor(test_tmpdir, [img], ie_algorithm=ie_algorithm)
+    mask = np.zeros((64, 64), dtype=bool)
+    mask[:32, :] = True
+    proc.bool_masks = [mask]
+    proc.ie_methods()
+    result = proc.dataset.buffer[0]
+    assert result.shape == img.shape
+    assert result.min() >= -1e-6
+    assert result.max() <= 255 + 1e-6
+
+
+def test_equal_target_hist_accepted_and_runs(test_tmpdir: Path) -> None:
+    """target_hist='equal' must be accepted by Options and produce a valid result."""
+    img = _make_gray()[:, :, np.newaxis]
+    proc = _build_hist_match_processor(test_tmpdir, [img], "equal")
+    proc.hist_match()
+    result = proc.dataset.buffer[0]
+    assert result.shape == img.shape
+    assert result.min() >= -1e-6
+    assert result.max() <= 255 + 1e-6
+
+
+def test_target_hist_unrecognised_string_rejected_by_options(test_tmpdir: Path) -> None:
+    """Options must reject any unrecognised target_hist string."""
+    inp, out = _make_input_output_dirs(test_tmpdir)
+    with pytest.raises((ValueError, ValidationError)):
+        Options(input_folder=inp, output_folder=out, target_hist="not_a_valid_value")
