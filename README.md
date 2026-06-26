@@ -133,7 +133,7 @@ And documentation:
 If you use **SHINIER**, please cite both of these articles:
 
 ### References
-- Salvas-Hébert, M., Dupuis-Roy, N., Landry, C., Charest, I., & Gosselin, F. (2025). *The SHINIER the Better: An Adaptation of the SHINE Toolbox on Python*
+- Salvas-Hébert, M., Dupuis-Roy, N., Landry, C., Charest, I., & Gosselin, F. (2026). *SHINIER: An Open-Source Python Package for Controlling Low-Level Image Properties*
 - Willenbockel, V., Sadr, J., Fiset, D., Horne, G. O., Gosselin, F., & Tanaka, J. W. (2010). Controlling low-level image properties: The SHINE toolbox. *Behavior Research Methods, 42*(3), 671–684. https://doi.org/10.3758/BRM.42.3.671
 
 ---
