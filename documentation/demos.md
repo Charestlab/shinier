@@ -30,7 +30,7 @@
 6 = hist_match & spec_match
 7 = sf_match & hist_match
 8 = spec_match & hist_match
-9 = only dithering
+9 = standalone per-image transform (ie_methods or dithering)
 ```
 
 ---
@@ -332,21 +332,42 @@ opts = Options(
 
 ---
 
-### Mode 9 – only dithering
+### Mode 9 – Standalone Per-Image Transform
+
+Mode 9 applies a standalone transform to each image independently — no inter-image target is computed. The operation is selected via `standalone_op`.
+
+#### 9a – Image Enhancement (`standalone_op="ie_methods"`)
 
 ```python
 """
-Mode 9 (only dithering): applies noisy-bit dithering Allard & Faubert, 2008).
+Mode 9 / ie_methods: applies a histogram equalization algorithm to each image
+  independently. Available algorithms: classic_he, tidhe, rdfhe, nfldice, betce, sfcef.
 
-Example use case: dithering will be applied with the default noisy-bit method
-  (Allard & Faubert, 2008), while leaving the original image luminance and
-  spectrum unchanged.
+Example use case: TIDHE is applied to each image independently. No inter-image
+  target is computed; each image is enhanced based on its own histogram.
 """
 opts = Options(
     input_folder=INPUT_FOLDER,
     output_folder=OUTPUT_FOLDER,
     mode = 9,
-    dithering = 1
+    standalone_op = "ie_methods",
+    ie_methods = "tidhe",        # classic_he | tidhe | rdfhe | nfldice | betce | sfcef
+)
+```
+
+#### 9b – Dithering only (`standalone_op="dithering"`)
+
+```python
+"""
+Mode 9 / dithering: applies noisy-bit dithering (Allard & Faubert, 2008),
+  leaving the original image luminance and spectrum unchanged.
+"""
+opts = Options(
+    input_folder=INPUT_FOLDER,
+    output_folder=OUTPUT_FOLDER,
+    mode = 9,
+    standalone_op = "dithering",
+    dithering = 1                # 1 = noisy-bit, 2 = Floyd-Steinberg
 )
 ```
 

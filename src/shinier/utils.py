@@ -270,7 +270,7 @@ class MatlabOperators:
         """Replicates MATLAB's rgb2gray function (ITU-R rec601)."""
         if image.ndim >= 3:
             from shinier.color.Converter import rgb2gray
-            return rgb2gray(image=image[..., :3], conversion_type='rec601', matlab_601=True)
+            return rgb2gray(image=image[..., :3], weighting_standard='rec601', matlab_601=True)
         else:
             return image
 
@@ -568,8 +568,12 @@ class StimulusMasker:
         return np.apply_along_axis(convolve, 1, image)
     
 
-def get_field_values_from_pydantic_model(field):
-    """Return all possible categorical values for a Pydantic field."""
+def pydantic_field_choices(field):
+    """Return all possible categorical values for a Pydantic model field.
+
+    Handles Literal, Union, bool, and Path annotations. Falls back to the
+    field default when no categorical type is detected.
+    """
     ann = field.annotation
 
     def extract_values(ann_type):
@@ -628,13 +632,17 @@ def get_field_values_from_pydantic_model(field):
     return unique_vals
 
 
-def generate_pydantic_key_value_dict(model_cls):
-    """Return dict of field → possible values for a Pydantic model."""
+def pydantic_model_choices(model_cls):
+    """Return (possible_values, default_values) for all fields of a Pydantic model.
+
+    Uses ``pydantic_field_choices`` per field to enumerate categorical options
+    (Literal, Union, bool). Non-categorical fields fall back to their default.
+    """
     possible_values = {}
     default_values = {}
     for name, field in model_cls.model_fields.items():
         try:
-            possible_values[name] = get_field_values_from_pydantic_model(field)
+            possible_values[name] = pydantic_field_choices(field)
             default = field.default_factory() if getattr(field, "default_factory", None) is not None else field.default
             default_values[name] = str(default) if isinstance(default, Path) else default
         except Exception as e:
@@ -653,6 +661,7 @@ def hist_plot(
     descriptives: bool = False,
     ax: Optional[plt.Axes] = None,
     show_normalized_rmse: bool = False,
+    show_gradient_bar: bool = True,
 ) -> Tuple[plt.Figure, Tuple[Any, Any]]:
 
     """Display a histogram with optional target and descriptive statistics.
@@ -692,6 +701,10 @@ def hist_plot(
 
     show_normalized_rmse : bool
         If True, shows normalized RMSE between two normalized histograms.
+
+    show_gradient_bar : bool
+        If True (default), appends a grayscale gradient bar below the histogram
+        using ``make_axes_locatable``.
 
     Returns
     -------
@@ -785,19 +798,23 @@ def hist_plot(
         ax_hist.spines[spine].set_visible(False)
 
     # --- grayscale gradient bar directly under the histogram axis ---
-    divider = make_axes_locatable(ax_hist)
-    ax_bar = divider.append_axes("bottom", size="4%", pad=0.0)  # pad=0.0 to stick to the axis
-    gradient = np.linspace(0, 1, 256, dtype=np.float64).reshape(1, -1)
-    ax_bar.imshow(gradient, cmap='gray', aspect='auto', extent=[0, 255, 0, 1])
-    ax_bar.set_xlim(ax_hist.get_xlim())
-    ax_bar.set_xticks([])
-    ax_bar.set_yticks([])
-    for spine in ax_bar.spines.values():
-        spine.set_visible(False)
-    xlabel_text = "Pixel intensity"
-    ax_bar.set_xlabel(xlabel_text, fontname=fontname, labelpad=2)
-    if ax is None:
-        fig.subplots_adjust(bottom=0.18)
+    ax_bar = None
+    if show_gradient_bar:
+        divider = make_axes_locatable(ax_hist)
+        ax_bar = divider.append_axes("bottom", size="4%", pad=0.0)  # pad=0.0 to stick to the axis
+        gradient = np.linspace(0, 1, 256, dtype=np.float64).reshape(1, -1)
+        ax_bar.imshow(gradient, cmap='gray', aspect='auto', extent=[0, 255, 0, 1])
+        ax_bar.set_xlim(ax_hist.get_xlim())
+        ax_bar.set_xticks([])
+        ax_bar.set_yticks([])
+        for spine in ax_bar.spines.values():
+            spine.set_visible(False)
+        xlabel_text = "Pixel intensity"
+        ax_bar.set_xlabel(xlabel_text, fontname=fontname, labelpad=2)
+        if ax is None:
+            fig.subplots_adjust(bottom=0.18)
+    else:
+        ax_hist.set_xlabel("Pixel intensity", fontname=fontname)
 
     # ----------------- descriptives overlay (μ and ±1σ) -----------------
     if descriptives:
@@ -966,6 +983,7 @@ def imhist_plot(
     ax_bar, ax_hist = hist_plot(
         hist=hist_normalized,
         bins=bins,
+        title=title if ax is not None else None,
         target_hist=target_hist,
         descriptives=descriptives,
         ax=ax_hist,
@@ -984,7 +1002,7 @@ def imhist_plot(
 
 
 def freq_axis(n: int) -> np.ndarray:
-    """Compute spatial frequency axis for image spectrum"""
+    """Compute the spatial-frequency axis for image spectra."""
     # MATLAB:
     # even n:   -n/2 : n/2-1
     # odd  n:   -n/2 : n/2-1  (with halves → -2.5,-1.5,...,+1.5 for n=5)
@@ -997,7 +1015,7 @@ def freq_axis(n: int) -> np.ndarray:
 
 
 def get_radius_grid(x_size: int, y_size: int, legacy_mode: bool = False) -> np.ndarray:
-    """Compute the radius grid for rotational average"""
+    """Compute the radius grid for rotational averages."""
     f2 = freq_axis(x_size)  # rows
     f1 = freq_axis(y_size)  # cols
     XX, YY = np.meshgrid(f1, f2)  # shape (xs, ys)
@@ -1327,7 +1345,7 @@ def im_power_spectrum_plot(im: np.ndarray, with_colorbar: bool = True):
     if arr.ndim == 3 and arr.shape[2] >= 3:
         from shinier.color.Converter import rgb2gray
         # suppose rgb2gray dispo; sinon fais la combinaison manuelle
-        gray = rgb2gray(arr, conversion_type='rec709').astype(np.float64, copy=False)
+        gray = rgb2gray(arr, weighting_standard='rec709').astype(np.float64, copy=False)
     else:
         gray = arr.astype(np.float64, copy=False)
 
@@ -1651,6 +1669,13 @@ def exact_histogram(
     -------
     tuple[np.ndarray, list]
         Histogram-specified image and order-accuracy values per channel.
+
+    Notes
+    -----
+    The ``'noise'`` strategy intentionally deviates from SHINE's ``match.m``, which uses
+    one-sided noise ``rand() * 0.1`` in ``[0, 0.1]``. SHINIER uses centered noise in
+    ``[-noise_level, +noise_level]`` with an adaptive level, avoiding the systematic
+    upward bias introduced by MATLAB's one-sided approach.
     """
     # --- Validate and prepare inputs ---
     L = n_bins if n_bins is not None else None
@@ -1730,6 +1755,9 @@ def exact_histogram(
                 console_log(msg=msg, indent_level=1, color=Bcolors.WARNING, verbose=True)
             noise_level = 0.1
         elif tie_strategy == 'noise':
+            # SHINE's legacy match.m uses rand(size(image)) * 0.1, i.e. one-sided noise in [0, 0.1].
+            # We intentionally deviate: centered noise in [-noise_level, +noise_level] with an
+            # adaptive level is better at breaking ties without introducing a systematic bias.
             noise_level = tie_breaking_noise_level(image)
             im_sort = image.astype(np.float64, copy=True)
         if tie_strategy == 'noise' or hybrid_extra_step:
@@ -1994,6 +2022,14 @@ def soft_clip(arr: np.ndarray,
     -------
     np.ndarray
         Clipped and possibly rescaled array.
+
+    Notes
+    -----
+    Frequency-based matching routinely produces out-of-range values; MATLAB
+    silently hard-clips them via a ``uint8`` cast. SHINIER intentionally
+    deviates from this even in ``legacy_mode``: hard clipping distorts the
+    matched spectrum, so ``soft_clip`` rescales the array to limit clipping to
+    at most ``max_percent`` of values, preserving the distribution shape.
     """
 
     def _zero_clip_mean_preserving(arr, a, b):
@@ -2902,6 +2938,109 @@ def console_log(msg: str, indent_level: int = 0, color: Optional[str] = None, ve
     return msg
 
 
+def tidhe_hist_plot(
+    img: np.ndarray,
+    ax: Optional[plt.Axes] = None,
+    title: Optional[str] = None,
+    figsize: tuple = (9, 5),
+    dpi: int = 100,
+    show_gradient_bar: bool = True,
+) -> Tuple[plt.Figure, plt.Axes]:
+    """Plot the TIDHE histogram decomposition for a 2D image.
+
+    The histogram is divided at pl_l and pl_u into lower, middle, and
+    upper sub-histograms containing approximately equal pixel proportions
+    (P_l, P_m, and P_u). Dashed lines show the clipping level of
+    each sub-histogram, computed from its mean and median bin counts. The three
+    intensity ranges are inferred from the partitioning levels.
+
+
+    Parameters
+    ----------
+    img : np.ndarray
+        2D intensity image. If a 3D array is provided, the first channel is used
+        as-is; the function does not infer color-space semantics. Values are
+        rounded and clipped to uint8.
+    ax : plt.Axes, optional
+        Existing axes to draw into. If omitted, a new figure is created.
+    title : str, optional
+        Plot title.
+    figsize : tuple
+        Figure size when ``ax`` is not provided.
+    dpi : int
+        Figure DPI when ``ax`` is not provided.
+    show_gradient_bar : bool
+        If True (default), appends a grayscale gradient bar.
+
+    Returns
+    -------
+    Tuple[plt.Figure, plt.Axes]
+        Figure and main histogram axes.
+    """
+    # Convert to uint8 and compute TIDHE parameters
+    gray_u8 = np.clip(np.round((img[..., 0] if img.ndim == 3 else img).astype(np.float64)), 0, 255).astype(np.uint8)
+    hist_raw = np.bincount(gray_u8.ravel(), minlength=256).astype(np.float64)
+    n_pixels = hist_raw.sum()
+    cdf = np.cumsum(hist_raw) / n_pixels
+    pl_l = np.intp(np.clip(np.argmin(np.abs(cdf - 1.0 / 3.0)), 0, 253))
+    pl_u = np.intp(np.clip(np.argmin(np.abs(cdf - 2.0 / 3.0)), pl_l + 1, 254))
+    bands = ((0, pl_l), (pl_l + 1, pl_u), (pl_u + 1, 255))
+    names = ("l", "m", "u")
+    clip_levels_raw = [(np.mean(hist_raw[s:e + 1]) + np.median(hist_raw[s:e + 1])) / 2.0 for s, e in bands]
+    fractions = [hist_raw[s:e + 1].sum() / n_pixels for s, e in bands]
+
+    # Normalize for hist_plot (probability frequencies)
+    hist_norm = hist_raw / n_pixels
+    clip_levels_norm = [cl / n_pixels for cl in clip_levels_raw]
+
+    # Base histogram via hist_plot
+    fig, (ax_bar, ax_hist) = hist_plot(
+        hist=hist_norm,
+        ax=ax,
+        title=title,
+        figsize=figsize,
+        dpi=dpi,
+        show_gradient_bar=show_gradient_bar,
+    )
+    legend = ax_hist.get_legend()
+    if legend is not None:
+        legend.remove()
+
+    # TIDHE-specific overlays
+    xs = np.arange(256)
+    y_top = max(hist_norm.max(), max(clip_levels_norm)) * 1.18
+    for (s, e), color, cl_norm in zip(bands, ("#d8e7f7", "#ddf0df", "#f8dfcd"), clip_levels_norm):
+        ax_hist.fill_between(xs[s:e + 1], hist_norm[s:e + 1], color=color, zorder=0)
+        ax_hist.hlines(cl_norm, s, e, colors="#7e2f8e", lw=1.8, linestyles="--")
+    ax_hist.vlines([pl_l, pl_u], 0, y_top, colors="#d95319", lw=2.0)
+    ax_hist.set_ylim(0, y_top)
+
+    # Summary box: p_l/p_u are partition levels; P_l/P_m/P_u are pixel proportions.
+    summary = "\n".join(
+        [rf"$p_l={pl_l},\ p_u={pl_u}$"]
+        + [rf"$P_l={fractions[0]:.3f},\ P_m={fractions[1]:.3f},\ P_u={fractions[2]:.3f}$"]
+        + [rf"$cl_l={clip_levels_raw[0]:.0f},\ cl_m={clip_levels_raw[1]:.0f},\ cl_u={clip_levels_raw[2]:.0f}$"]
+    )
+    ax_hist.text(
+        0.985, 0.955, summary,
+        transform=ax_hist.transAxes,
+        ha="right", va="top", fontsize=8, color="0.18",
+        bbox={"boxstyle": "round,pad=0.28", "facecolor": "white", "edgecolor": "0.82", "alpha": 0.88},
+    )
+
+    # Partitioning level ticks on gradient bar (or ax_hist if no bar)
+    if ax_bar is not None:
+        ax_bar.set_xticks([pl_l, pl_u])
+        ax_bar.set_xticklabels([rf"$pl_l={pl_l}$", rf"$pl_u={pl_u}$"])
+        ax_bar.tick_params(axis="x", pad=2, length=3, labelsize=9)
+        ax_bar.xaxis.label.set_size(10)
+    else:
+        ax_hist.set_xticks([pl_l, pl_u])
+        ax_hist.set_xticklabels([rf"$pl_l={pl_l}$", rf"$pl_u={pl_u}$"])
+
+    return fig, ax_hist
+
+
 def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_figure: bool = True, show_initial_target: bool = False) -> plt.Figure:
     """Display before/after images and diagnostics for all processing steps in one figure.
 
@@ -2936,8 +3075,10 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
     >>> fig = show_processing_overview(processor, img_idx=0, show_figure=False)
     """
 
-    import os, matplotlib
-    if not show_figure and os.environ.get("DISPLAY", "") == "":
+    import os, sys, matplotlib
+    # Use Agg only on headless Linux (no DISPLAY/WAYLAND); macOS and Windows have native GUI backends
+    _headless = sys.platform.startswith("linux") and not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY")
+    if not show_figure and _headless:
         matplotlib.use("Agg")
 
     fontname = 'Arial'
@@ -3131,6 +3272,38 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
             axL.set_title(f"Before – spectrum\n({row_label})", fontsize=10, fontname=fontname, pad=8)
             axR.set_title(f"After – spectrum\n({row_label})", fontsize=10, fontname=fontname, pad=8)
 
+        # ---- Histogram equalization (HE or TIDHE) ----
+        elif base_step == "ie_methods":
+            op = getattr(processor.options, "ie_methods", "tidhe")
+            if op == "tidhe":
+                tidhe_hist_plot(
+                    img=processor._initial_buffer[img_idx],
+                    ax=axL,
+                    title="Input histogram and TIDHE partition",
+                )
+                tidhe_hist_plot(
+                    img=processor._final_buffer[img_idx],
+                    ax=axR,
+                    title="Output histogram after TIDHE",
+                )
+                tidhe_ymax = max(axL.get_ylim()[1], axR.get_ylim()[1])
+                axL.set_ylim(0, tidhe_ymax)
+                axR.set_ylim(0, tidhe_ymax)
+            elif op in ("classic_he", "rdfhe", "betce", "nfldice"):
+                ce_label = "classic histogram equalization" if op == "classic_he" else op.upper()
+                _ = imhist_plot(
+                    img=processor._initial_buffer[img_idx],
+                    descriptives=False,
+                    title=f"Before – {ce_label}",
+                    ax=axL,
+                )
+                _ = imhist_plot(
+                    img=processor._final_buffer[img_idx],
+                    descriptives=False,
+                    title=f"After – {ce_label}",
+                    ax=axR,
+                )
+
         # ---- Dithering ----
         elif base_step == "dithering":
             # Dithering only affects appearance (already visible in row 1)
@@ -3302,8 +3475,8 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, data_range: Optional[float
     all_sens = []
     all_mssim = []
     for ch in range(C):
-        X = img1_3D[:, :, ch]
-        Y = img2_3D[:, :, ch]
+        X = img1_3D[:, :, ch].astype(np.float64)
+        Y = img2_3D[:, :, ch].astype(np.float64)
 
         # Local means (Gaussian)
         ux = convolve_2d(X, g1d)
@@ -3376,18 +3549,26 @@ def ssim_sens(image1: np.ndarray, image2: np.ndarray, data_range: Optional[float
 class StepSizeController:
     """Three-regime adaptive step-size controller for SSIM optimization.
 
-    Behavior:
-      A) If SSIM increases noticeably → accept, keep weight.
-      B) If SSIM increases only slightly (stall) → restart with larger weight.
-      C) If SSIM decreases → restart with smaller weight.
+    Behavior
+    --------
+    A. If SSIM increases noticeably, accept and keep the weight.
+    B. If SSIM increases only slightly, restart with a larger weight.
+    C. If SSIM decreases, restart with a smaller weight.
 
     Attributes
-    ----------        gain_up (float): Multiplier when escaping a stall (default=1.3).
-        gain_down (float): Multiplier when correcting overshoot (default=0.6).
-        stall_thresh (float): ΔSSIM below which we consider a stall (default=1e-5).
-        alpha_min (float): Minimum allowed step size.
-        alpha_max (float): Maximum allowed step size.
-        max_stall_iter (int): Maximum allowed number of stalled iterations.
+    ----------
+    gain_up : float
+        Multiplier when escaping a stall.
+    gain_down : float
+        Multiplier when correcting overshoot.
+    stall_thresh : float
+        SSIM change below which the optimization is considered stalled.
+    alpha_min : float
+        Minimum allowed step size.
+    alpha_max : float
+        Maximum allowed step size.
+    max_stall_iter : int
+        Maximum allowed number of stalled iterations.
     """
 
     def __init__(
@@ -3420,17 +3601,20 @@ class StepSizeController:
         """Update step size and decide whether to restart or accept.
 
         Parameters
-        ----------            alpha (float): Current step-size weight.
-            ssim_new (float): Current mean SSIM value.
-            Y_new (np.ndarray): Current image.
-            gradient_new (np.ndarray): Current gradient from ssim_sens()
+        ----------
+        alpha : float
+            Current step-size weight.
+        ssim_new : float
+            Current mean SSIM value.
+        Y_new : np.ndarray
+            Current image.
+        gradient_new : np.ndarray
+            Current gradient from ``ssim_sens``.
 
         Returns
-        -------            (alpha_new, Y_next, restart)
-                alpha_new       : Updated step-size weight.
-                Y_next          : Either new image or reverted one.
-                gradient_next   : Either new gradient or reverted one.
-                restart         : Whether a restart is needed.
+        -------
+        tuple
+            ``(alpha_new, ssim_next, Y_next, gradient_next, restart, done)``.
         """
         restart = False
         self.restart_reason = " "
@@ -3487,6 +3671,70 @@ class StepSizeController:
         return alpha, ssim_new, Y_new, gradient_new, restart, done
 
 
+def mean_spectrum(magnitudes: Sequence[np.ndarray], shape: tuple) -> np.ndarray:
+    """Average magnitude spectrum across a list of spectra.
+
+    Parameters
+    ----------
+    magnitudes : Sequence[np.ndarray]
+        Per-image magnitude spectra to average.
+    shape : tuple
+        Shape of a single image, used to allocate the accumulator. A trailing
+        channel axis is added if missing.
+
+    Returns
+    -------
+    np.ndarray
+        Mean spectrum as a 3D array ``(H, W, C)``.
+    """
+    acc = im3D(np.zeros(shape))
+    for mag in magnitudes:
+        acc += mag
+    acc /= len(magnitudes)
+    return im3D(acc)
+
+
+def corr_rmse_per_item(
+    items: Sequence[np.ndarray],
+    target: np.ndarray,
+    normalize_rmse: bool = False,
+    mode: Literal["assume [0, 1]", "actual range", "expected range", "histogram"] = "actual range",
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Correlation coefficient and RMSE of each item against a shared target.
+
+    Each item and the target are flattened before comparison.
+
+    Parameters
+    ----------
+    items : Sequence[np.ndarray]
+        Arrays to compare against ``target`` (e.g. per-image histograms or
+        spectra).
+    target : np.ndarray
+        Reference array compared against every item.
+    normalize_rmse : bool, optional
+        If True, use :func:`normalized_rmse` (with ``mode``); otherwise use
+        :func:`compute_rmse`.
+    mode : str, optional
+        Normalization mode forwarded to :func:`normalized_rmse`.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Correlation coefficients and RMSE values, one per item.
+    """
+    target_flat = target.ravel()
+    N = len(items)
+    corr, rms = np.zeros((N,)), np.zeros((N,))
+    for idx, item in enumerate(items):
+        item_flat = item.ravel()
+        corr[idx] = np.corrcoef(item_flat, target_flat)[0, 1]
+        if normalize_rmse:
+            rms[idx] = normalized_rmse(item_flat, target_flat, mode=mode)
+        else:
+            rms[idx] = compute_rmse(item_flat, target_flat)
+    return corr, rms
+
+
 def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], target_hist: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """Validate histogram matching with correlation and RMSE metrics.
 
@@ -3526,18 +3774,16 @@ def hist_match_validation(images: ImageListIO, binary_masks: List[np.ndarray], t
         target_hist = target_hist / (target_hist.sum(axis=0, keepdims=True) + 1e-12)
 
     # Compute metric
-    N = len(initial_hist)
-    corr, rms = np.zeros((N,)), np.zeros((N,))
-    for idx, a_hist in enumerate(initial_hist):
-        corr[idx] = np.corrcoef(a_hist.ravel(), target_hist.ravel())[0, 1]
-        if normalize_rmse:
-            rms[idx] = normalized_rmse(a_hist.ravel(), target_hist.ravel(), mode='histogram')
-        else:
-            rms[idx] = compute_rmse(a_hist.ravel(), target_hist.ravel())
-    return corr, rms
+    return corr_rmse_per_item(initial_hist, target_hist, normalize_rmse, mode='histogram')
 
 
-def sf_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+def sf_match_validation(
+    images: ImageListIO,
+    target_spectrum: Optional[np.ndarray] = None,
+    normalize_rmse: bool = False,
+    fft_padding_mode: Literal[0, 1, 2, 3] = 0,
+    fft_padding_value: Union[int, Literal[300]] = 300,
+) -> Tuple[np.ndarray, np.ndarray]:
     """Validate spatial-frequency matching with correlation and RMSE metrics.
 
     Validates spectral match between a set of input images by comparing their
@@ -3552,6 +3798,12 @@ def sf_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndarra
         used.
     normalize_rmse : bool, optional
         If True, return normalized RMSE.
+    fft_padding_mode : int, optional
+        Padding mode for FFT (0 = no padding). Must match the mode used to
+        produce ``target_spectrum`` so that source and target spectra are at
+        the same spatial scale.
+    fft_padding_value : int, optional
+        Constant padding value when ``fft_padding_mode=3``.
 
     Returns
     -------
@@ -3559,20 +3811,21 @@ def sf_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndarra
         Correlation coefficients and RMSE values.
     """
 
-    x_size, y_size = images[0].shape[:2]
     n_channels = 1 if images[0].ndim == 2 else 3
 
-    # Compute spectra and mean spectrum if required
-    magnitudes, phases = get_images_spectra(images=images)
+    # Compute spectra with the same padding as the target
+    magnitudes, phases = get_images_spectra(
+        images=images,
+        fft_padding_mode=fft_padding_mode,
+        fft_padding_value=fft_padding_value,
+    )
     if target_spectrum is None:
-        target_spectrum = im3D(np.zeros(images[0].shape))
-        for idx, mag in enumerate(magnitudes):
-            target_spectrum += mag
-        target_spectrum /= len(magnitudes)
+        target_spectrum = mean_spectrum(magnitudes, images[0].shape)
     target_spectrum = im3D(target_spectrum)
 
-    # Returns the frequencies of the image, bins range from -0.5f to 0.5f (0.5f is the Nyquist frequency) 1/y_size is the distance between each pixel in the image
-    r_int = get_radius_grid(x_size=x_size, y_size=y_size)
+    # Radius grid at the (padded) spectrum scale — must match source magnitude shape
+    ts_x, ts_y = target_spectrum.shape[:2]
+    r_int = get_radius_grid(x_size=ts_x, y_size=ts_y)
     target_rot_avg = []
     initial_rot_avg = []
     for idx, image in enumerate(images):
@@ -3591,18 +3844,16 @@ def sf_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndarra
         initial_rot_avg.append(np.stack(ira).T)
 
     # Compute metrics
-    N = len(initial_rot_avg)
-    corr, rms = np.zeros((N,)), np.zeros((N,))
-    for idx, ira in enumerate(initial_rot_avg):
-        corr[idx] = np.corrcoef(ira.ravel(), target_rot_avg.ravel())[0, 1]
-        if normalize_rmse:
-            rms[idx] = normalized_rmse(ira.ravel(), target_rot_avg.ravel(), mode='actual range')
-        else:
-            rms[idx] = compute_rmse(ira.ravel(), target_rot_avg.ravel())
-    return corr, rms
+    return corr_rmse_per_item(initial_rot_avg, target_rot_avg, normalize_rmse, mode='actual range')
 
 
-def spec_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndarray] = None, normalize_rmse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+def spec_match_validation(
+    images: ImageListIO,
+    target_spectrum: Optional[np.ndarray] = None,
+    normalize_rmse: bool = False,
+    fft_padding_mode: Literal[0, 1, 2, 3] = 0,
+    fft_padding_value: Union[int, Literal[300]] = 300,
+) -> Tuple[np.ndarray, np.ndarray]:
     """Validate Fourier-spectrum matching with correlation and RMSE metrics.
 
     Validates spectral matching of input images by comparing the spectra of each
@@ -3620,13 +3871,23 @@ def spec_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndar
         used.
     normalize_rmse : bool, optional
         If True, return normalized RMSE.
+    fft_padding_mode : int, optional
+        Padding mode for FFT (0 = no padding). Must match the mode used to
+        produce ``target_spectrum`` so that source and target spectra are at
+        the same spatial scale.
+    fft_padding_value : int, optional
+        Constant padding value when ``fft_padding_mode=3``.
 
     Returns
     -------
     tuple[np.ndarray, np.ndarray]
         Correlation coefficients and RMSE values.
     """
-    magnitudes, phases = get_images_spectra(images=images)
+    magnitudes, phases = get_images_spectra(
+        images=images,
+        fft_padding_mode=fft_padding_mode,
+        fft_padding_value=fft_padding_value,
+    )
 
     n_channels = 1 if images[0].ndim == 2 else 3
     compute_target_spectrum = target_spectrum is None
@@ -3635,24 +3896,10 @@ def spec_match_validation(images: ImageListIO, target_spectrum: Optional[np.ndar
         if n_channels_ts != n_channels:
             raise ValueError(f"Target spectrum has {n_channels_ts} channels but images have {n_channels} channels")
 
-    target_spectrum = im3D(np.zeros(images[0].shape)) if compute_target_spectrum else im3D(target_spectrum)
-    if compute_target_spectrum:
-        for idx, mag in enumerate(magnitudes):
-            target_spectrum += mag
-        target_spectrum /= len(magnitudes)
-        target_spectrum = im3D(target_spectrum)
+    target_spectrum = mean_spectrum(magnitudes, images[0].shape) if compute_target_spectrum else im3D(target_spectrum)
 
     # Compute metric
-    N = len(magnitudes)
-    corr, rms = np.zeros((N,)), np.zeros((N,))
-    for idx, a_mag in enumerate(magnitudes):
-        a_mag = im3D(a_mag)
-        corr[idx] = np.corrcoef(a_mag.ravel(), target_spectrum.ravel())[0, 1]
-        if normalize_rmse:
-            rms[idx] = normalized_rmse(a_mag.ravel(), target_spectrum.ravel(), mode='actual range')
-        else:
-            rms[idx] = compute_rmse(a_mag.ravel(), target_spectrum.ravel())
-    return corr, rms
+    return corr_rmse_per_item(magnitudes, target_spectrum, normalize_rmse, mode='actual range')
 
 
 def compute_rmse(image1: np.ndarray, image2: np.ndarray, log: bool = False) -> float:
@@ -3885,7 +4132,7 @@ def rescale_images255(images: ImageListIO, rescaling_option: Literal[0, 1, 2, 3]
     rescaling_option : Literal[0, 1, 2, 3], optional
         Rescaling strategy. ``0`` disables rescaling, ``1`` rescales each image
         independently, ``2`` uses dataset absolute min/max, and ``3`` uses
-        dataset average min/max.
+        dataset average min/max (could necessitate clipping).
     legacy_mode : bool, optional
         If True, convert results with MATLAB-compatible uint8 behavior.
 
@@ -3920,7 +4167,8 @@ def rescale_images255(images: ImageListIO, rescaling_option: Literal[0, 1, 2, 3]
             if rescaling_option == 1:
                 new_image = stretch(new_image) * 255
             else:
-                new_image = (new_image - mn)/(mx - mn) * 255
+                # Clipping needed with Option 3. mn/mx are dataset averages, values could exceed [0, 255].
+                new_image = np.clip((new_image - mn) / (mx - mn) * 255, 0, 255)
             images[idx] = MatlabOperators.uint8(new_image) if legacy_mode else new_image
 
     return images
@@ -4073,6 +4321,405 @@ def imhist(image: np.ndarray, mask: Optional[np.ndarray] = None, n_bins: int = 2
     return count
 
 
+def _validate_uint8_gray(image: np.ndarray, name: str) -> None:
+    """Validate the uint8 grayscale domain used by image-enhancement methods."""
+    if image.ndim != 2:
+        raise ValueError(f"{name} expects a 2D grayscale image")
+    if image.dtype != np.uint8:
+        raise ValueError(f"{name} expects dtype uint8")
+
+
+def _hist256(image: np.ndarray) -> np.ndarray:
+    """Compute a 256-bin uint8 histogram as float64."""
+    return np.bincount(image.ravel(), minlength=256).astype(np.float64)
+
+
+def _apply_uint8_lut(image: np.ndarray, mapping: np.ndarray, legacy_mode: bool) -> np.ndarray:
+    """Apply a 256-entry lookup table to a uint8 image and cast the result."""
+    values = mapping[image]
+    if legacy_mode:
+        return MatlabOperators.uint8(values)
+    return np.clip(np.round(values), 0, 255).astype(np.uint8)
+
+
+def classic_he_gray(image: np.ndarray, legacy_mode: bool = False) -> np.ndarray:
+    """Apply classic global histogram equalization to a 2D grayscale image.
+
+    Maps each intensity level with a normalized cumulative distribution
+    function (CDF), so the first non-empty input level maps to 0 and the last
+    maps to 255. The resulting output histogram is approximately flat over
+    [0, 255].
+
+    This is the standard (classic) CDF-based HE — it maximizes contrast but can
+    over-enhance noise and produce washed-out results on natural images.
+    For a more controlled alternative see :func:`tidhe_gray`.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        2D uint8 grayscale image.
+    legacy_mode : bool, optional
+        If True, use MATLAB-compatible rounding and uint8 cast via
+        :class:`shinier.utils.MatlabOperators`.  Default is False.
+    """
+    _validate_uint8_gray(image, "classic_he_gray")
+
+    hist = _hist256(image)
+    N = np.float64(hist.sum())
+    if N == 0:
+        return image.copy()
+
+    cdf = np.cumsum(hist)
+    cdf_min = cdf[np.flatnonzero(hist)[0]]
+    denom = N - cdf_min
+    if denom == 0:
+        return image.copy()
+
+    mapping = np.float64(255.0) * (cdf - cdf_min) / denom
+    return _apply_uint8_lut(image, mapping, legacy_mode)
+
+
+def tidhe_gray(image: np.ndarray, legacy_mode: bool = True) -> np.ndarray:
+    """Apply TRIPARTITE IMAGE DECOMPOSITION-BASED HISTOGRAM EQUALIZATION (TIDHE).
+
+    TIDHE is a state-of-the-art HE-based contrast-enhancement 
+    algorithm designed for slightly low-contrast and low-contrast grayscale
+    images. It partitions the image into three intensity sub-images, clips
+    their histograms to control the enhancement rate, and equalizes each
+    sub-image independently to limit brightness shifts and artifacts.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        2D uint8 grayscale image.
+    legacy_mode : bool, optional
+        If True (default), use MATLAB-compatible rounding (round-half-away-from-zero)
+        for clipping levels and the final uint8 cast, reproducing ``imTIDHE`` exactly.
+        If False, use standard NumPy rounding and casting.
+
+    References
+    ----------
+    Rahman, H., & Shimamura, T. (2026). Tripartite image decomposition-based histogram 
+    equalization to enhance slightly low-contrast and low-contrast images. ICIC Express 
+    Letters, 20(3), 321-332. https://doi.org/10.24507/icicel.20.03.321
+    """
+    _validate_uint8_gray(image, "tidhe_gray")
+    
+    hist = _hist256(image)
+    N_pixels = np.float64(hist.sum())
+    if N_pixels == 0:
+        return image.copy()
+
+    cdf = np.cumsum(hist) / N_pixels
+    mapping = np.arange(256, dtype=np.float64)
+
+    # Eqs. (1)-(2) - pl_l, pl_u : partitioning levels where cdf ≈ 1/3 and ≈ 2/3
+    # clipped so each of the three bands has at least one bin
+    pl_l = np.intp(np.clip(np.argmin(np.abs(cdf - np.float64(1.0 / 3.0))), 0, 253))
+    pl_u = np.intp(np.clip(np.argmin(np.abs(cdf - np.float64(2.0 / 3.0))), pl_l + 1, 254))
+
+    # Produce y_l′, y_m′, y_u′ by equalizing each sub-band — Eqs. (6)-(11)
+    for start, end in ((0, pl_l), (pl_l + 1, pl_u), (pl_u + 1, 255)):
+        hist_sub = hist[start:end + 1]
+
+        # IHC clipping level: average of mean and median — Eqs. (3)-(5)
+        raw_cl = np.float64((hist_sub.mean() + np.median(hist_sub)) / 2.0)
+        cl = MatlabOperators.round(raw_cl) if legacy_mode else np.round(raw_cl)
+
+        # IHC-clipped sub-histogram
+        ihc = np.minimum(hist_sub, cl)
+        sum_ihc = np.float64(ihc.sum())
+
+        if sum_ihc > 0:
+            # t_l/t_m/t_u transformation functions — Eqs. (9)-(11)
+            mapping[start:end + 1] = np.float64(start) + np.float64(end - start) * np.cumsum(ihc) / sum_ihc
+
+    # Eq. (12) - Apply LUT to every pixel and cast to uint8
+    return _apply_uint8_lut(image, mapping, legacy_mode)
+
+
+def rdfhe_gray(image: np.ndarray, theta: int = 10, legacy_mode: bool = True) -> np.ndarray:
+    """Apply RECURSIVE DUALISTIC FUZZY HISTOGRAM EQUALIZATION (RDFHE). 
+
+    RDFHE is a state-of-the-art fuzzy HE-based contrast-enhancement 
+    algorithm designed for low-contrast grayscale images. It constructs
+    a fuzzy image histogram, recursively partitions it into four intensity 
+    sub-histograms, and equalizes each sub-histogram independently to 
+    enhance contrast while limiting brightness shifts and entropy loss.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        2D uint8 grayscale image.
+    theta : int, optional
+        Fuzziness-related parameter ϑ. Original article uses ``theta=10``.
+    legacy_mode : bool, optional
+        If True (default), use MATLAB-compatible uint8 casting for the final
+        image, reproducing ``imRDFHE`` exactly.
+
+    References
+    ----------
+    Rahman, H., Mostofa, S., Akter, T., & Rashedunnabi, A. H. M. (2026, April).
+    Efficient enhancement of images using recursive dualistic fuzzy histogram
+    equalization. In 2026 IEEE 2nd International Conference on Quantum Photonics,
+    Artificial Intelligence & Networking (QPAIN) (pp. 1–6). IEEE.
+    https://doi.org/10.1109/QPAIN69676.2026.11546014
+    """
+    _validate_uint8_gray(image, "rdfhe_gray")
+    if theta <= 0:
+        raise ValueError("rdfhe_gray expects theta > 0")
+    hist = _hist256(image)
+
+    # Equivalent implementation of Eq. (1) - n_tilde(i): fuzzy image histogram (FIH)
+    # Pixels with the same intensity contribute identically, so Eq. (1) can be 
+    # computed exactly by convolving the ordinary histogram with the triangular
+    # membership function.
+    offsets = np.arange(-(theta - 1), theta, dtype=np.float64)
+    triangular_membership_weights = np.maximum(
+        0.0,
+        1.0 - np.abs(offsets) / np.float64(theta),
+    )
+    n_tilde = np.convolve(hist, triangular_membership_weights, mode="same")
+    N_tilde = np.float64(np.sum(n_tilde))
+    if N_tilde == 0:
+        return image.copy()
+
+    # Eqs. (2), (3), (4) - Partition Levels: pl_1 (≈25% FIH mass), pl_2 (≈50%), pl_3 (≈75%)
+    cdf = np.cumsum(n_tilde) / N_tilde
+    pl_1 = np.intp(np.clip(np.argmin(np.abs(cdf - 0.25)), 0, 252))
+    pl_2 = np.intp(np.clip(np.argmin(np.abs(cdf - 0.50)), pl_1 + 1, 253))
+    pl_3 = np.intp(np.clip(np.argmin(np.abs(cdf - 0.75)), pl_2 + 1, 254))
+
+    mapping = np.arange(256, dtype=np.float64)
+    for start, end in ((0, pl_1), (pl_1 + 1, pl_2), (pl_2 + 1, pl_3), (pl_3 + 1, 255)):
+        n_sub = n_tilde[start:end + 1] # <- n_tilde_1 .. n_tilde_4, Eqs (5), (6), (7), (8)
+        sum_n_sub = np.float64(np.sum(n_sub))
+        if sum_n_sub > 0:
+            # Eq. (9): equalize the sub-histogram onto its own range [start, end].
+            # `start` is the branch offset, `end - start` its output width (t_s, t_d in branch 4).
+            mapping[start:end + 1] = np.float64(start) + np.float64(end - start) * np.cumsum(n_sub) / sum_n_sub
+
+    # x′ - Apply LUT to every pixel and cast to uint8
+    return _apply_uint8_lut(image, mapping, legacy_mode)
+
+
+def nfldice_gray(
+    image: np.ndarray,
+    b: float = 10.0,
+    e_l: float = 5.0,
+    p_l: float = 127.5,
+    legacy_mode: bool = True,
+) -> np.ndarray:
+    """Apply NONLINEAR FUZZIFICATION–LINEAR DEFUZZIFICATION-BASED IMAGE CONTRAST ENHANCEMENT (NFLDICE).
+
+    NFLDICE is a state-of-the-art fuzzy set-theoretic image-enhancement algorithm
+    designed for grayscale images. It maps each gray level to a fuzzy membership
+    value using a nonlinear logistic fuzzifier, then converts the membership
+    value back to the intensity range using a linear defuzzifier. Because the
+    transformation is monotonic and applied independently to each pixel, it
+    enhances contrast while preserving spatial structure and fine details.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        2D uint8 grayscale image.
+    b : float, optional
+        Base ``B`` of the nonlinear fuzzifier. Controls the enhancement level and
+        should be larger than two. Article uses ``b=10`` (default).
+    e_l : float, optional
+        Exponent gain ``E_l`` of the nonlinear fuzzifier. Controls the enhancement
+        level and should be larger than two. Article uses ``e_l=5`` (default).
+    p_l : float, optional
+        Gray level ``P_l`` assigned a membership value of 0.5 (the fuzzifier's
+        inflection point). Article uses ``p_l=127.5`` (default).
+    legacy_mode : bool, optional
+        If True (default), use MATLAB-compatible uint8 casting for the final
+        image, reproducing ``imNFLDICE`` exactly. If False, use standard NumPy
+        rounding and casting.
+
+    References
+    ----------
+    Rahman, H. (2025). A time-efficient and effective image contrast enhancement 
+    technique using fuzzification and defuzzification. In M. Mahmud, M. S. Kaiser, 
+    A. Bandyopadhyay, K. Ray, & S. A. Mamun (Eds.), Trends in electronics and health 
+    informatics (Lecture Notes in Networks and Systems, Vol. 1034, pp. 45–58). 
+    Springer Nature Singapore. https://doi.org/10.1007/978-981-97-3937-0_4
+    """
+    _validate_uint8_gray(image, "nfldice_gray")
+    if b <= 1.0:
+        raise ValueError("nfldice_gray expects b > 1")
+    if e_l <= 0.0:
+        raise ValueError("nfldice_gray expects e_l > 0")
+
+    L = 256
+    levels = np.arange(L, dtype=np.float64)
+
+    # Eqs. (1)-(2) - nonlinear fuzzifier F_X: logistic membership in (0, 1).
+    # P_l is the gray level with membership 0.5; B and E_l set the steepness.
+    membership = 1.0 / (1.0 + b ** (-e_l * ((levels - p_l) / np.float64(L - 1))))
+
+    # Eqs. (3)-(4) - linear defuzzifier D_L: rescale membership to [0, L-1].
+    mapping = membership * np.float64(L - 1)
+
+    # Apply LUT to every pixel and cast to uint8
+    return _apply_uint8_lut(image, mapping, legacy_mode)
+
+
+def betce_gray(image: np.ndarray, legacy_mode: bool = True) -> np.ndarray:
+    """Apply BI-ENTROPY CURVE EQUALIZATION (BETCE).
+
+    BETCE is a state-of-the-art curve-based image-enhancement algorithm for
+    very low-contrast grayscale images. It replaces the image histogram with an
+    entropy curve, partitions that curve into lower and upper sub-curves, and
+    equalizes each sub-curve independently to enhance contrast while limiting
+    mean-brightness shifts and entropy loss.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        2D uint8 grayscale image.
+    legacy_mode : bool, optional
+        If True (default), use MATLAB-compatible rounding and uint8 casting for
+        the final image, reproducing ``imBETCE`` exactly.
+
+    References
+    ----------
+    Rahman, H. (2025). Bi-entropy curve equalization for enhancement of images.
+    In 2025 7th International Conference on Electrical Information and
+    Communication Technology (EICT) (pp. 1–6). IEEE.
+    https://doi.org/10.1109/EICT68394.2025.11355632
+    """
+    _validate_uint8_gray(image, "betce_gray")
+
+    L = 256
+    hist = _hist256(image)
+    N_pixels = np.float64(hist.sum())
+    if N_pixels == 0:
+        return image.copy()
+    prob = hist / N_pixels
+
+    # Eq. (1) - ET(i): entropy curve (ETC)
+    ET = np.zeros(L, dtype=np.float64)
+    nz = prob > 0
+    ET[nz] = -prob[nz] * np.log2(prob[nz])
+    sum_ET = np.float64(np.sum(ET))
+    if sum_ET == 0:
+        return image.copy()
+
+    # Eq. (2) - pl: ETC weighted arithmetic mean
+    levels = np.arange(L, dtype=np.float64)
+    raw_pl = np.sum(levels * ET) / sum_ET
+    pl = np.intp(MatlabOperators.round(raw_pl) if legacy_mode else np.round(raw_pl))
+    pl = np.intp(np.clip(pl, 0, L - 2))
+
+    mapping = levels.copy()
+    for start, end in ((0, pl), (pl + 1, L - 1)):
+        ET_sub = ET[start:end + 1]  # ET_l and ET_u, Eqs. (3), (4)
+        sum_ET_sub = np.float64(np.sum(ET_sub))
+        if sum_ET_sub > 0:
+            # Eq. (5) - equalize each sub-ETC onto its own brightness range
+            mapping[start:end + 1] = np.float64(start) + np.float64(end - start) * np.cumsum(ET_sub) / sum_ET_sub
+
+    return _apply_uint8_lut(image, mapping, legacy_mode)
+
+
+def sfcef_gray(image: np.ndarray, t: float = 0.5, legacy_mode: bool = True) -> np.ndarray:
+    """Apply SAKAGUCHI-TYPE FUNCTION-BASED COST-EFFECTIVE FILTERING (SFCEF).
+
+    SFCEF is a state-of-the-art filtering-based image-enhancement algorithm
+    designed for low-light grayscale images. It computes two filter coefficients
+    from coefficient bounds of a Sakaguchi/Gegenbauer geometric function class,
+    then convolves the image with a single 3x3 filter.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        2D uint8 grayscale image.
+    t : float, optional
+        Fixed parameter of the geometric function class. The article uses
+        ``t=0.5`` for low-light images (default) and ``t=-1`` for low-contrast
+        images.
+    legacy_mode : bool, optional
+        If True (default), use MATLAB-compatible uint8 casting. Exact MATLAB
+        parity is still not guaranteed because MATLAB ``filter2`` may differ
+        from NumPy by one gray level around rounding ties.
+
+    Notes
+    -----
+    Python ``sfcef_gray(..., legacy_mode=True)`` was compared against MATLAB
+    ``imSFCEF`` on the 500 low-light images of the LOL dataset
+    (Kaggle mirror: https://www.kaggle.com/datasets/soumikrakshit/lol-dataset).
+    MATLAB outputs were generated as ``imread -> rgb2gray -> imSFCEF`` and Python
+    outputs used MATLAB-compatible grayscale conversion. The goal of this
+    comparison was to quantify numerical agreement, not to establish that one
+    version is better than the other. No pixel differed by more than one gray
+    level, and 0.45075667% of pixels differed by exactly one gray level.
+
+    Mean metric values (bold = better; max% = worst-case per-image gap vs MATLAB):
+
+    - AMBE     (↓): Py **42.7434** / MATLAB 42.7444   [max 0.0080%]
+    - MSSIM    (↑): Py **0.6633**  / MATLAB 0.6633    [max 0.0191%]
+    - PSNR     (↑): Py **14.7413** / MATLAB 14.7410   [max 0.0145%]
+    - BP2BPSIM (↑): Py 0.5372     / MATLAB **0.5372** [max 0.0242%]
+    - CI       (↑): Py 58.2189    / MATLAB **58.2194** [max 0.0300%]
+    - Entropy  (↑): Py 6.8514     / MATLAB **6.8528**  [max 0.0638%]
+
+    All differences are small enough to be treated as numerical implementation
+    differences.
+
+    References
+    ----------
+    Rahman, H., Sugiura, Y., & Shimamura, T. (2025). Enhancement of low-light
+    images using Sakaguchi-type function-based cost-effective filtering.
+    Pattern Analysis and Applications, 28, 193.
+    https://doi.org/10.1007/s10044-025-01578-8
+    """
+    _validate_uint8_gray(image, "sfcef_gray")
+
+    phi = np.float64(0.5)
+    x = np.float64(1.0)
+    u2 = np.float64(1.0 + t)
+    u3 = np.float64(1.0 + t + t * t)
+
+    # Eqs. (1), (2), (3) - coefficient bounds a1, a2, a3 of G_S(phi)
+    a1 = np.float64(1.0)
+    a2 = (2.0 * phi * x) ** np.float64(3.0 / 2.0) / np.sqrt(
+        phi * (2.0 - u2) ** 2.0
+        - 2.0 * x ** 2.0 * (
+            (phi + phi ** 2.0) * (2.0 - u2) ** 2.0
+            - 2.0 * phi ** 2.0 * ((3.0 - u3) - (2.0 * u2 - u2 ** 2.0))
+        )
+    )
+    a3 = (2.0 * phi * x / (2.0 - u2)) ** 2.0 + (2.0 * phi * x) / (3.0 - u3)
+
+    # Eqs. (4)-(5) with d1=d3=1/8, d2=d4=d6=0, d5=1
+    c1 = (a1 + a3) / 8.0
+    c2 = a2
+
+    # Steps 5-6 - 3x3 filter: c1 around the center and c2 at center
+    padded = np.pad(image.astype(np.float64), 1, mode="constant")
+    neighbours = (
+        padded[:-2, :-2] + padded[:-2, 1:-1] + padded[:-2, 2:]
+        + padded[1:-1, :-2] + padded[1:-1, 2:]
+        + padded[2:, :-2] + padded[2:, 1:-1] + padded[2:, 2:]
+    )
+    filtered = c1 * neighbours + c2 * padded[1:-1, 1:-1]
+
+    if legacy_mode:
+        return MatlabOperators.uint8(filtered)
+    return np.clip(np.round(filtered), 0, 255).astype(np.uint8)
+
+
+IMAGE_ENHANCEMENT_METHODS = {
+    "classic_he": {"fn": classic_he_gray, "label": "Classic HE"},
+    "tidhe": {"fn": tidhe_gray, "label": "TIDHE"},
+    "rdfhe": {"fn": rdfhe_gray, "label": "RDFHE"},
+    "nfldice": {"fn": nfldice_gray, "label": "NFLDICE"},
+    "betce": {"fn": betce_gray, "label": "BETCE"},
+    "sfcef": {"fn": sfcef_gray, "label": "SFCEF"},
+}
+
+
 def rounded_target_hist(target_hist: np.ndarray, n_pixels: int) -> np.ndarray:
     """Convert an ideal target histogram into realizable probabilities.
 
@@ -4219,3 +4866,161 @@ def avg_hist(images: ImageListIO, binary_masks: List[np.ndarray], normalized: bo
         return average, hist_list
     else:
         return average
+
+
+@dataclass
+class ImageStats:
+    """Per-image and dataset-level luminance statistics. Mirrors the output of SHINE ``imstats``."""
+
+    #: ``(n_bins, n_images)`` array of histograms for each image.
+    hist_mat: np.ndarray
+    #: ``(n_images,)`` array of mean luminance for each image.
+    mean_vec: np.ndarray
+    #: ``(n_images,)`` array of luminance standard deviation for each image.
+    std_vec: np.ndarray
+    #: ``(n_bins,)`` array of the average histogram across all images.
+    mean_hist: np.ndarray
+    #: Scalar mean luminance across all images.
+    mean_lum: float
+    #: Scalar mean standard deviation across all images.
+    mean_std: float
+
+
+def imstats(
+    images: Union["ImageListIO", List[np.ndarray]],
+    mask: Optional[Union[np.ndarray, List[np.ndarray]]] = None,
+    n_bins: int = 256,
+) -> "ImageStats":
+    """Compute per-image and dataset-level luminance statistics (mirrors SHINE ``imstats``)."""
+    imgs = list(images)
+    n = len(imgs)
+    if n == 0:
+        raise ValueError("images must not be empty.")
+
+    masks = [None] * n if mask is None else [mask] * n if isinstance(mask, np.ndarray) else list(mask)
+    if len(masks) != n:
+        raise ValueError("len(mask) must equal the number of images.")
+
+    mean_vec = np.zeros(n)
+    std_vec = np.zeros(n)
+    hist_mat = np.zeros((n_bins, n))
+
+    for i, im in enumerate(imgs):
+        im1 = MatlabOperators.rgb2gray(im) if im.ndim == 3 else im
+        bm = np.ones(im1.shape, dtype=bool) if masks[i] is None else np.asarray(masks[i], dtype=bool)
+        px = im1[bm]
+        mean_vec[i] = MatlabOperators.mean2(px)
+        std_vec[i] = MatlabOperators.std2(px)
+        hist_mat[:, i] = imhist(px.reshape(-1, 1), n_bins=n_bins)[:, 0]
+
+    return ImageStats(
+        hist_mat=hist_mat,
+        mean_vec=mean_vec,
+        std_vec=std_vec,
+        mean_hist=hist_mat.mean(axis=1),
+        mean_lum=float(mean_vec.mean()),
+        mean_std=float(std_vec.mean()),
+    )
+
+
+def _check_same_shape(image1: np.ndarray, image2: np.ndarray, metric_name: str) -> None:
+    if image1.shape != image2.shape:
+        raise ValueError(f"{metric_name} expects images with the same shape.")
+
+
+def compute_ambe(reference: np.ndarray, enhanced: np.ndarray) -> float:
+    """Absolute mean brightness error between two images.
+
+    Lower values indicate better mean-brightness preservation.
+    """
+    _check_same_shape(reference, enhanced, "compute_ambe")
+    ref = im3D(reference).astype(np.float64)
+    enh = im3D(enhanced).astype(np.float64)
+    return np.float64(np.mean(np.abs(np.mean(ref, axis=(0, 1)) - np.mean(enh, axis=(0, 1)))))
+
+
+def compute_contrast_improvement(image: np.ndarray, n_bins: int = 256) -> float:
+    """Contrast Improvement (CI) metric.
+
+    Computes the histogram-weighted standard deviation of pixel intensities.
+    Higher values indicate a more spread-out intensity distribution.
+    """
+    arr = im3D(image).astype(np.float64)
+    ci_vals = []
+    for c in range(arr.shape[2]):
+        hist, _ = np.histogram(arr[:, :, c], bins=n_bins, range=(0, n_bins))
+        total = hist.sum()
+        if total == 0:
+            ci_vals.append(0.0)
+            continue
+        px = hist / total
+        bins = np.arange(n_bins, dtype=np.float64)
+        mu = np.float64(np.sum(bins * px))
+        ci = np.float64(np.sqrt(np.sum((bins - mu) ** 2 * px)))
+        ci_vals.append(ci)
+    return np.float64(np.mean(ci_vals))
+
+
+def compute_image_entropy(image: np.ndarray, n_bins: int = 256) -> float:
+    """Shannon entropy of the image intensity distribution.
+
+    Higher values indicate greater intensity diversity.
+    """
+    arr = im3D(image).astype(np.float64)
+    ent_vals = []
+    for c in range(arr.shape[2]):
+        hist, _ = np.histogram(arr[:, :, c], bins=n_bins, range=(0, n_bins))
+        total = hist.sum()
+        if total == 0:
+            ent_vals.append(0.0)
+            continue
+        px = hist / total
+        nonzero = px > 0
+        ent = np.float64(-np.sum(px[nonzero] * np.log2(px[nonzero])))
+        ent_vals.append(ent)
+    return np.float64(np.mean(ent_vals))
+
+
+def compute_mssim(reference: np.ndarray, enhanced: np.ndarray, data_range: Optional[float] = None) -> float:
+    """Mean Structural Similarity Index (MSSIM) between two images.
+
+    Wrapper around :func:`ssim_sens` returning only the per-channel mean SSIM
+    averaged over all channels. Higher is better (maximum is 1).
+    """
+    _check_same_shape(reference, enhanced, "compute_mssim")
+    _, ssim_vals = ssim_sens(reference, enhanced, data_range=data_range)
+    return np.float64(np.mean(ssim_vals))
+
+
+def compute_psnr(reference: np.ndarray, enhanced: np.ndarray, data_range: float = 255) -> float:
+    """Peak signal-to-noise ratio between two images.
+
+    Higher values indicate lower reconstruction error. Identical images return
+    ``np.inf``.
+    """
+    _check_same_shape(reference, enhanced, "compute_psnr")
+    ref = im3D(reference).astype(np.float64)
+    enh = im3D(enhanced).astype(np.float64)
+    values = []
+    for ch in range(ref.shape[2]):
+        mse = np.mean((ref[:, :, ch] - enh[:, :, ch]) ** 2)
+        values.append(np.inf if mse == 0 else 20.0 * np.log10(np.float64(data_range)) - 10.0 * np.log10(mse))
+    return np.float64(np.mean(values))
+
+
+def compute_bp2bpsim(reference: np.ndarray, enhanced: np.ndarray, n_bits: int = 8) -> float:
+    """Bit-plane to bit-plane similarity between two images.
+
+    Values range from 0 to 1. Higher values indicate more matching bits across
+    corresponding pixels and channels.
+    """
+    _check_same_shape(reference, enhanced, "compute_bp2bpsim")
+    if n_bits < 1 or n_bits > 8:
+        raise ValueError("compute_bp2bpsim expects n_bits between 1 and 8.")
+
+    ref = np.clip(np.round(reference), 0, 255).astype(np.uint8)
+    enh = np.clip(np.round(enhanced), 0, 255).astype(np.uint8)
+    bit_matches = 0
+    for bit in range(n_bits):
+        bit_matches += np.count_nonzero(((ref >> bit) & 1) == ((enh >> bit) & 1))
+    return np.float64(bit_matches / (ref.size * n_bits))

@@ -29,11 +29,12 @@ REC_STANDARD = Literal["rec601", "rec709", "rec2020"]
 RGB_STANDARD = Literal["equal", "rec601", "rec709", "rec2020"]
 
 RGB2GRAY_WEIGHTS = {
-    'equal': [1/3, 1/3, 1/3],
-    'rec601': M_RGB2XYZ_601[1, :],
-    'rec709': M_RGB2XYZ_709[1, :],
-    'rec2020': M_RGB2XYZ_2020[1, :],
+    'equal': np.array([1/3, 1/3, 1/3], dtype=np.float64),
+    'rec601': M_RGB2XYZ_601[1, :].astype(np.float64),
+    'rec709': M_RGB2XYZ_709[1, :].astype(np.float64),
+    'rec2020': M_RGB2XYZ_2020[1, :].astype(np.float64),
 }
+MATLAB_RGB2GRAY_WEIGHTS = np.array([0.298936021293775, 0.587043074451121, 0.114020904255103], dtype=np.float64)
 for k, v in RGB2GRAY_WEIGHTS.items():
     RGB2GRAY_WEIGHTS[k] /= np.sum(v)
 int2key_mapping = dict(zip(range(1, len(RGB2GRAY_WEIGHTS)+1), RGB2GRAY_WEIGHTS.keys()))
@@ -317,7 +318,7 @@ class ColorTreatment(ColorConverter):
             linear_luminance: bool,
             as_gray: bool,
             output_other: Optional[ImageListIO] = None,
-            conversion_type: Literal['sRGB_to_xyY', 'sRGB_to_lab'] = 'sRGB_to_xyY',
+            color_conversion: Literal['sRGB_to_xyY', 'sRGB_to_lab'] = 'sRGB_to_xyY',
             desaturate_chroma_on_low_luminance: bool = False,
             legacy_mode: bool = False,
             verbose: bool = False) -> Tuple[ImageListIO, Optional[ImageListIO]]:
@@ -350,7 +351,7 @@ class ColorTreatment(ColorConverter):
         output_other : Optional[ImageListIO]
             Secondary buffer receiving auxiliary chromatic channels.
 
-        conversion_type : Literal["sRGB_to_xyY", "sRGB_to_lab"]
+        color_conversion : Literal["sRGB_to_xyY", "sRGB_to_lab"]
             Forward color conversion to apply.
 
         desaturate_chroma_on_low_luminance : bool
@@ -358,7 +359,12 @@ class ColorTreatment(ColorConverter):
             chromatic noise from being inflated by luminance manipulation.
 
         legacy_mode : bool
-            If True, uses MATLAB-compatible grayscale conversion behavior.
+            If True, uses MATLAB-compatible grayscale conversion behavior when
+            ``as_gray=True`` and ``linear_luminance=False``. This matches the Y
+            channel of MATLAB's ``rgb2ntsc`` transform. When called from the
+            SHINIER pipeline, ``legacy_mode=True`` forces both ``as_gray=1``
+            and ``linear_luminance=False`` via ``Options``, so the condition is
+            always satisfied.
 
         verbose : bool
             If True, prints processing messages.
@@ -401,7 +407,7 @@ class ColorTreatment(ColorConverter):
             if as_gray:
                 # Convert to grayscale using simple mean
                 for idx, image in enumerate(input_images):
-                    output_images[idx] = rgb2gray(image, conversion_type="equal", matlab_601=legacy_mode)
+                    output_images[idx] = rgb2gray(image, weighting_standard="equal", matlab_601=legacy_mode)
             else:
                 for idx, image in enumerate(input_images):
                     if np.issubdtype(image.dtype, np.uint8):
@@ -411,7 +417,11 @@ class ColorTreatment(ColorConverter):
         # --- CASE 2: Color treatment branch -------------------------------------
         elif not linear_luminance:
             for idx, image in enumerate(output_images):
-                if conversion_type == "sRGB_to_xyY":
+                if as_gray and legacy_mode:
+                    output_images[idx] = rgb2gray(image, weighting_standard="rec601", matlab_601=True)
+                    continue
+
+                if color_conversion == "sRGB_to_xyY":
                     # Convert from sRGB → xyY (internally handles gamma decoding)
                     srgb_before = image / 255.0
                     _image = converter.sRGB_to_xyY(srgb_before)
@@ -435,7 +445,7 @@ class ColorTreatment(ColorConverter):
                         )
                         output_other[idx] = xy_after
 
-                elif conversion_type == "sRGB_to_lab":
+                elif color_conversion == "sRGB_to_lab":
                     # Convert from sRGB → Lab (internally handles gamma decoding)
                     _image = converter.sRGB_to_lab(image / 255)
 
@@ -446,7 +456,7 @@ class ColorTreatment(ColorConverter):
                     if as_gray == 0:
                         output_other[idx] = _image[:, :, 1:]
                 else:
-                    raise ValueError(f"Unknown conversion type `{conversion_type}`")
+                    raise ValueError(f"Unknown color conversion `{color_conversion}`")
 
             return output_images, output_other
         else:
@@ -460,8 +470,9 @@ class ColorTreatment(ColorConverter):
             linear_luminance: bool,
             as_gray: bool,
             input_other: Optional[ImageListIO] = None,
-            conversion_type: Literal['xyY_to_sRGB', 'lab_to_sRGB'] = 'xyY_to_sRGB',
+            color_conversion: Literal['xyY_to_sRGB', 'lab_to_sRGB'] = 'xyY_to_sRGB',
             gamut_strategy: str = 'clip',
+            legacy_mode: bool = False,
             verbose: bool = False) -> ImageListIO:
         """Apply the backward color-treatment step to an image collection.
 
@@ -489,11 +500,15 @@ class ColorTreatment(ColorConverter):
         input_other : Optional[ImageListIO]
             Auxiliary chromatic data required for color reconstruction.
 
-        conversion_type : Literal["xyY_to_sRGB", "lab_to_sRGB"]
+        color_conversion : Literal["xyY_to_sRGB", "lab_to_sRGB"]
             Backward color conversion to apply.
 
         gamut_strategy : str
             Strategy for repairing out-of-gamut pixels during conversion.
+
+        legacy_mode : bool
+            If True and ``as_gray=True``, keep MATLAB-compatible grayscale
+            intensities without applying an additional sRGB transfer function.
 
         verbose : bool
             If True, prints processing messages.
@@ -538,7 +553,7 @@ class ColorTreatment(ColorConverter):
                 other = input_other[idx]
 
                 # Rebuild xyY or Lab: shape (H, W, 3)
-                if conversion_type == "xyY_to_sRGB":
+                if color_conversion == "xyY_to_sRGB":
                     # --- Out-of-gamut repair ---
                     Y255, other = gamut_control.apply_image(Y=Y*255, other=other, idx=idx, verbose=verbose)
                     Y = Y255/255.0
@@ -546,15 +561,14 @@ class ColorTreatment(ColorConverter):
                     # Gamma Encode to sRGB
                     output_images[idx] = converter.xyY_to_sRGB(np.dstack((other, Y))) * 255
 
-                elif conversion_type == "lab_to_sRGB":
+                elif color_conversion == "lab_to_sRGB":
                     # Convert xyY → sRGB (includes linear→gamma)
                     lab = np.dstack([Y*100, other])
                     output_images[idx] = converter.lab_to_sRGB(lab) * 255
 
             # Output = Grayscale image
             else:
-                # Apply gamma encoding (sRGB transfer function)
-                Yg = converter.linRGB_to_sRGB(im3D(Y))
+                Yg = im3D(Y) if legacy_mode else converter.linRGB_to_sRGB(im3D(Y))
 
                 # Replicate into 3 channels for display compatibility
                 output_images[idx] = np.dstack([Yg, Yg, Yg]) * 255
@@ -562,21 +576,24 @@ class ColorTreatment(ColorConverter):
         return output_images
 
 
-def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: RGB_STANDARD = 'equal', matlab_601: bool = False) -> np.ndarray:
-    """Convert an R'G'B' image to grayscale luma.
+def rgb2gray(
+    image: Union[np.ndarray, Image.Image],
+    weighting_standard: RGB_STANDARD = 'equal',
+    matlab_601: bool = False,
+) -> np.ndarray:
+    """Convert an RGB image to grayscale using luma or luminance coefficients.
 
     Parameters
     ----------
     image : Union[np.ndarray, Image.Image]
-        RGB image array with a final channel dimension of 3. The image is
-        assumed to be gamma-encoded, as with typical sRGB files.
+        RGB image array with a final channel dimension of 3.
 
-    conversion_type : RGB_STANDARD
-        Luma standard to use: ``"equal"``, ``"rec601"``, ``"rec709"``, or
-        ``"rec2020"``.
+    weighting_standard : RGB_STANDARD
+        Weighting standard: ``"equal"``, ``"rec601"``, ``"rec709"``,
+        or ``"rec2020"``.
 
     matlab_601 : bool
-        If True and ``conversion_type="rec601"``, uses MATLAB's BT.601 weights.
+        If True and ``weighting_standard="rec601"``, uses MATLAB's BT.601 weights.
 
     Returns
     -------
@@ -585,29 +602,57 @@ def rgb2gray(image: Union[np.ndarray, Image.Image], conversion_type: RGB_STANDAR
 
     Notes
     -----
-    This computes luma (Y') from gamma-encoded components. For physical linear
-    luminance, first linearize RGB, combine linear-light coefficients, then
-    re-encode if needed.
+    Rec. standards use the normalized Y row of SHINIER's RGB-to-XYZ matrices.
+    These linear-light coefficients are an approximation when applied directly
+    to gamma-encoded RGB values.
+
+    ``matlab_601=True`` uses MATLAB-compatible ``rgb2gray`` / ``rgb2ntsc``
+    Y weights (``0.298936021293775, 0.587043074451121, 0.114020904255103``).
+    Use :func:`rgb2ntsc_intensity` for an explicit NTSC/YIQ intensity image.
     """
     if isinstance(image, Image.Image):
         image = np.array(image)
     elif not isinstance(image, np.ndarray):
         raise ValueError(f"Invalid image type {type(image)}. Supported values are Image.Image and np.ndarray")
 
-    if conversion_type not in RGB2GRAY_WEIGHTS.keys():
-        raise ValueError('Conversion type must be either rec709, rec601, rec2020 or equal')
+    if weighting_standard not in RGB2GRAY_WEIGHTS.keys():
+        raise ValueError('Weighting standard must be either rec709, rec601, rec2020 or equal')
 
     if image.ndim > 2:
-        if conversion_type == "equal":
+        if weighting_standard == "equal":
             return np.mean(image[..., :3], axis=-1)
         else:
-            weights = np.array([0.298936021293775, 0.587043074451121, 0.114020904255103]) if conversion_type == "rec601" and matlab_601 else RGB2GRAY_WEIGHTS[conversion_type]
+            weights = (MATLAB_RGB2GRAY_WEIGHTS if weighting_standard == "rec601" and matlab_601 else RGB2GRAY_WEIGHTS[weighting_standard]).copy()
             weights /= np.sum(weights)
             return image[..., 0] * weights[0] + image[..., 1] * weights[1] + image[..., 2] * weights[2]
     elif image.ndim == 2:
         return image
     else:
         raise ValueError(f"Invalid image dimension {image.shape}. Supported values are >= 2")
+
+
+def rgb2ntsc_intensity(image: Union[np.ndarray, Image.Image]) -> np.ndarray:
+    """Convert an RGB image to an NTSC intensity image.
+
+    This is a user-facing helper for workflows that specifically request an
+    NTSC/YIQ intensity image. It is not used by SHINIER's main color-processing
+    pipeline. The Y channel of MATLAB's ``rgb2ntsc`` transform is equivalent to
+    MATLAB-compatible ``rgb2gray`` weights:
+    ``Y = 0.298936021293775 R + 0.587043074451121 G + 0.114020904255103 B``.
+    The commonly cited NTSC formula ``0.299 R + 0.587 G + 0.114 B`` is the
+    rounded form of the same coefficients.
+
+    Parameters
+    ----------
+    image : Union[np.ndarray, Image.Image]
+        RGB image array or PIL image.
+
+    Returns
+    -------
+    np.ndarray
+        2D NTSC intensity image.
+    """
+    return rgb2gray(image, weighting_standard="rec601", matlab_601=True)
 
 
 def gray2rgb(image: Union[np.ndarray, Image.Image]) -> np.ndarray:

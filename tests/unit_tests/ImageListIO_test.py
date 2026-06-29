@@ -66,11 +66,12 @@ def test_as_gray_flag_validation() -> None:
         ImageListIO(input_data=arrays, as_gray=9)  # invalid literal
 
 
-def test_as_gray_flag_accepted(test_tmpdir: Path) -> None:
+@pytest.mark.parametrize("as_gray", [3, 4])
+def test_as_gray_flag_accepted(test_tmpdir: Path, as_gray: int) -> None:
     """as_gray flag should be correctly forwarded and retained."""
     arrays = [_make_rgb(seed=s) for s in range(2)]
-    coll = ImageListIO(input_data=arrays, conserve_memory=True, as_gray=3)
-    assert coll.as_gray == 3
+    coll = ImageListIO(input_data=arrays, conserve_memory=True, as_gray=as_gray)
+    assert coll.as_gray == as_gray
     coll.close()
 
 

@@ -18,7 +18,9 @@ from shinier.utils import (
     rescale_images255, get_images_spectra, ssim_sens, spectrum_plot, imhist_plot, sf_plot, avg_hist,
     uint8_plus, float01_to_uint, uint_to_float01, noisy_bit_dithering, floyd_steinberg_dithering,
     exact_histogram, Bcolors, MatlabOperators, compute_rmse, get_radius_grid, rotational_avg,
-    has_duplicates, stretch, console_log, print_log, StepSizeController, image_spectrum, _crop_after_fft
+    has_duplicates, stretch, console_log, print_log, StepSizeController, image_spectrum, _crop_after_fft,
+    IMAGE_ENHANCEMENT_METHODS,
+    compute_ambe, compute_contrast_improvement, compute_image_entropy, compute_mssim, compute_psnr, compute_bp2bpsim,
 )
 from shinier.color import ColorConverter, ColorTreatment, rgb2gray, gray2rgb, RGB2GRAY_WEIGHTS, RGB_STANDARD, GamutControl
 
@@ -102,13 +104,13 @@ class ImageProcessor(InformativeBaseModel):
     verbose: Literal[-1, 0, 1, 2, 3] = 0
 
     # --- Private attributes ---
-    _backward_conversion_type: str = PrivateAttr(default=None)
+    _backward_color_conversion: str = PrivateAttr(default=None)
     _color_space: Literal['uvw01', 'xyY'] = PrivateAttr(default='xyY')
     _complete: bool = PrivateAttr(default=False)
     _dataset_map: dict = PrivateAttr(default_factory=dict)
     _fct_name2process_name: dict = PrivateAttr(default_factory=dict)
     _final_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
-    _forward_conversion_type: str = PrivateAttr(default=None)
+    _forward_color_conversion: str = PrivateAttr(default=None)
     _gamut_control: Optional[GamutControl] = PrivateAttr(default=None)
     _initial_buffer: Optional[ImageListIO] = PrivateAttr(default=None)
     _initial_targets: Optional[Dict[str, np.ndarray]] = PrivateAttr(default={})
@@ -134,8 +136,8 @@ class ImageProcessor(InformativeBaseModel):
 
     def post_init(self, __context: Any) -> None:
         """Run initialization logic after Pydantic validation and only once at instantiation."""
-        self._forward_conversion_type = f"sRGB_to_{self._color_space}" if self._color_space is not None else None
-        self._backward_conversion_type= f"{self._color_space}_to_sRGB" if self._color_space is not None else None
+        self._forward_color_conversion = f"sRGB_to_{self._color_space}" if self._color_space is not None else None
+        self._backward_color_conversion = f"{self._color_space}_to_sRGB" if self._color_space is not None else None
 
         if self.options is None:
             self.options = getattr(self.dataset, "options", None)
@@ -165,7 +167,7 @@ class ImageProcessor(InformativeBaseModel):
             6: ["hist_match", "spec_match"],
             7: ["sf_match", "hist_match"],
             8: ["spec_match", "hist_match"],
-            9: [None],
+            9: [None] if self.options.standalone_op == "dithering" else ["ie_methods"],
         }
 
         self._fct_name2process_name = {
@@ -173,6 +175,7 @@ class ImageProcessor(InformativeBaseModel):
             "hist_match": "histogram matching",
             "sf_match": "spatial frequency matching",
             "spec_match": "fourier spectrum matching",
+            "ie_methods": "image enhancement",
             None: "dithering",
         }
 
@@ -180,6 +183,10 @@ class ImageProcessor(InformativeBaseModel):
         self._processing_steps = self._mode2processing_steps[self.options.mode]
         self._n_steps = len(self._processing_steps)
         self._sum_bool_masks = [None] * len(self.dataset.images)
+
+        if self.seed is None and self.options.seed is not None:
+            self.seed = self.options.seed
+
         if self.from_unit_test:
             return
 
@@ -203,29 +210,39 @@ class ImageProcessor(InformativeBaseModel):
 
     def print_log_results(self):
         """
-        Compiles and prints logs related to regular processing steps,
-        SSIM validation results, and function validation results. The logs are
-        formatted and stored in the specified output folder.
+        Write selected options, regular processing logs, SSIM validation
+        results, and function validation results to the output log file.
         """
 
-        # Print regular logs
         if self.verbose >= 0:
-            logs = []
+            def format_option(value):
+                if isinstance(value, np.ndarray):
+                    return f"ndarray(shape={value.shape}, dtype={value.dtype})"
+                if isinstance(value, Path):
+                    return str(value)
+                return repr(value)
+
+            def format_channel(value):
+                return "all" if value is None else value
+
+            logs = ['[Options]']
+            logs += [f"{key}: {format_option(value)}" for key, value in dict(self.options).items()]
+            logs += ['']
+
             if len(self.log) > 0:
                 logs = logs + ['[Regular logs]'] + self.log + ['']
 
             # Print SSIM validation results
             if len(self.ssim_results):
-                _logs = [f"iter={res['iter']}; step={res['step']}; image={res['image']}; channel={res['channel']}; result={res['valid_result']}" for res in self.ssim_results]
+                _logs = [f"iter={res['iter']}; step={res['step']}; image={res['image']}; channel={format_channel(res['channel'])}; result={res['valid_result']}" for res in self.ssim_results]
                 logs = logs + ['[SSIM validation results]'] + _logs + ['']
 
             # Print function validation results
             if len(self.validation):
-                _logs = [f"iter={res['iter']}; step={res['step']}; image={res['image']}; channel={res['channel']}; processing function={res['processing_function']}; result={res['valid_result']}; other={res['log_result']}" for res in self.validation]
+                _logs = [f"iter={res['iter']}; step={res['step']}; image={res['image']}; channel={format_channel(res['channel'])}; processing function={res['processing_function']}; result={res['valid_result']}; other={res['log_result']}" for res in self.validation]
                 logs = logs + ['[Processing validation results]'] + _logs + ['']
 
-            if len(logs):
-                print_log(logs=logs, log_path=self.options.output_folder)
+            print_log(logs=logs, log_path=self.options.output_folder)
 
     def get_results(self):
         """Return the processed output in the same container style as the input.
@@ -354,7 +371,7 @@ class ImageProcessor(InformativeBaseModel):
             linear_luminance=self.options.linear_luminance,
             as_gray=self.options.as_gray,
             output_other=target_buffer_other,
-            conversion_type=self._forward_conversion_type,
+            color_conversion=self._forward_color_conversion,
             desaturate_chroma_on_low_luminance=True,
             legacy_mode=self.options.legacy_mode,
             verbose=False,
@@ -396,7 +413,7 @@ class ImageProcessor(InformativeBaseModel):
             if target_hist.shape[0] != n_bins:
                 raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
         if target_hist.ndim > 1 and target_hist.shape[-1] != self.dataset.buffer.n_channels:
-            raise ValueError(f"target_hist must have {self.dataset.buffer.n_channels} channels, ")
+            raise ValueError(f"target_hist must have {self.dataset.buffer.n_channels} channels, but has {target_hist.shape[-1]}.")
         self._target_hist = target_hist
 
     def _compute_target_hist_from_image_path(self, image_path: Path, n_bins: int = 256) -> np.ndarray:
@@ -433,7 +450,7 @@ class ImageProcessor(InformativeBaseModel):
             linear_luminance=self.options.linear_luminance,
             as_gray=self.options.as_gray,
             output_other=target_buffer_other,
-            conversion_type=self._forward_conversion_type,
+            color_conversion=self._forward_color_conversion,
             desaturate_chroma_on_low_luminance=True,
             legacy_mode=self.options.legacy_mode,
             verbose=False,
@@ -503,8 +520,8 @@ class ImageProcessor(InformativeBaseModel):
             # Compute number of unmasked pixels per channel
             self._sum_bool_masks[idx] = [self.bool_masks[idx][..., ch].sum() for ch in range(self.bool_masks[idx].shape[2])]
 
-    def _validate_ssim(self, ssim: List[float]):
-        """Validate that SSIM progression is monotonic during optimization."""
+    def _validate_ssim(self, ssim: List[float], tag: str = 'sub_iter'):
+        """Validate that SSIM did not regress. tag: 'sub_iter' (pre-rollback) or 'final' (output)."""
         out = np.array(ssim)
         if out.shape[0] > 1:
             for ch in range(out.shape[1]):
@@ -514,15 +531,18 @@ class ImageProcessor(InformativeBaseModel):
                     'step': self._step,
                     'image': self._processed_image,
                     'channel': self._processed_channel,
-                    'valid_result': is_strictly_increasing
+                    'tag': tag,
+                    'valid_result': is_strictly_increasing,
                 }
+                if not is_strictly_increasing:
+                    results['ssim_values'] = out[:, ch].tolist()
                 self.ssim_results.append(results)
                 if not is_strictly_increasing and self.verbose > 1:
-                    res = f'{Bcolors.OKCYAN}SSIM optimization test for channel {ch}:{Bcolors.ENDC} {Bcolors.FAIL}FAIL{Bcolors.ENDC}'
+                    res = f'{Bcolors.OKCYAN}SSIM optimization {tag} test for channel {ch}:{Bcolors.ENDC} {Bcolors.FAIL}FAIL{Bcolors.ENDC}'
                     console_log(msg=res, indent_level=1, verbose=self.verbose > 2)
-                    raise Exception(f"SSIM optimization non-monotonic for channel {ch}: {out[:, ch]}")
+                    raise Exception(f"SSIM optimization {tag} non-monotonic for channel {ch}: {out[:, ch]}")
 
-            res = f'{Bcolors.OKCYAN}SSIM optimization test:{Bcolors.ENDC} {Bcolors.OKGREEN}PASS{Bcolors.ENDC}'
+            res = f'{Bcolors.OKCYAN}SSIM optimization {tag} test:{Bcolors.ENDC} {Bcolors.OKGREEN}PASS{Bcolors.ENDC}'
             console_log(msg=res, indent_level=1, verbose=self.verbose >= 3)
 
     def _validate(self, observed: List[float], expected: List[float], measures_str: list[str], rmse_tolerance: float = 1e-3):
@@ -550,6 +570,38 @@ class ImageProcessor(InformativeBaseModel):
         indent_level = 1 if self._processed_channel is None else 2
         console_log(msg=results['log_result'], indent_level=indent_level, verbose=self.verbose==3)
         self.validation.append(results)
+
+    def _record_ie_metrics(self, before: np.ndarray, after: np.ndarray, op_label: str) -> None:
+        """Record image-enhancement metrics as a diagnostic validation entry."""
+        before_ci = compute_contrast_improvement(before)
+        after_ci = compute_contrast_improvement(after)
+        before_entropy = compute_image_entropy(before)
+        after_entropy = compute_image_entropy(after)
+        warning = after_ci < before_ci and after_entropy < before_entropy
+        result = "WARN" if warning else "PASS"
+        metrics = (
+            f"AMBE={compute_ambe(before, after):.6f}; "
+            f"MSSIM={compute_mssim(before, after):.6f}; "
+            f"PSNR={compute_psnr(before, after):.6f}; "
+            f"BP2BPSIM={compute_bp2bpsim(before, after):.6f}; "
+            f"CI={before_ci:.6f}->{after_ci:.6f} (delta={after_ci - before_ci:.6f}); "
+            f"Entropy={before_entropy:.6f}->{after_entropy:.6f} (delta={after_entropy - before_entropy:.6f})"
+        )
+        note = (
+            "WARN: CI and entropy both decreased; the image may already be bright/high-contrast, "
+            "or the transform may be reducing useful contrast."
+            if warning else
+            "PASS: diagnostic metrics did not trigger the CI+entropy decrease warning."
+        )
+        self.validation.append({
+            'iter': self._iter_num,
+            'step': self._step,
+            'processing_function': "ie_methods",
+            'image': self._processed_image,
+            'channel': "all",
+            'valid_result': result,
+            'log_result': f"{op_label}: {metrics}; {note}",
+        })
 
     def process(self):
         """Run the full SHINIER pipeline on the current dataset.
@@ -610,7 +662,7 @@ class ImageProcessor(InformativeBaseModel):
             linear_luminance=self.options.linear_luminance,
             as_gray=self.options.as_gray,
             output_other=self.dataset.buffer_other,
-            conversion_type=self._forward_conversion_type,
+            color_conversion=self._forward_color_conversion,
             desaturate_chroma_on_low_luminance=True,
             legacy_mode=self.options.legacy_mode,
             verbose=self.verbose>=2)
@@ -711,7 +763,8 @@ class ImageProcessor(InformativeBaseModel):
             linear_luminance=self.options.linear_luminance,
             gamut_strategy=self.options.gamut_strategy,
             as_gray=self.options.as_gray,
-            conversion_type=self._backward_conversion_type,
+            color_conversion=self._backward_color_conversion,
+            legacy_mode=self.options.legacy_mode,
             verbose=self.verbose>=2)
 
         # Applies dithering or simply convert into uint8 if no dithering
@@ -844,8 +897,8 @@ class ImageProcessor(InformativeBaseModel):
             #     M = MatlabOperators.mean2(im[binary_mask]) if self.options.legacy_mode else np.mean(im[binary_mask])
             #     SD = MatlabOperators.mean2(im[binary_mask]) if self.options.legacy_mode else np.mean(im[binary_mask])
             # else:
-            #     convertion_type = RGB2GRAY_WEIGHTS['int2key'][self.options.rgb_weights]
-            #     ch_weights = RGB2GRAY_WEIGHTS[conversion_type]
+            #     weighting_standard = RGB2GRAY_WEIGHTS['int2key'][self.options.rgb_weights]
+            #     ch_weights = RGB2GRAY_WEIGHTS[weighting_standard]
             #     ch_means = np.array([np.mean(im[:, :, c][binary_mask[:, :, c]]) for c in range(3)])
             #     ch_stds = np.array([np.std(im[:, :, c][binary_mask[:, :, c]]) for c in range(3)])
             #     M = np.sum(ch_means * ch_weights)
@@ -1196,7 +1249,7 @@ class ImageProcessor(InformativeBaseModel):
                     Y, _ = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=self._target_hist, tie_strategy='none', n_bins=n_bins)
                 else:
                     Y, OA = exact_histogram(image=X, binary_mask=self.bool_masks[idx], target_hist=self._target_hist, tie_strategy=tie_strategy, n_bins=n_bins)
-                    if hist_spec_names != 'noise' and (n_iter == 1 or (n_iter > 1 and self._sub_iter < n_iter - 1)):
+                    if tie_strategy != 'noise' and (n_iter == 1 or (n_iter > 1 and self._sub_iter < n_iter - 1)):
                         console_log(msg=f"Ordering accuracy per channel = {OA}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose == 3)
                 # Compute Structural Similarity and gradient map (sens), along with max and min
                 if self._sub_iter < n_iter - 1:
@@ -1244,9 +1297,14 @@ class ImageProcessor(InformativeBaseModel):
 
                 self._sub_iter += 1
 
-            # Test monotonic increase of ssim between first and last iteration
-            if self.options.hist_optim and len(all_ssim) >=2:
-                self._validate_ssim(ssim=[all_ssim[0], all_ssim[-1]])
+            if self.options.hist_optim and len(all_ssim) >= 2:
+                # sub_iter: first vs last pre-rollback proposal — shows per-step trajectory.
+                self._validate_ssim(ssim=[all_ssim[0], all_ssim[-1]], tag='sub_iter')
+            if self.options.hist_optim and len(all_ssim) >= 1 and self.from_validation_test:
+                # final: first-iteration SSIM vs actual output Y — definitive correctness check.
+                # Guarded by from_validation_test: ssim_sens is O(W×H) and too costly in production.
+                _, final_ssim = ssim_sens(original_image, Y, data_range=n_bins - 1, use_sample_covariance=False, binary_mask=self.bool_masks[idx])
+                self._validate_ssim(ssim=[all_ssim[0], final_ssim], tag='final')
 
             # Important Note:
             # - Must use Y as this is the one that matches the target histogram.
@@ -1263,6 +1321,88 @@ class ImageProcessor(InformativeBaseModel):
             if ssim is not None:
                 console_log(msg=f"SSIM index between transformed and original image: {np.mean(ssim):.5f}", indent_level=1, color=Bcolors.OKBLUE, verbose=self.verbose==3)
             self._validate(observed=[rmse], expected=[0], measures_str=['RMS error'])
+
+        buffer_collection.drange = (0, 255)
+
+    def ie_methods(self):
+        """Apply standalone image enhancement to each image independently.
+
+        Dispatches based on ``options.ie_methods``:
+
+        - ``'classic_he'``: Classic global histogram equalization. Maps each intensity
+          level *y* to ``round(255 × CDF(y))``, producing an approximately flat
+          output histogram. Maximizes contrast but can over-enhance noise on natural images.
+          Implemented by :func:`shinier.utils.classic_he_gray`.
+
+        - ``'tidhe'``: Tripartite Image Decomposition-Based Histogram Equalization
+          (Rahman & Shimamura, *ICIC Express Letters* 20(3), 2026). Splits the
+          histogram into three equal-mass sub-bands, clips each via Intensity
+          Histogram Clipping (IHC), and equalizes them independently.
+          Implemented by :func:`shinier.utils.tidhe_gray`.
+
+        - ``'rdfhe'``: Recursive Dualistic Fuzzy Histogram Equalization
+          (Rahman et al., IEEE QPAIN, 2026). Computes a fuzzy histogram,
+          partitions it recursively into four sub-histograms, and equalizes them
+          independently. Implemented by :func:`shinier.utils.rdfhe_gray`.
+
+        - ``'nfldice'``: Nonlinear Fuzzification–Linear Defuzzification-Based ICE
+          (Rahman, *Trends in Electronics and Health Informatics*, LNNS 1034, 2025).
+          A fuzzy set-theoretic point operation: fuzzifies each gray level with a
+          nonlinear (logistic) fuzzifier, then defuzzifies linearly back to the
+          gray-level range. Implemented by :func:`shinier.utils.nfldice_gray`.
+
+        - ``'betce'``: Bi-Entropy Curve Equalization
+          (Rahman, IEEE EICT, 2025). A state-of-the-art curve-based algorithm:
+          replaces the histogram with an entropy curve, partitions it into two
+          sub-curves, then equalizes each independently.
+          Implemented by :func:`shinier.utils.betce_gray`.
+
+        - ``'sfcef'``: Sakaguchi-type Function-Based Cost-Effective Filtering
+          (Rahman et al., *Pattern Analysis and Applications*, 2025). A
+          state-of-the-art filtering-based algorithm: builds one 3x3 filter from
+          Sakaguchi/Gegenbauer coefficient bounds and convolves each image.
+          Implemented by :func:`shinier.utils.sfcef_gray`.
+
+        In all cases each image is processed independently — no shared target is
+        computed across the dataset. The transform is applied per channel on the
+        prepared luminance buffer (or on all channels when
+        ``linear_luminance=True``).
+
+        Results are stored back in ``dataset.buffer`` as ``float64`` in ``[0, 255]``.
+        The final output conversion casts these values to ``uint8`` without
+        dithering; mode 9 image enhancement does not accept a dithering option.
+        """
+        buffer_collection = self.dataset.buffer
+        n_bins = 256
+        op = self.options.ie_methods
+        ie_method = IMAGE_ENHANCEMENT_METHODS[op]
+        ie_fn = ie_method["fn"]
+        op_label = ie_method["label"]
+
+        for idx, image in enumerate(buffer_collection):
+            self._processed_image = f'#{idx}' if self.dataset.images.src_paths[idx] is None else self.dataset.images.src_paths[idx]
+            console_log(msg=f"\nImage {self._processed_image}", indent_level=0, color=Bcolors.BOLD, verbose=self.verbose >= 2)
+
+            X = im3D(image)
+            X_int = MatlabOperators.uint8(X) if self.options.legacy_mode \
+                else np.clip(np.round(X), 0, 255).astype(np.uint8)
+            Y = X.copy()
+            for ch in range(X_int.shape[-1]):
+                Y[..., ch] = ie_fn(X_int[..., ch], legacy_mode=self.options.legacy_mode)
+
+            self._record_ie_metrics(X_int, Y, op_label)
+
+            final_hist = imhist(image=Y.squeeze() if Y.shape[-1] == 1 else Y, mask=self.bool_masks[idx], n_bins=n_bins, normalized=True)
+            equal_target = np.ones(final_hist.shape) / n_bins
+            rmse = compute_rmse(final_hist.flatten(), equal_target.flatten())
+            console_log(
+                msg=f"Histogram flatness error ({op_label}): {rmse:.5f}",
+                indent_level=1,
+                color=Bcolors.OKBLUE,
+                verbose=self.verbose == 3,
+            )
+
+            buffer_collection[idx] = Y
 
         buffer_collection.drange = (0, 255)
 
@@ -1349,9 +1489,10 @@ class ImageProcessor(InformativeBaseModel):
                 rmse = compute_rmse(t, o)
                 self._validate(observed=[rmse], expected=[0], measures_str=['RMS error'])
 
-            # Soft-clip output values: As this transformation typically produces out-of-range values
+            # Soft-clip on last outer iteration: as this transformation typically produces out-of-range values
             output_image = np.stack(matched_image, axis=-1).squeeze()
-            if self._is_last_operation:
+            # Last iteration to include iterative modes with sf_match before the last operation (e.g., mode 5 or 7)
+            if self._iter_num == self.options.iterations - 1:
                 mn, mx = output_image.min(), output_image.max()
                 if mn < 0 or mx > 1:
                     console_log(
@@ -1442,9 +1583,10 @@ class ImageProcessor(InformativeBaseModel):
                 self._validate(observed=[rmse], expected=[0],
                                measures_str=['RMS error'])
 
-            # Soft-clip output values: As this transformation typically produces out-of-range values
+            # Soft-clip on last outer iteration: as this transformation typically produces out-of-range values
             output_image = np.stack(matched_image, axis=-1).squeeze()
-            if self._is_last_operation:
+            # Last iteration to include iterative modes with spec_match before the last operation (e.g., mode 6 or 8)
+            if self._iter_num == self.options.iterations - 1:
                 mn, mx = output_image.min(), output_image.max()
                 if mn < 0 or mx > 1:
                     console_log(

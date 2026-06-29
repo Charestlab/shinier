@@ -16,7 +16,7 @@ documentation remains in the Markdown files under `documentation/`.
    :show-inheritance:
 
 .. autoclass:: shinier.ImageProcessor
-   :members: get_results, process, lum_match, hist_match, sf_match, spec_match
+   :members: get_results, process, lum_match, hist_match, sf_match, spec_match, dithering, ie_methods,    uint8_to_float255, float255_to_float01, float01_to_float255, print_log_results, 
    :exclude-members: __init__, __new__
    :show-inheritance:
 ```
@@ -25,7 +25,7 @@ documentation remains in the Markdown files under `documentation/`.
 
 ```{eval-rst}
 .. autoclass:: shinier.color.ColorConverter
-   :members: sRGB_to_linRGB, linRGB_to_sRGB, linRGB_to_xyz, xyz_to_linRGB, xyz_to_xyY, xyY_to_xyz, xyz_to_lab, lab_to_xyz, sRGB_to_xyz, xyz_to_sRGB, sRGB_to_lab, lab_to_sRGB, sRGB_to_xyY, xyY_to_sRGB
+   :members: sRGB_to_linRGB, linRGB_to_sRGB, linRGB_to_xyz, xyz_to_linRGB, xyz_to_xyY, xyY_to_xyz, xyz_to_lab, lab_to_xyz, sRGB_to_xyz, xyz_to_sRGB, sRGB_to_lab, lab_to_sRGB, sRGB_to_xyY, xyY_to_sRGB, apply_standard_config
    :exclude-members: __init__, __new__
    :show-inheritance:
 
@@ -40,6 +40,8 @@ documentation remains in the Markdown files under `documentation/`.
    :show-inheritance:
 
 .. autofunction:: shinier.color.rgb2gray
+
+.. autofunction:: shinier.color.rgb2ntsc_intensity
 
 .. autofunction:: shinier.color.gray2rgb
 ```
@@ -61,7 +63,25 @@ documentation remains in the Markdown files under `documentation/`.
 
 .. autofunction:: shinier.utils.im_power_spectrum_plot
 
+.. autofunction:: shinier.utils.tidhe_hist_plot
+
 .. autofunction:: shinier.utils.show_processing_overview
+```
+
+### Utility Classes
+
+```{eval-rst}
+.. autoclass:: shinier.utils.Bcolors
+   :members:
+
+.. autoclass:: shinier.utils.DiffusionMaps
+   :members:
+
+.. autoclass:: shinier.utils.StepSizeController
+   :members:
+
+.. autoclass:: shinier.utils.ImageStats
+   :members:
 ```
 
 ### StimulusMasker
@@ -84,9 +104,9 @@ documentation remains in the Markdown files under `documentation/`.
 ```{eval-rst}
 .. autofunction:: shinier.utils.print_shinier_header
 
-.. autofunction:: shinier.utils.get_field_values_from_pydantic_model
+.. autofunction:: shinier.utils.pydantic_field_choices
 
-.. autofunction:: shinier.utils.generate_pydantic_key_value_dict
+.. autofunction:: shinier.utils.pydantic_model_choices
 
 .. autofunction:: shinier.utils.sf_profile
 
@@ -182,17 +202,68 @@ documentation remains in the Markdown files under `documentation/`.
 
 .. autofunction:: shinier.utils.imhist
 
+.. autofunction:: shinier.utils.classic_he_gray
+
+.. autofunction:: shinier.utils.tidhe_gray
+
+.. autofunction:: shinier.utils.rdfhe_gray
+
+.. autofunction:: shinier.utils.nfldice_gray
+
+.. autofunction:: shinier.utils.betce_gray
+
+.. autofunction:: shinier.utils.sfcef_gray
+
+```
+
+### Contrast Enhancement Metrics
+
+```{eval-rst}
+.. autofunction:: shinier.utils.compute_ambe
+
+.. autofunction:: shinier.utils.compute_contrast_improvement
+
+.. autofunction:: shinier.utils.compute_image_entropy
+
+.. autofunction:: shinier.utils.compute_mssim
+
+.. autofunction:: shinier.utils.compute_psnr
+
+.. autofunction:: shinier.utils.compute_bp2bpsim
+
+```
+
+### Histogram And Image Statistics
+
+```{eval-rst}
 .. autofunction:: shinier.utils.rounded_target_hist
 
 .. autofunction:: shinier.utils.compute_tvd_hist
 
 .. autofunction:: shinier.utils.avg_hist
+
+.. autofunction:: shinier.utils.imstats
 ```
 
 ## CLI
 
 ```{eval-rst}
-.. autofunction:: shinier.SHINIER.SHINIER_CLI
+.. autofunction:: shinier.SHINIER.prompt
+
+.. autofunction:: shinier.SHINIER.options_display
+
+.. autofunction:: shinier.SHINIER.get_image_list
+
+.. autofunction:: shinier.SHINIER.main
+```
+
+## Base Helpers
+
+```{eval-rst}
+.. autofunction:: shinier.base.image_list_validator
+
+.. autoclass:: shinier.base.InformativeBaseModel
+   :exclude-members: __init__, __new__
 ```
 
 ## Others
@@ -200,23 +271,27 @@ documentation remains in the Markdown files under `documentation/`.
 ### Chroma Loss Metrics
 
 ```{eval-rst}
-.. autoclass:: shinier.color.quantify_chroma_loss.ChromaMetrics
+.. autoclass:: shinier.color.chroma_eval.ChromaMetrics
 
-.. autoclass:: shinier.color.quantify_chroma_loss.AggregateMetric
+.. autoclass:: shinier.color.chroma_eval.AggregateMetric
 
-.. autoclass:: shinier.color.quantify_chroma_loss.AggregateRow
+.. autoclass:: shinier.color.chroma_eval.AggregateRow
 
-.. autoclass:: shinier.color.quantify_chroma_loss.ChromaInfoRetention
+.. autoclass:: shinier.color.chroma_eval.ChromaInfoRetention
 
-.. autoclass:: shinier.color.quantify_chroma_loss.ChromaInfoLossResult
+.. autoclass:: shinier.color.chroma_eval.ChromaInfoLossResult
 
-.. autofunction:: shinier.color.quantify_chroma_loss.compute_chroma_metrics_for_image
+.. autofunction:: shinier.color.chroma_eval.chroma_metrics_for_image
 
-.. autofunction:: shinier.color.quantify_chroma_loss.aggregate_chroma_metrics
+.. autofunction:: shinier.color.chroma_eval.aggregate_chroma_metrics
 
-.. autofunction:: shinier.color.quantify_chroma_loss.generate_chroma_loss_report
+.. autofunction:: shinier.color.chroma_eval.build_chroma_loss_report
 
-.. autofunction:: shinier.color.quantify_chroma_loss.chroma_info_loss_bits_per_pixel_vs_y1
+.. autofunction:: shinier.color.chroma_eval.chroma_info_loss_bpp
+
+.. autofunction:: shinier.color.chroma_eval.mean_chroma_loss_pct_lab
+
+.. autofunction:: shinier.color.chroma_eval.lab_chroma_retention
 ```
 
 ### ImageListIO

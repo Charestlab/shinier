@@ -2,9 +2,9 @@ name: Tests
 
 on:
   push:
-    branches: [ main, dev_1.4, dev_1.7, dev_v0.2.0 ]
+    branches: [ main, dev_1.4, dev_1.7, dev_v0.2.0, dev_v0.2.1]
   pull_request:
-    branches: [ main, dev_1.4, dev_1.7, dev_v0.2.0 ]
+    branches: [ main, dev_1.4, dev_1.7, dev_v0.2.0, dev_v0.2.1 ]
 
 jobs:
   tests:
@@ -20,11 +20,11 @@ jobs:
     steps:
       # 1) Récupérer le code
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # 2) Choisir la version de Python
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 

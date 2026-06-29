@@ -221,6 +221,53 @@ def test_target_spectrum_validation(tmp_dirs):
 
 
 @pytest.mark.unit_tests
+def test_target_hist_equal_accepted(tmp_dirs):
+    """target_hist='equal' must be accepted and stored as-is."""
+    in_dir, out_dir, _ = tmp_dirs
+    opt = Options(input_folder=in_dir, output_folder=out_dir, target_hist="equal")
+    assert opt.target_hist == "equal"
+
+
+@pytest.mark.unit_tests
+@pytest.mark.parametrize("ie_methods", ["classic_he", "tidhe", "rdfhe", "nfldice", "betce", "sfcef"])
+def test_ie_methods_accepted(tmp_dirs, ie_methods):
+    """All image-enhancement methods must be accepted in mode 9."""
+    in_dir, out_dir, _ = tmp_dirs
+    opt = Options(input_folder=in_dir, output_folder=out_dir,
+                  mode=9, standalone_op="ie_methods", ie_methods=ie_methods)
+    assert opt.standalone_op == "ie_methods"
+    assert opt.ie_methods == ie_methods
+
+
+@pytest.mark.unit_tests
+def test_operation_dithering_requires_dithering_nonzero(tmp_dirs):
+    """mode=9 with standalone_op='dithering' and dithering=0 must raise."""
+    in_dir, out_dir, _ = tmp_dirs
+    with pytest.raises((ValueError, ValidationError)):
+        Options(input_folder=in_dir, output_folder=out_dir,
+                mode=9, standalone_op="dithering", dithering=0)
+
+
+@pytest.mark.unit_tests
+def test_mode9_ie_methods_rejects_dithering(tmp_dirs):
+    """mode=9 image-enhancement methods must not accept dithering."""
+    in_dir, out_dir, _ = tmp_dirs
+    with pytest.raises((ValueError, ValidationError)):
+        Options(input_folder=in_dir, output_folder=out_dir,
+                mode=9, standalone_op="ie_methods", dithering=2)
+
+
+@pytest.mark.unit_tests
+def test_target_hist_unrecognised_string_rejected(tmp_dirs):
+    """Arbitrary strings that are not valid sentinel values must be rejected."""
+    in_dir, out_dir, _ = tmp_dirs
+    with pytest.raises((ValueError, ValidationError)):
+        Options(input_folder=in_dir, output_folder=out_dir, target_hist="flat")
+    with pytest.raises((ValueError, ValidationError)):
+        Options(input_folder=in_dir, output_folder=out_dir, target_hist="equalization")
+
+
+@pytest.mark.unit_tests
 def test_hist_optim_overwrites_hist_spec(tmp_dirs):
     """hist_optim=True should nullify hist_specification."""
     in_dir, out_dir, _ = tmp_dirs
@@ -239,10 +286,11 @@ def test_rescaling_forbidden_modes_overwrite(tmp_dirs):
 
 @pytest.mark.unit_tests
 def test_mode9_dithering_zero_raises(tmp_dirs):
-    """Mode 9 cannot have dithering=0."""
+    """Mode 9 with standalone_op='dithering' and dithering=0 must raise."""
     in_dir, out_dir, _ = tmp_dirs
-    with pytest.raises(ValueError):
-        Options(input_folder=in_dir, output_folder=out_dir, mode=9, dithering=0)
+    with pytest.raises((ValueError, ValidationError)):
+        Options(input_folder=in_dir, output_folder=out_dir,
+                mode=9, standalone_op="dithering", dithering=0)
 
 
 @pytest.mark.unit_tests
@@ -271,6 +319,8 @@ def test_legacy_mode_overrides(tmp_dirs):
     opt = Options(input_folder=in_dir, output_folder=out_dir, legacy_mode=True)
     assert not opt.conserve_memory
     assert opt.as_gray
+    assert not opt.linear_luminance
+    assert opt.rec_standard == 1
     assert opt.dithering == 0
     assert opt.hist_specification == 1
     assert not opt.safe_lum_match
@@ -340,8 +390,11 @@ def test_all_combo(tmp_dirs):
             continue
 
         params = dict(zip(keys, combo))
-        if params['mode'] == 9 and params['dithering'] == 0:
-            params['dithering'] = 1
+        if params['mode'] == 9:
+            if params['standalone_op'] == 'dithering' and params['dithering'] == 0:
+                params['dithering'] = 1
+            elif params['standalone_op'] == 'ie_methods' and params['dithering'] != 0:
+                params['dithering'] = 0
         Options(**params)
         if pbar is not None:
             pbar.update(1)

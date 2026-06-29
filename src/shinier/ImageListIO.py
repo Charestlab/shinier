@@ -523,7 +523,7 @@ class ImageListIO(InformativeBaseModel):
         """Convert an RGB image to grayscale according to the configured mode."""
         if image.ndim == 3:
             if self.as_gray > 0:
-                image = rgb2gray(image, conversion_type=RGB2GRAY_WEIGHTS['int2key'][self.as_gray])
+                image = rgb2gray(image, weighting_standard=RGB2GRAY_WEIGHTS['int2key'][self.as_gray])
                 image = uint8_plus(image)
         return image
 

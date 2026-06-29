@@ -331,7 +331,7 @@ class GamutControl(InformativeBaseModel):
         # Optional chroma-loss metric (lazy import to avoid circular imports)
         if self.log_low_Y_chroma_loss and verbose:
             try:
-                from shinier.color.quantify_chroma_loss import relative_mean_chroma_loss_pct_global_lab
+                from shinier.color.chroma_eval import mean_chroma_loss_pct_lab
 
                 xy_before = np.asarray(other, dtype=np.float64)
                 xy_after = np.asarray(other_out, dtype=np.float64)
@@ -341,7 +341,7 @@ class GamutControl(InformativeBaseModel):
                 srgb_before = self._converter.xyY_to_sRGB(xyY_before)
                 srgb_after = self._converter.xyY_to_sRGB(xyY_after)
 
-                loss_pct, mean_c0, mean_c1 = relative_mean_chroma_loss_pct_global_lab(
+                loss_pct, mean_c0, mean_c1 = mean_chroma_loss_pct_lab(
                     converter=self._converter,
                     srgb_before_01=srgb_before,
                     srgb_after_01=srgb_after,

@@ -33,6 +33,7 @@ OPTION_TYPES = {
     'luminance':        ['safe_lum_match', 'target_lum'],
     'histogram':        ['hist_optim', 'hist_specification', 'hist_iterations', 'target_hist'],
     'fourier':          ['rescaling', 'target_spectrum', 'fft_padding_mode', 'fft_padding_value'],
+    'mode9':            ['standalone_op', 'ie_methods'],
     'misc':             ['verbose']
 }
 
@@ -59,7 +60,9 @@ class Options(InformativeBaseModel):
         ``hist_optim``, ``hist_specification``, ``hist_iterations``, ``target_hist``
     8. FOURIER matching
         ``rescaling``, ``target_spectrum``, ``fft_padding_mode``, ``fft_padding_value``
-    9. Misc
+    9. MODE 9
+        ``standalone_op``, ``ie_methods``
+    10. Misc
         ``verbose``
 
     Options
@@ -115,7 +118,7 @@ class Options(InformativeBaseModel):
         - 6 = hist_match and spec_match.
         - 7 = sf_match and hist_match.
         - 8 = spec_match and hist_match.
-        - 9 = only dithering.
+        - 9 = standalone per-image transform — no inter-image target, controlled by ``standalone_op``:
 
         Related methods in :class:`shinier.ImageProcessor`:
 
@@ -123,6 +126,7 @@ class Options(InformativeBaseModel):
         - Histogram matching: :meth:`shinier.ImageProcessor.hist_match`
         - Spatial-frequency matching: :meth:`shinier.ImageProcessor.sf_match`
         - Spectrum matching: :meth:`shinier.ImageProcessor.spec_match`
+        - Image enhancement: :meth:`shinier.ImageProcessor.ie_methods`
         - Full pipeline orchestration: :meth:`shinier.ImageProcessor.process`
         
     legacy_mode : Optional[bool]
@@ -133,16 +137,22 @@ class Options(InformativeBaseModel):
 
         Important: legacy_mode affects more than the explicit option overrides listed below.
         It also enables MATLAB-compatibility behavior in several processing steps
-        (for example MATLAB-style rounding and grayscale conversion paths), so outputs may differ
-        even when two runs appear to share the same visible option values.
+        (for example MATLAB-style rounding and MATLAB-compatible RGB to grayscale
+        conversion), so outputs may differ even when two runs appear to share the
+        same visible option values.
 
         True reproduces the behavior of previous releases by setting:
 
         - ``conserve_memory`` = ``False``
         - ``as_gray`` = ``1``
+        - ``linear_luminance`` = ``False``
+        - ``rec_standard`` = ``1`` (Rec.601)
         - ``dithering`` = ``0``
         - ``hist_specification`` = ``1``
         - ``safe_lum_match`` = ``False``
+
+        In grayscale color preprocessing, legacy mode uses MATLAB-compatible
+        Rec.601 / NTSC-YIQ intensity weights, equivalent to MATLAB ``rgb2gray``.
 
         False means no legacy settings are forced and all options follow their current defaults.
 
@@ -158,7 +168,7 @@ class Options(InformativeBaseModel):
     iterations : int
         [3] SHINIER MODE.
 
-        Number of iterations for composite modes.
+        Number of iterations for composite modes (5-8).
         Default is 5.
 
         For these modes, histogram specification and Fourier amplitude specification affect each other.
@@ -166,6 +176,8 @@ class Options(InformativeBaseModel):
 
         This method of iterating was developed so that it recalculates the respective target at each iteration
         (i.e., no target hist/spectrum).
+
+        Silently forced to 1 outside composite modes (1-4, 9).
 
     as_gray : bool
         [4] Grayscale / color.
@@ -176,8 +188,11 @@ class Options(InformativeBaseModel):
         - True = Convert into grayscale images.
 
                 - When ``linear_luminance`` is ``False``:
-                    computes non-linear grayscale images by applying the perceptual
-                    luma weights from the specified ``rec_standard``.
+                    extracts the CIE xyY luminance channel after RGB
+                    linearization, using the selected ``rec_standard`` for the
+                    RGB-to-XYZ conversion. In ``legacy_mode``, SHINIER instead
+                    uses MATLAB-compatible Rec.601 ``rgb2gray`` / NTSC-YIQ
+                    intensity weights.
                     
                 - When ``linear_luminance`` is ``True``:
                     computes linear grayscale images by averaging the RGB channels
@@ -364,7 +379,9 @@ class Options(InformativeBaseModel):
                     - Spatial dimensions must match the processed images.
 
             - ``'equal'``:
-                    - Uses a flat histogram, i.e., histogram equalization.
+                    - Flat histogram, i.e., performs a type of `histogram equalization`.
+                    - All images are matched to the same flat histogram (``1/256`` per bin).
+                    - Preserves inter-image consistency; uses the full ``exact_histogram`` pipeline.
 
             - ``None``:
                     - Uses the average histogram of all input images.
@@ -378,11 +395,11 @@ class Options(InformativeBaseModel):
         Default is 2.
 
         - 0 = no rescaling.
-        - 1 = Rescaling each image so that it stretches to [0, 1] (its own min -> 0, max -> 1).
-        - 2 = Rescaling absolute max/min (shared 0-1 range).
-        - 3 = Rescaling average max/min.
+        - 1 = Per-image stretch to [0, 255] (each image's own min → 0, max → 255).
+        - 2 = Dataset absolute min/max mapped to [0, 255] (shared range, no clipping).
+        - 3 = Dataset average min/max mapped to [0, 255] (shared range, outlier images are clipped).
 
-        Not allowed for modes 1 and 2.
+        Not used in modes 1 and 2 (silently reset to 0).
 
     target_spectrum : Optional[Union[np.ndarray, Path]]
         [8] FOURIER matching.
@@ -430,8 +447,44 @@ class Options(InformativeBaseModel):
         If ``300``, the mean intensity of the current normalized image is used.
         Used only when ``fft_padding_mode=3``.
 
+        Silently reset to ``300`` unless ``fft_padding_mode=3``.
+        
+    standalone_op : Literal['dithering', 'ie_methods']
+        [9] MODE 9.
+
+        Selects the standalone transform applied in mode 9.
+        Default is ``'ie_methods'``.
+
+        Only used when ``mode=9``.
+
+        - ``'dithering'``: applies the dithering method selected by ``dithering`` (1 or 2) before
+          the final uint8 cast. Requires ``dithering != 0``.
+        - ``'ie_methods'``: applies image enhancement per image; the specific
+          algorithm is controlled by ``ie_methods``.
+
+    ie_methods : Literal['classic_he', 'tidhe', 'rdfhe', 'nfldice', 'betce', 'sfcef']
+        [9] MODE 9.
+
+        Selects the image-enhancement algorithm applied when ``standalone_op='ie_methods'``.
+        Default is ``'tidhe'``.
+
+        Only used when ``mode=9`` and ``standalone_op='ie_methods'``.
+
+        - ``'classic_he'``: classic global histogram equalization.
+          See :func:`shinier.utils.classic_he_gray`.
+        - ``'tidhe'``: Tripartite Image Decomposition-Based Histogram Equalization.
+          See :func:`shinier.utils.tidhe_gray`.
+        - ``'rdfhe'``: Recursive Dualistic Fuzzy Histogram Equalization.
+          See :func:`shinier.utils.rdfhe_gray`.
+        - ``'nfldice'``: Nonlinear Fuzzification-Linear Defuzzification-Based ICE.
+          See :func:`shinier.utils.nfldice_gray`.
+        - ``'betce'``: Bi-Entropy Curve Equalization.
+          See :func:`shinier.utils.betce_gray`.
+        - ``'sfcef'``: Sakaguchi-type Function-Based Cost-Effective Filtering.
+          See :func:`shinier.utils.sfcef_gray`.
+
     verbose : Literal[-1, 0, 1, 2, 3], optional
-        [9] Misc.
+        [10] Misc.
 
         Controls verbosity levels.
         Default is 0.
@@ -490,6 +543,10 @@ class Options(InformativeBaseModel):
     fft_padding_mode: Literal[0, 1, 2, 3] = 0
     fft_padding_value: Union[int, Literal[300]] = 300
 
+    # --- Mode 9 ---
+    standalone_op: Literal["dithering", "ie_methods"] = "ie_methods"
+    ie_methods: Literal["classic_he", "tidhe", "rdfhe", "nfldice", "betce", "sfcef"] = "tidhe"
+
     # --- Misc ---
     verbose: Literal[-1, 0, 1, 2, 3] = 0
 
@@ -512,27 +569,32 @@ class Options(InformativeBaseModel):
     @field_validator("target_hist")
     @classmethod
     def validate_target_hist(cls, v):
-        """Validate that target_hist is 'equal', an array of correct shape, or a valid image path."""
-        if v is None or (isinstance(v, str) and v in ["equal", 'unit_test']):
+        """Validate that target_hist is 'equal', a numpy array of correct shape, or an image path."""
+        if v is None:
             return v
-        if isinstance(v, (str, Path)):
-            v = Path(v).resolve()
-            if not v.exists():
-                raise ValueError(f"target_hist image does not exist: {v}")
-            if not v.is_file():
-                raise ValueError(f"target_hist path must point to a file: {v}")
-            if v.suffix.lower().lstrip(".") not in get_args(ACCEPTED_IMAGE_FORMATS):
-                raise ValueError(
-                    f"target_hist image must use one of {get_args(ACCEPTED_IMAGE_FORMATS)}. "
-                    f"Got: {v.suffix}"
-                )
+        if isinstance(v, np.ndarray):
+            if v.ndim not in (1, 2):
+                raise ValueError("target_hist must be 1D (gray) or 2D (color).")
+            if v.ndim == 1 and v.size != 256:
+                raise ValueError("For grayscale, target_hist must have 256 bins.")
             return v
-        if not isinstance(v, np.ndarray):
+        if isinstance(v, (str, Path)) and str(v) in {"equal", "unit_test"}:
+            return str(v)
+        if isinstance(v, str):
+            raise ValueError(f"target_hist string value '{v}' is not recognised. "
+                             f"Use 'equal', an image path, or a numpy array.")
+        if not isinstance(v, Path):
             raise TypeError("target_hist must be a numpy.ndarray, an image path, or 'equal'.")
-        if v.ndim not in (1, 2):
-            raise ValueError("target_hist must be 1D (gray) or 2D (color).")
-        if v.ndim == 1 and v.size != 256:
-            raise ValueError("For grayscale, target_hist must have 256 bins.")
+        v = v.resolve()
+        if not v.exists():
+            raise ValueError(f"target_hist image does not exist: {v}")
+        if not v.is_file():
+            raise ValueError(f"target_hist path must point to a file: {v}")
+        if v.suffix.lower().lstrip(".") not in get_args(ACCEPTED_IMAGE_FORMATS):
+            raise ValueError(
+                f"target_hist image must use one of {get_args(ACCEPTED_IMAGE_FORMATS)}. "
+                f"Got: {v.suffix}"
+            )
         return v
 
     @field_validator("target_spectrum")
@@ -601,9 +663,18 @@ class Options(InformativeBaseModel):
             object.__setattr__(self, "rescaling", 0)
             console_log(msg=f"Rescaling not valid for luminance/histogram modes. rescaling -> 0", color=Bcolors.WARNING, verbose=self.verbose > 0)
 
-        # Mode 9: must have dithering != 0 → raise ValueError
-        if self.mode == 9 and self.dithering == 0:
-            raise ValueError("Mode 9 requires dithering 1 or 2 (not 0).")
+        # Mode 9 (dithering): must have dithering != 0
+        if self.mode == 9 and self.standalone_op == "dithering" and self.dithering == 0:
+            raise ValueError("Mode 9 with standalone_op='dithering' requires dithering 1 or 2 (not 0).")
+
+        # Mode 9 image-enhancement methods are standalone transforms; dithering is a separate standalone operation.
+        if self.mode == 9 and self.standalone_op == "ie_methods" and self.dithering != 0:
+            raise ValueError("Mode 9 with standalone_op='ie_methods' does not accept dithering. Use standalone_op='dithering' instead.")
+
+        # Image enhancement is a one-shot transform; iterations > 1 has no meaning — silently clamp to 1.
+        if self.mode == 9 and self.standalone_op == "ie_methods" and self.iterations != 1:
+            object.__setattr__(self, "iterations", 1)
+            console_log(msg="Image enhancement is a one-shot transform — iterations forced to 1.", color=Bcolors.WARNING, verbose=self.verbose > 0)
 
         # target_hist should match expected images size under as_gray and linear_luminance
         if self.target_hist is not None and not isinstance(self.target_hist, (str, Path)):
