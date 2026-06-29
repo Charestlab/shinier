@@ -183,6 +183,10 @@ class ImageProcessor(InformativeBaseModel):
         self._processing_steps = self._mode2processing_steps[self.options.mode]
         self._n_steps = len(self._processing_steps)
         self._sum_bool_masks = [None] * len(self.dataset.images)
+
+        if self.seed is None and self.options.seed is not None:
+            self.seed = self.options.seed
+
         if self.from_unit_test:
             return
 
