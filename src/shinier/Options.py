@@ -168,7 +168,7 @@ class Options(InformativeBaseModel):
     iterations : int
         [3] SHINIER MODE.
 
-        Number of iterations for composite modes.
+        Number of iterations for composite modes (5-8).
         Default is 5.
 
         For these modes, histogram specification and Fourier amplitude specification affect each other.
@@ -176,6 +176,8 @@ class Options(InformativeBaseModel):
 
         This method of iterating was developed so that it recalculates the respective target at each iteration
         (i.e., no target hist/spectrum).
+
+        Silently forced to 1 outside composite modes (1-4, 9).
 
     as_gray : bool
         [4] Grayscale / color.
@@ -397,7 +399,7 @@ class Options(InformativeBaseModel):
         - 2 = Dataset absolute min/max mapped to [0, 255] (shared range, no clipping).
         - 3 = Dataset average min/max mapped to [0, 255] (shared range, outlier images are clipped).
 
-        Not allowed for modes 1 and 2.
+        Not used in modes 1 and 2 (silently reset to 0).
 
     target_spectrum : Optional[Union[np.ndarray, Path]]
         [8] FOURIER matching.
@@ -445,6 +447,8 @@ class Options(InformativeBaseModel):
         If ``300``, the mean intensity of the current normalized image is used.
         Used only when ``fft_padding_mode=3``.
 
+        Silently reset to ``300`` unless ``fft_padding_mode=3``.
+        
     standalone_op : Literal['dithering', 'ie_methods']
         [9] MODE 9.
 

@@ -68,14 +68,7 @@ shinier/src
 
 ### Processing Flow
 
-```mermaid
-graph TD
-    A[Options] --> B[ImageDataset]
-    B --> C[ImageProcessor]
-    C --> D[Mode-based Processing]
-    D --> E[Final Conversion]
-    E --> F[Output Images]
-```
+![SHINIER processing flow](figures/processing_flow.png)
 
 ---
 
@@ -371,10 +364,9 @@ Applies a standalone transform to each image independently — no inter-image ta
 
 ### Histogram Equalization: Exact Specification and Histogram-Derived Remapping
 
-**Exact histogram specification (EHS)** (`target_hist="equal"`, `mode=2` or modes 5–8) ranks individual pixels and assigns them to a uniform target, achieving an exactly flat histogram on the discrete image.
+Histogram equalization can be achieved through **Exact Histogram Specification (EHS)** using a flat, uniform target histogram (`target_hist="equal"`, `mode=2` or modes 5–8). Pixels are individually ranked and assigned to target bins, allowing the output to exactly match the feasible discrete uniform histogram.
 
-**Histogram-derived methods** (`mode=9`, `standalone_op="ie_methods"`) apply a gray-level mapping computed from the image's own CDF — optionally after partitioning, clipping, or fuzzifying the histogram (`classic_he`, `tidhe`, `rdfhe`, …). Because all pixels at the same input level map to the same output, an exactly uniform histogram is not generally achievable.
-
+SHINIER also provides **histogram-derived methods** (`mode=9`, `standalone_op="ie_methods"`), including `classic_he`, `tidhe`, and `rdfhe`. These methods compute gray-level mappings from the image histogram or CDF. Because identical input intensities receive the same output value, the resulting histogram is generally only approximately uniform.
 ---
 
 ### Border Artifacts and FFT Padding
