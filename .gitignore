@@ -27,6 +27,9 @@ documentation/readthedocs/_build/
 # PACKAGE DATA
 # -------------------------------
 
+# Dev TODOs
+future_todos.md
+
 # Ignore everything inside OUTPUT, but keep the folder itself
 src/shinier/data/OUTPUT/*
 !src/shinier/data/OUTPUT/.gitkeep

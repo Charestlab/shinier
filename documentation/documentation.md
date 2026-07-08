@@ -367,6 +367,7 @@ Applies a standalone transform to each image independently — no inter-image ta
 Histogram equalization can be achieved through **Exact Histogram Specification (EHS)** using a flat, uniform target histogram (`target_hist="equal"`, `mode=2` or modes 5–8). Pixels are individually ranked and assigned to target bins, allowing the output to exactly match the feasible discrete uniform histogram.
 
 SHINIER also provides **histogram-derived methods** (`mode=9`, `standalone_op="ie_methods"`), including `classic_he`, `tidhe`, and `rdfhe`. These methods compute gray-level mappings from the image histogram or CDF. Because identical input intensities receive the same output value, the resulting histogram is generally only approximately uniform.
+
 ---
 
 ### Border Artifacts and FFT Padding

@@ -102,7 +102,7 @@ Change the mode number (e.g. `opt = Options(mode=3)`) to change image processing
 | 6    | `hist_match → spec_match`         | Histogram, then spectrum                  |
 | 7    | `sf_match → hist_match`           | Spatial frequency, then histogram         |
 | 8    | `spec_match → hist_match` (default) | Spectrum, then histogram (recommended)  |
-| 9    | `dithering`                       | Dithering only                            |
+| 9    | `ie_methods` or `dithering`       | Standalone per-image transform (histogram-derived enhancement or dithering) |
 
 Below is an example of results obtained using mode 5 with joint histogram equalization and spatial frequency normalization.
 <p>
