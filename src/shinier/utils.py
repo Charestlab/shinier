@@ -5013,6 +5013,12 @@ def compute_bp2bpsim(reference: np.ndarray, enhanced: np.ndarray, n_bits: int = 
 
     Values range from 0 to 1. Higher values indicate more matching bits across
     corresponding pixels and channels.
+
+    References
+    ----------
+    Rahman, H., & Paul, G. C. (2023). Tripartite sub-image histogram equalization for slightly
+    low contrast gray-tone image enhancement. Pattern Recognition, 134, Article 109043.
+    https://doi.org/10.1016/j.patcog.2022.109043
     """
     _check_same_shape(reference, enhanced, "compute_bp2bpsim")
     if n_bits < 1 or n_bits > 8:
