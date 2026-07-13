@@ -1023,7 +1023,7 @@ def get_radius_grid(x_size: int, y_size: int, legacy_mode: bool = False) -> np.n
     # --- polar radius, MATLAB rounding rule ---
     r = np.hypot(XX, YY)
     r_adjustment = -1 if (x_size % 2 == 1) or (y_size % 2 == 1) else 0
-    r = MatlabOperators.round(r) if legacy_mode else np.round(r, decimals=0) + r_adjustment
+    r = (MatlabOperators.round(r) if legacy_mode else np.round(r, decimals=0)) + r_adjustment
 
     # Non-negative integer bin indices
     return np.clip(r, 0, None).astype(np.int64)

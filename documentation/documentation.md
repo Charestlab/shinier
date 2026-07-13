@@ -857,6 +857,18 @@ See `tests/README.md` for a detailed breakdown.
 `ImageEnhancement_validation_test.py` validates each image-enhancement algorithm (TIDHE, RDFHE, NFLDICE, BETCE, SFCEF) against pixel-exact MATLAB reference outputs stored as SHA-256 hashes in `tests/assets/image_enhancement_matlab_sha256.json`.
 SFCEF uses a pixel-difference bound (`max_diff ≤ 1`) instead of exact hash equality due to FMA-induced rounding differences between MATLAB and NumPy.
 
+### MATLAB SHINE Comparison
+
+A standalone tool benchmarks SHINIER directly against the original [MATLAB SHINE toolbox](http://www.mapageweb.umontreal.ca/gosselif/SHINE/) across processing modes 1–8.
+It compares three implementations — `matlab_shine` (the original toolbox), `shinier_legacy` (`legacy_mode=True`, MATLAB-compatible behavior), and `shinier_modern_gray` (SHINIER defaults on grayscale) — in two stages: pixel differences between saved outputs, and distances to shared fixed targets (histogram and spectrum), each measured in the implementation's own processing domain.
+
+```bash
+# Requires MATLAB and the SHINE toolbox
+bash tests/tools/run_matlab_shine_comparison.sh
+```
+
+Results are written as CSV files under `tmp/matlab_shine_comparison/` and summarized in terminal tables. See `tests/README.md` and the docstring of `tests/tools/matlab_shine_comparison.py` for details.
+
 ---
 
 ## 📚 Usage Examples

@@ -314,3 +314,47 @@ This will rebuild the same `Options`, reload selected images, and re-run the fai
    ```bash
    python -m tests.tools.replay_failure path/to/failure_xxxxx.pkl
    ```
+
+---
+
+## 🔬 MATLAB SHINE Comparison
+
+SHINIER ships with a standalone comparison tool that benchmarks the Python
+implementations against the original
+[MATLAB SHINE toolbox](http://www.mapageweb.umontreal.ca/gosselif/SHINE/)
+across processing modes 1–8. Three implementations are compared:
+
+| Implementation        | Description                                                        |
+|-----------------------|--------------------------------------------------------------------|
+| `matlab_shine`        | Original MATLAB SHINE toolbox, driven by a generated MATLAB script |
+| `shinier_legacy`      | SHINIER with `legacy_mode=True` (MATLAB-compatible behavior)       |
+| `shinier_modern_gray` | SHINIER defaults on grayscale (xyY luminance processing)           |
+
+The tool produces two comparison stages:
+
+1. **Output comparison** — pixel differences (RMSE, MAE, max abs, equal
+   fraction, histogram L1) between saved MATLAB and Python images.
+2. **Fixed-target comparison** — every implementation receives the same fixed
+   initial Python targets (histogram and spectrum) and each output is measured
+   against the target in its own processing domain.
+
+Requirements: a local MATLAB installation and the SHINE toolbox.
+
+```bash
+# Complete run (asks for MATLAB/SHINE paths if not found)
+bash tests/tools/run_matlab_shine_comparison.sh
+
+# Common overrides
+MATLAB_BIN=/Applications/MATLAB_R2025a.app/bin/matlab \
+SHINE_DIR=~/toolboxes/shinetoolbox \
+MODES="2 3 4" LIMIT=8 ITERATIONS=5 \
+bash tests/tools/run_matlab_shine_comparison.sh
+
+# Keep all intermediate images, MATLAB scripts and .mat files
+FULL_TRACKING=1 bash tests/tools/run_matlab_shine_comparison.sh
+```
+
+Results are written as CSV files (summary and per-image detail) under
+`tmp/matlab_shine_comparison/`, and summary tables are printed to the
+terminal. See the module docstring of
+`tests/tools/matlab_shine_comparison.py` for the full metric definitions.
