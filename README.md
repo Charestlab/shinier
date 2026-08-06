@@ -152,5 +152,5 @@ See [LICENSE](LICENSE) for more information.
 ---
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-  <em>Version 0.2.0 - Complete technical documentation</em>
+  <em>Version 0.2.2 - Complete technical documentation</em>
 </p>

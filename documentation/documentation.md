@@ -937,5 +937,5 @@ Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum m
 
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-    <em>Version 0.2.0 - Complete technical documentation</em>
+    <em>Version 0.2.2 - Complete technical documentation</em>
 </p>
