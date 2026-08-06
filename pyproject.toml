@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77", "wheel", "numpy>=1.22"]
+requires = ["setuptools>=77", "wheel", "numpy>=2.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -13,12 +13,11 @@ authors = [
     { name = "Nicolas Dupuis-Roy", email = "nicolas.dupuis.roy@umontreal.ca" },
     { name = "Mathias Salvas-Hébert", email = "mathias.salvas-hebert@umontreal.ca" }
 ]
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.9,<3.15"
 dependencies = [
-    "numpy>=1.22,<2.1",
+    "numpy>=1.23",
     "Pillow>=9.0.0",
     "tqdm>=4.60",
-    "cython>=3.0",
     "matplotlib>=3.9.0",
     "pydantic>=2.12",
 ]
@@ -27,6 +26,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
 ]
 
@@ -38,6 +39,7 @@ dev = [
     "pytest>=8.3.0",
     "wheel>=0.44.0",
     "setuptools>=77",
+    "cython>=3.0",
     "scikit-image>=0.24.0",
     "colour-science >= 0.4.0",
     "build>=1.2.1",

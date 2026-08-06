@@ -320,16 +320,16 @@ class StimulusMasker:
     >>> final_mask = masker.interactive_mask(image)
     """
 
-    image_size: int | tuple[int, int]
+    image_size: Union[int, Tuple[int, int]]
     cutoff_a: float
-    cutoff_b: float | None = None
+    cutoff_b: Optional[float] = None
     offset_a: float = 0.0
     offset_b: float = 0.0
     mask_type: MaskType = "feathered_disk"
     sigma: float = 2.0
     edge_width: float = 2.0
     background: float = 0.5
-    output_dtype: np.dtype | type = np.float64
+    output_dtype: Union[np.dtype, type] = np.float64
 
     def mask(self) -> np.ndarray:
         """Generate mask as float64 in [0, 1]."""
@@ -2846,7 +2846,7 @@ def print_log(logs: List[str], log_path: Union[Path, str], log_name: Optional[st
     filename = Path(log_path) / log_name
 
     # Write each log to a new line in the file
-    with open(filename, 'w') as file:
+    with open(filename, 'w', encoding='utf-8') as file:
         for log in logs:
             file.write(strip_ansi(log) + '\n')
 

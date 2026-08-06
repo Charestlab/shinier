@@ -176,7 +176,7 @@ class GamutControl(InformativeBaseModel):
         return np.clip(dist_to_edge / fade_width, 0.0, 1.0)
 
     @staticmethod
-    def _min_or_quantile(values: np.ndarray, quantile_threshold: float | None) -> float:
+    def _min_or_quantile(values: np.ndarray, quantile_threshold: Optional[float]) -> float:
         """Return min(values) or a lower-quantile if configured."""
         if values.size == 0:
             return 1.0
@@ -185,7 +185,7 @@ class GamutControl(InformativeBaseModel):
         return float(np.quantile(values, quantile_threshold))
 
     @staticmethod
-    def _format_quantile_msg(quantile_threshold: float | None) -> str:
+    def _format_quantile_msg(quantile_threshold: Optional[float]) -> str:
         """Format a short message describing quantile clipping."""
         if quantile_threshold is None:
             return ''
@@ -194,9 +194,9 @@ class GamutControl(InformativeBaseModel):
     def _log_image_overflow(
         self,
         kind: str,
-        idx: int | None,
+        idx: Optional[int],
         local_min: float,
-        quantile_threshold: float | None,
+        quantile_threshold: Optional[float],
         verbose: bool,
     ) -> None:
         """Log a standardized per-image overflow message.
@@ -277,7 +277,7 @@ class GamutControl(InformativeBaseModel):
         self,
         Y: np.ndarray,
         other: np.ndarray,
-        idx: int | None = None,
+        idx: Optional[int] = None,
         verbose: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """[S1] Optionally desaturate chroma for low-luminance pixels.
 

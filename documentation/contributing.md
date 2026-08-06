@@ -40,7 +40,7 @@ By participating, you agree to uphold a standard of professional, inclusive, and
 
 ## Development Setup
 
-> **Python:** >=3.9, <3.13  
+> **Python:** >=3.9, <3.15  
 > **OS:** macOS / Linux / Windows  
 > **Optional:** C/C++ toolchain for the Cython-compiled `_cconvolve` extension (speeds up convolution)
 

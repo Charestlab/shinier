@@ -22,17 +22,40 @@ __email__ = "nicolas.dupuis.roy@umontreal.ca"
 # For direct importation
 from importlib import util
 from pathlib import Path
-_HAS_CYTHON = util.find_spec("shinier._cconvolve") is not None
+import sys
+import warnings
+
+_HAS_CYTHON = False
+convolve2d_direct = None
+convolve2d_separable = None
 
 # This is the *package* root: src/shinier in dev, site-packages/shinier when installed
 DEV_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = Path(__file__).resolve().parent
 
-if _HAS_CYTHON:
-    from ._cconvolve import convolve2d_direct, convolve2d_separable
-else:
-    convolve2d_direct = None
-    convolve2d_separable = None
+if util.find_spec("shinier._cconvolve") is not None:
+    try:
+        from ._cconvolve import convolve2d_direct, convolve2d_separable
+        _HAS_CYTHON = True
+    except Exception as exc:
+        try:
+            import numpy as _np
+
+            numpy_version = _np.__version__
+        except Exception:
+            numpy_version = "unavailable"
+
+        warnings.warn(
+            "SHINIER could not load the optional compiled convolution extension "
+            "(`shinier._cconvolve`). SHINIER will keep working, but convolution-heavy "
+            "operations will use the slower NumPy fallback. "
+            f"Python: {sys.version.split()[0]}; NumPy: {numpy_version}. "
+            "If you want the faster compiled extension, try reinstalling SHINIER after "
+            "upgrading pip, setuptools, wheel, and NumPy, and make sure a C++ compiler "
+            f"is available. Original error: {exc!r}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
 __all__ = [
     "Options",
