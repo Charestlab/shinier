@@ -15,26 +15,31 @@
 # Documentation
 <!-- readthedocs-content-start -->
 
-## 📋 Table of Contents
+## Table of Contents
 
 1. [Overview](#overview)
 2. [Package Architecture](#package-architecture)
 3. [MATLAB vs Python Differences](#matlab-vs-python-differences)
 4. [Detailed Processing Modes](#detailed-processing-modes)
-5. [Main Classes](#main-classes)
-6. [Visualization Functions](#visualization-functions)
-7. [Implemented Algorithms](#implemented-algorithms)
-8. [Memory Management and Performance](#memory-management-and-performance)
-9. [Testing and Validation](#testing-and-validation)
+5. [Border Artifacts and FFT Padding](#border-artifacts-and-fft-padding)
+6. [Main Classes](#main-classes)
+7. [Visualization Functions](#visualization-functions)
+8. [Implemented Algorithms](#implemented-algorithms)
+9. [Memory Management and Performance](#memory-management-and-performance)
+10. [Testing and Validation](#testing-and-validation)
+11. [Troubleshooting and Optimization](#troubleshooting-and-optimization)
+12. [Additional Resources](#additional-resources)
 
 ---
 
 <a id="overview"></a>
-## 🎯 Overview
+## Overview
 
 **SHINIER** is a modern Python implementation of the **SHINE** (Spectrum, Histogram, and Intensity Normalization, Equalization, and Refinements) toolbox, originally developed in MATLAB by [Willenbockel et al. (2010)](https://doi.org/10.3758/BRM.42.3.671). This new version implemented new options (e.g., color management, dithering and [Coltuc, Bolon & Chassery (2006)](https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf) exact histogram specification algorithm) and refined the previous ones.
 
-**Reference** : [Willenbockel, V., Sadr, J., Fiset, D., Horne, G. O., Gosselin, F., & Tanaka, J. W. (2010). Controlling low-level image properties: The SHINE toolbox. *Behavior Research Methods*, 42(3), 671-684.](https://doi.org/10.3758/BRM.42.3.671)
+**References**:
+- [Salvas-Hébert, M., Dupuis-Roy, N., Landry, C., Charest, I., & Gosselin, F. (2026). SHINIER: An open-source Python package for controlling low-level image properties. *SoftwareX*, *35*, Article 102884.](https://doi.org/10.1016/j.softx.2026.102884)
+- [Willenbockel, V., Sadr, J., Fiset, D., Horne, G. O., Gosselin, F., & Tanaka, J. W. (2010). Controlling low-level image properties: The SHINE toolbox. *Behavior Research Methods*, *42*(3), 671–684.](https://doi.org/10.3758/BRM.42.3.671)
 
 ### Main Objectives
 - **Compatibility**: Maintain compatibility with the original MATLAB implementation
@@ -45,7 +50,7 @@
 ---
 
 <a id="package-architecture"></a>
-## 🏗️ Package Architecture
+## Package Architecture
 
 ### Module Structure
 
@@ -73,7 +78,7 @@ shinier/src
 ---
 
 <a id="matlab-vs-python-differences"></a>
-## 🔬 MATLAB vs Python Differences
+## MATLAB vs Python Differences
 
 ### 1. **Rounding Operators**
 
@@ -258,9 +263,11 @@ At half-integer boundaries this shifts ~0.1 % of pixels by ±1 gray level. There
 ---
 
 <a id="detailed-processing-modes"></a>
-## ⚙️ Detailed Processing Modes
+## Detailed Processing Modes
 
-### Mode 1: Luminance Matching Only
+### **Pixel-based matching (Modes 1–2)**
+
+#### Mode 1: Luminance Matching Only
 ```python
 mode = 1  # lum_match only
 ```
@@ -278,10 +285,15 @@ mode = 1  # lum_match only
 - `target_lum`: Tuple `(mean, std)` where `mean ∈ [0, 255]` or `None`, and `std ∈ [0, +∞)` or `None`. `0` uses the dataset average for that statistic, so `(0, 20)` uses the average mean and a std of 20, while `(100, 0)` uses a mean of 100 and the average std. 
 - `safe_lum_match`: If True, automatically adjusts `(target_mean, target_std)` to keep all pixel values within [0, 255] (values may differ slightly from the requested target)
 
-### Mode 2: Histogram Matching Only
+#### Mode 2: Histogram Matching Only
 ```python
 mode = 2  # hist_match only
 ```
+
+**What it does (sliding-puzzle analogy).** A histogram is only an *inventory* of shades — how many pixels are black, dark gray, gray, or white — with no information about *where* each one goes. The same inventory can be arranged into completely different pictures: below, the scrambled panel and both faces share the **exact same histogram** (13 / 9 / 106 / 96 pixels). Like a sliding puzzle, histogram matching redistributes an image's pixels to reproduce a *target's* inventory of shades, while preserving each pixel's brightness rank so the original structure is kept.
+
+![](figures/sliding_puzzle.png)
+
 **Available Algorithms:**
 - **Exact specification** (`hist_specification=0`): [Coltuc, Bolon & Chassery (2006)]((https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf)) algorithm
 - **Specification with noise** (`hist_specification=1`): Legacy version with noise addition
@@ -291,7 +303,9 @@ mode = 2  # hist_match only
 - `hist_iterations`: Number of iterations (default: 10)
 - `step_size`: Step size (default: 34)
 
-### Mode 3: Spatial Frequency Matching Only
+### **Spatial-frequency-based matching (Modes 3–4)**
+
+#### Mode 3: Spatial Frequency Matching Only
 ```python
 mode = 3  # sf_match only
 ```
@@ -307,7 +321,7 @@ Equalizes the **mean amplitude per spatial frequency** across images — i.e., t
 
 ---
 
-### Mode 4: Spectrum Matching Only
+#### Mode 4: Spectrum Matching Only
 ```python
 mode = 4  # spec_match only
 ```
@@ -321,7 +335,7 @@ Equalizes the **amplitude at every spatial frequency and orientation** across im
 4. Apply rescaling per `options.rescaling` and clip to the valid intensity range.
 5. Store float255 outputs and optionally log or visualize spectrum-related diagnostics.
 
-### Composite Modes (5-8)
+### **Composite modes (Modes 5–8)**
 
 #### Mode 5: Histogram + Spatial Frequency
 ```python
@@ -347,7 +361,9 @@ mode = 8  # spec_match → hist_match
 - Composite modes use temporary floating-point precision
 - Reduces rounding errors in multi-step calculations
 
-### Mode 9: Standalone Per-Image Transform
+### **Standalone transforms (Mode 9)**
+
+#### Mode 9: Standalone per-image transform
 ```python
 mode = 9 #  standalone_op = "ie_methods" or "dithering"
 
@@ -360,9 +376,7 @@ dithering = 1  # Dithering method (0 = none, 1 = Noisy-bit, 2 = Floyd-Steinberg)
 
 Applies a standalone transform to each image independently — no inter-image target is computed.
 
----
-
-### Histogram Equalization: Exact Specification and Histogram-Derived Remapping
+#### Histogram equalization: exact specification and histogram-derived remapping
 
 Histogram equalization can be achieved through **Exact Histogram Specification (EHS)** using a flat, uniform target histogram (`target_hist="equal"`, `mode=2` or modes 5–8). Pixels are individually ranked and assigned to target bins, allowing the output to exactly match the feasible discrete uniform histogram.
 
@@ -370,7 +384,7 @@ SHINIER also provides **histogram-derived methods** (`mode=9`, `standalone_op="i
 
 ---
 
-### Border Artifacts and FFT Padding
+## Border Artifacts and FFT Padding
 
 **Why border artifacts occur**
 The Fourier transform implicitly treats an image as if it repeats infinitely in all directions: the left edge connects to the right, and the top to the bottom. When opposite edges differ, this creates artificial discontinuities that introduce unwanted high-frequency energy (*spectral leakage*), sometimes visible as ringing or edge artifacts after reconstruction.
@@ -398,7 +412,7 @@ Images can optionally be padded before computing the FFT, then cropped back to t
 ---
 
 <a id="main-classes"></a>
-## 🏛️ Main Classes
+## Main Classes
 ### `Converter`
 Encapsulates color-space conversions and transfer functions for Rec.601/709/2020.
 ```python
@@ -564,14 +578,6 @@ class ImageProcessor:
 ```
 
 
-## Additional Resources
-
-- For a detailed description of the available options, see the `Options` class in `Options.py`; each parameter lists its purpose, allowed values, and default.
-- For algorithmic details and a walkthrough of processing steps, see the `ImageProcessor` class in `ImageProcessor.py`.
-- For color management and gamut-control strategies, see the `GamutControl` class in `color/GamutControl.py`. Interactive visual examples are available at [shinier-web examples](https://charestlab.github.io/shinier-web/).
-
----
-
 <a id="visualization-functions"></a>
 ## Visualization Functions
 These helpers are implemented in `src/shinier/utils.py`.
@@ -691,12 +697,14 @@ masked_images = masker.apply_all(stim_arr)
 mask_from_gui = masker.interactive_mask(image)
 ```
 
+![Dynamic StimulusMasker GUI demo](readthedocs/_static/dynamic_stim_masker.gif)
+
 ---
 
 <a id="implemented-algorithms"></a>
-## 🧮 Implemented Algorithms
+## Implemented Algorithms
 
-### 1. Exact Histogram Specification
+### 1. **Exact Histogram Specification**
 **Reference:** [Coltuc, D., Bolon, P., & Chassery, J. M. (2006). Exact histogram specification. *IEEE Transactions on Image Processing*, 15(5), 1143-1152.](https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf)
 
 **Algorithm:**
@@ -705,7 +713,7 @@ mask_from_gui = masker.interactive_mask(image)
 3. Create mapping table based on CDFs
 4. Apply mapping pixel by pixel
 
-### 2. SSIM Optimization for Histogram
+### 2. **SSIM Optimization for Histogram**
 **Reference:** [Avanaki, A. N. (2009). Exact histogram specification for digital images using a variational approach. *Journal of Visual Communication and Image Representation*, 20(7), 505-515.](https://link.springer.com/article/10.1007/s10043-009-0119-z)
 
 **Algorithm:**
@@ -713,7 +721,7 @@ mask_from_gui = masker.interactive_mask(image)
 2. Successive iterations with SSIM-based adjustment
 3. Step size optimization for fast convergence
 
-### 3. Floyd-Steinberg Dithering
+### 3. **Floyd-Steinberg Dithering**
 **Reference:** Floyd, R. W., & Steinberg, L. (1976). An adaptive algorithm for spatial grey scale.
 
 **Algorithm:**
@@ -721,7 +729,7 @@ mask_from_gui = masker.interactive_mask(image)
 2. Calculate quantization error for each pixel
 3. Distribute error to neighboring pixels with different weights.
 
-### 4. Noisy Bit Dithering
+### 4. **Noisy Bit Dithering**
 **Reference:** [Allard, R., & Faubert, J. (2008). The noisy-bit method for digital halftoning. *Journal of the Optical Society of America A*, 25(8), 1980-1989.](https://link.springer.com/article/10.3758/BRM.40.3.735)
 
 **Algorithm:**
@@ -729,7 +737,7 @@ mask_from_gui = masker.interactive_mask(image)
 2. Quantize with rounding
 3. Preserve overall image structure
 
-### 5. Classic Global Histogram Equalization (Classic HE)
+### 5. **Classic Global Histogram Equalization (Classic HE)**
 
 **Algorithm:**
 1. Compute the intensity histogram of the image
@@ -739,7 +747,7 @@ mask_from_gui = masker.interactive_mask(image)
 
 The output histogram is approximately flat over [0, 255]. Maximizes contrast globally but can over-enhance noise on natural images. Implemented by `shinier.utils.classic_he_gray`.
 
-### 6. Tripartite Image Decomposition-Based Histogram Equalization (TIDHE)
+### 6. **Tripartite Image Decomposition-Based Histogram Equalization (TIDHE)**
 **Reference:** [Rahman, H., & Shimamura, T. (2026). Tripartite image decomposition-based histogram equalization to enhance slightly low-contrast and low-contrast images. ICIC Express Letters, 20(3), 321-332.](https://doi.org/10.24507/icicel.20.03.321)
 
 **Algorithm:**
@@ -748,7 +756,7 @@ The output histogram is approximately flat over [0, 255]. Maximizes contrast glo
 3. Clip each sub-histogram at the average of its mean and median to control enhancement rate (Eqs. 3-5)
 4. Equalize each sub-band independently via its clipped CDF (Eqs. 9-11)
 
-### 7. Recursive Dualistic Fuzzy Histogram Equalization (RDFHE)
+### 7. **Recursive Dualistic Fuzzy Histogram Equalization (RDFHE)**
 **Reference:** [Rahman, H., Mostofa, S., Akter, T., & Rashedunnabi, A. H. M. (2026, April). Efficient enhancement of images using recursive dualistic fuzzy histogram equalization. In *2026 IEEE 2nd International Conference on Quantum Photonics, Artificial Intelligence & Networking (QPAIN)* (pp. 1–6). IEEE.](https://doi.org/10.1109/QPAIN69676.2026.11546014)
 
 **Algorithm:**
@@ -759,7 +767,7 @@ The output histogram is approximately flat over [0, 255]. Maximizes contrast glo
 
 Implemented by `shinier.utils.rdfhe_gray`.
 
-### 8. Nonlinear Fuzzification–Linear Defuzzification-Based ICE (NFLDICE)
+### 8. **Nonlinear Fuzzification–Linear Defuzzification-Based ICE (NFLDICE)**
 **Reference:** [Rahman, H. (2025). A Time-Efficient and Effective Image Contrast Enhancement Technique Using Fuzzification and Defuzzification. In *Proceedings of Trends in Electronics and Health Informatics* (Lecture Notes in Networks and Systems, vol. 1034, pp. 45–58). Springer.](https://doi.org/10.1007/978-981-97-3937-0_4)
 
 Unlike the fuzzy-histogram methods (DFHE/RDFHE), NFLDICE is a fuzzy **set-theoretic** technique: it operates directly on gray levels as fuzzy sets rather than on the histogram.
@@ -771,7 +779,7 @@ Unlike the fuzzy-histogram methods (DFHE/RDFHE), NFLDICE is a fuzzy **set-theore
 
 Reference parameters: `B=10`, `E_l=5`, `P_l=127.5`, `L=256`. Implemented by `shinier.utils.nfldice_gray`.
 
-### 9. Bi-Entropy Curve Equalization (BETCE)
+### 9. **Bi-Entropy Curve Equalization (BETCE)**
 **Reference:** [Rahman, H. (2025). Bi-Entropy Curve Equalization for Enhancement of Images. In *2025 7th International Conference on Electrical Information and Communication Technology (EICT)* (pp. 1–6). IEEE.](https://doi.org/10.1109/EICT68394.2025.11355632)
 
 BETCE is a state-of-the-art curve-based algorithm for very low-contrast grayscale images. It replaces the image histogram with an entropy curve, partitions that curve into lower and upper sub-curves, and equalizes each sub-curve independently.
@@ -784,7 +792,7 @@ BETCE is a state-of-the-art curve-based algorithm for very low-contrast grayscal
 
 Implemented by `shinier.utils.betce_gray`.
 
-### 10. Sakaguchi-Type Function-Based Cost-Effective Filtering (SFCEF)
+### 10. **Sakaguchi-Type Function-Based Cost-Effective Filtering (SFCEF)**
 **Reference:** [Rahman, H., Sugiura, Y., & Shimamura, T. (2025). Enhancement of low-light images using Sakaguchi-type function-based cost-effective filtering. *Pattern Analysis and Applications*, 28, 193.](https://doi.org/10.1007/s10044-025-01578-8)
 
 SFCEF is a state-of-the-art filtering-based algorithm for low-light grayscale images. It builds one 3x3 convolution filter from coefficient bounds of a Sakaguchi/Gegenbauer geometric function class, then filters the input image directly.
@@ -801,7 +809,7 @@ Implemented by `shinier.utils.sfcef_gray`.
 ---
 
 <a id="memory-management-and-performance"></a>
-## 💾 Memory Management and Performance
+## Memory Management and Performance
 
 ### Memory Conservation Mode (`conserve_memory=True`)
 
@@ -830,7 +838,7 @@ class ImageListIO:
 ---
 
 <a id="testing-and-validation"></a>
-## 🧪 Testing and Validation
+## Testing and Validation
 
 ### Unit Tests
 
@@ -871,17 +879,8 @@ Results are written as CSV files under `tmp/matlab_shine_comparison/` and summar
 
 ---
 
-## 📚 Usage Examples
-
-- [See](documentation/demos.ipynb) `demos.ipynb` [in the documentation folder for](documentation/demos.ipynb):
-  - Coding usage
-  - Interactive CLI usage
-
-Examples in here have been intentionally minimized; please open the demos for more examples.
-
----
-
-## 🔧 Troubleshooting and Optimization
+<a id="troubleshooting-and-optimization"></a>
+## Troubleshooting and Optimization
 
 ### Common Issues
 
@@ -932,6 +931,22 @@ Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum m
 1. **Sequential Processing**: Each cycle compensates for the distortions introduced by the preceding transformation (e.g., histogram adjustment altering spectral power).
 2. **Convergence**: Repeated alternation drives both properties toward their joint target values.
 3. **Iterative Refinement**: After several iterations (typically 5), the process reaches a stable equilibrium where further refinement yields negligible improvement.
+
+---
+
+<a id="additional-resources"></a>
+## Additional Resources
+
+The examples in this documentation are intentionally minimized. For more **complete usage examples**, see `demos.ipynb` in the documentation folder:
+
+- Coding usage
+- Interactive CLI usage
+
+For a **detailed description** of the available **options**, see the `Options` class in `Options.py`; each parameter lists its purpose, allowed values, and default.
+
+For **algorithmic details** and a walkthrough of processing steps, **see** the `ImageProcessor` class in `ImageProcessor.py`.
+
+For **color management** and **gamut-control strategies**, see the `GamutControl` class in `color/GamutControl.py`. Interactive **visual examples** are available at [shinier-web examples](https://charestlab.github.io/shinier-web/).
 
 ---
 

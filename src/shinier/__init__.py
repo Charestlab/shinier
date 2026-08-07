@@ -10,8 +10,9 @@ References:
     Controlling low-level image properties: The SHINE toolbox.
     *Behavior Research Methods, 42*(3), 671–684. https://doi.org/10.3758/BRM.42.3.671
 
-    See accompanying paper: Salvas-Hébert, M., Dupuis-Roy, N., Landry, C., Charest, I. & Gosselin, F. (2025)
-    The SHINIER the Better: An Adaptation of the SHINE Toolbox on Python.
+    See accompanying paper: Salvas-Hébert, M.*, Dupuis-Roy, N.*, Landry, C., Charest, I., & Gosselin, F. (2026).
+    SHINIER: An open-source Python package for controlling low-level image properties.
+    SoftwareX, 35, Article 102884. https://doi.org/10.1016/j.softx.2026.102884
 """
 
 # Metadata
