@@ -14,6 +14,7 @@ __pycache__/
 *.pyd
 *.dll
 .pytest_tmp/
+tmp/
 *venv*/
 *.db
 *.db*
@@ -26,6 +27,9 @@ documentation/readthedocs/_build/
 # -------------------------------
 # PACKAGE DATA
 # -------------------------------
+
+# Dev TODOs
+future_todos.md
 
 # Ignore everything inside OUTPUT, but keep the folder itself
 src/shinier/data/OUTPUT/*

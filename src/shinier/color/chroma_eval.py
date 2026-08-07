@@ -197,15 +197,13 @@ def mean_chroma_loss_pct_lab(
     """Compute the global relative mean chroma loss percentage in CIELAB.
 
     Both sRGB images are converted to CIE Lab, and chroma is computed for each
-    pixel as ``C* = sqrt(a*^2 + b*^2)``..
+    pixel as ``C* = sqrt(a*^2 + b*^2)``.
 
-    The relative mean chroma loss percentage is defined as::
-
-   ``100 * (E[C*_before] - E[C*_after]) / E[C*_before]``
-
-    where ``E`` denotes the mean across all image pixels. A positive percentage
-    indicates a reduction in mean chroma, whereas a negative percentage indicates
-    an increase.
+    The relative mean chroma loss percentage is defined as
+    ``100 * (E[C*_before] - E[C*_after]) / E[C*_before]``, where ``E`` denotes
+    the mean across all image pixels. A positive percentage indicates a
+    reduction in mean chroma, whereas a negative percentage indicates an
+    increase.
 
     Parameters
     ----------

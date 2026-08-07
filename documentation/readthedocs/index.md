@@ -37,6 +37,7 @@ contributors_guide/testing
 :hidden:
 
 Project Links <project-links>
+SHINIER PDF <paper>
 License <user_guide/license>
 ```
 

@@ -320,16 +320,16 @@ class StimulusMasker:
     >>> final_mask = masker.interactive_mask(image)
     """
 
-    image_size: int | tuple[int, int]
+    image_size: Union[int, Tuple[int, int]]
     cutoff_a: float
-    cutoff_b: float | None = None
+    cutoff_b: Optional[float] = None
     offset_a: float = 0.0
     offset_b: float = 0.0
     mask_type: MaskType = "feathered_disk"
     sigma: float = 2.0
     edge_width: float = 2.0
     background: float = 0.5
-    output_dtype: np.dtype | type = np.float64
+    output_dtype: Union[np.dtype, type] = np.float64
 
     def mask(self) -> np.ndarray:
         """Generate mask as float64 in [0, 1]."""
@@ -1023,7 +1023,7 @@ def get_radius_grid(x_size: int, y_size: int, legacy_mode: bool = False) -> np.n
     # --- polar radius, MATLAB rounding rule ---
     r = np.hypot(XX, YY)
     r_adjustment = -1 if (x_size % 2 == 1) or (y_size % 2 == 1) else 0
-    r = MatlabOperators.round(r) if legacy_mode else np.round(r, decimals=0) + r_adjustment
+    r = (MatlabOperators.round(r) if legacy_mode else np.round(r, decimals=0)) + r_adjustment
 
     # Non-negative integer bin indices
     return np.clip(r, 0, None).astype(np.int64)
@@ -2846,7 +2846,7 @@ def print_log(logs: List[str], log_path: Union[Path, str], log_name: Optional[st
     filename = Path(log_path) / log_name
 
     # Write each log to a new line in the file
-    with open(filename, 'w') as file:
+    with open(filename, 'w', encoding='utf-8') as file:
         for log in logs:
             file.write(strip_ansi(log) + '\n')
 
@@ -5013,6 +5013,12 @@ def compute_bp2bpsim(reference: np.ndarray, enhanced: np.ndarray, n_bits: int = 
 
     Values range from 0 to 1. Higher values indicate more matching bits across
     corresponding pixels and channels.
+
+    References
+    ----------
+    Rahman, H., & Paul, G. C. (2023). Tripartite sub-image histogram equalization for slightly
+    low contrast gray-tone image enhancement. Pattern Recognition, 134, Article 109043.
+    https://doi.org/10.1016/j.patcog.2022.109043
     """
     _check_same_shape(reference, enhanced, "compute_bp2bpsim")
     if n_bits < 1 or n_bits > 8:

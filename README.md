@@ -1,4 +1,4 @@
-# 🌟 SHINIER
+# SHINIER
 ```text
    ███████╗██╗  ██╗██╗███╗  ██╗██╗███████╗██████╗
    ██╔════╝██║  ██║██║████╗ ██║██║██╔════╝██╔══██╗
@@ -15,26 +15,26 @@
 [![Tests](https://github.com/Charestlab/shinier/actions/workflows/tests.yml/badge.svg)](https://github.com/Charestlab/shinier/actions/workflows/tests.yml)
 ---
 
-## 🎯 Overview
+## Overview
 
 SHINIER is a modern Python implementation of SHINE (Spectrum, Histogram, and Intensity Normalization and Equalization), originally developed in MATLAB by Willenbockel et al., 2010. It provides precise control over luminance, contrast, histograms, and spectral content across large image sets for well-calibrated visual experiments.
 
 ### Key Features and Improvements
 
-- 🎨 **Color Processing** — New modes for color image control with modern color-space standards (Rec.601 / Rec.709 / Rec.2020).
-- 🖼️ **Dithering Support** — Reduces quantization artifacts and enhances output image quality.
-- ⚡ **Optimized Performance** — Efficient memory management and faster processing for large image sets (optional Cython/C++ convolution core).
-- 🕰 **Legacy Mode** — Ensures full backward compatibility with MATLAB’s original SHINE toolbox.
-- 🔢 **High-Precision Arithmetic** — Computations in floating-point precision rather than 8-bit integer space, minimizing rounding errors in multi-stage processing.
-- 📦 **Object-Oriented Design** — Modular, extensible architecture with a clean Python API.
-- 😀 **User-Friendly CLI** — Guided, prompt-based interface for users who prefer not to write code.
+- **Color Processing** — New modes for color image control with modern color-space standards (Rec.601 / Rec.709 / Rec.2020).
+- **Dithering Support** — Reduces quantization artifacts and enhances output image quality.
+- **Optimized Performance** — Efficient memory management and faster processing for large image sets (optional Cython/C++ convolution core).
+- **Legacy Mode** — Ensures full backward compatibility with MATLAB’s original SHINE toolbox.
+- **High-Precision Arithmetic** — Computations in floating-point precision rather than 8-bit integer space, minimizing rounding errors in multi-stage processing.
+- **Object-Oriented Design** — Modular, extensible architecture with a clean Python API.
+- **User-Friendly CLI** — Guided, prompt-based interface for users who prefer not to write code.
 
 For detailed technical documentation (algorithms, numerical choices, and MATLAB vs Python behavior), see  
 [`documentation/documentation.md`](documentation/documentation.md).
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -68,7 +68,7 @@ print("shinier version:", getattr(shinier, "__version__", "unknown"))
 ```
 
 
-### 😀 **User-friendly  Interface**
+### User-friendly Interface
 Call the following bash command to quickly start using the interactive CLI.  
 ```bash
 shinier --show_results --image_index=1
@@ -77,7 +77,7 @@ shinier --show_results --image_index=1
   <img src="https://raw.githubusercontent.com/Charestlab/shinier/main/assets/DEMO_INTERACTIVE_CLI.gif" width="1000" alt="CLI demo">
 </p>
 
-### 🧩 Example in Python
+### Example in Python
 Run the following python code to make sure the package is running properly.
 ```python
 from shinier import Options, ImageDataset, ImageProcessor, utils
@@ -102,7 +102,7 @@ Change the mode number (e.g. `opt = Options(mode=3)`) to change image processing
 | 6    | `hist_match → spec_match`         | Histogram, then spectrum                  |
 | 7    | `sf_match → hist_match`           | Spatial frequency, then histogram         |
 | 8    | `spec_match → hist_match` (default) | Spectrum, then histogram (recommended)  |
-| 9    | `dithering`                       | Dithering only                            |
+| 9    | `ie_methods` or `dithering`       | Standalone per-image transform (histogram-derived enhancement or dithering) |
 
 Below is an example of results obtained using mode 5 with joint histogram equalization and spatial frequency normalization.
 <p>
@@ -110,7 +110,7 @@ Below is an example of results obtained using mode 5 with joint histogram equali
 </p>
 
 ---
-## 🏛️ **Technical information**
+## **Technical information**
 
 Documentation:
 1. [Package Overview](documentation/documentation.md#overview)
@@ -128,29 +128,30 @@ Documentation:
 13. [Additional Resources](documentation/documentation.md#additional-resources)
 
 ---
-## 📚 Citing
+## Citing
 If you use **SHINIER**, please cite both of these articles:
 
 ### References
-- Salvas-Hébert, M., Dupuis-Roy, N., Landry, C., Charest, I., & Gosselin, F. (2026). *SHINIER: An Open-Source Python Package for Controlling Low-Level Image Properties*
-- Willenbockel, V., Sadr, J., Fiset, D., Horne, G. O., Gosselin, F., & Tanaka, J. W. (2010). Controlling low-level image properties: The SHINE toolbox. *Behavior Research Methods, 42*(3), 671–684. https://doi.org/10.3758/BRM.42.3.671
+- Salvas-Hébert, M., Dupuis-Roy, N., Landry, C., Charest, I., & Gosselin, F. (2026). SHINIER: An open-source Python package for controlling low-level image properties. *SoftwareX*, *35*, Article 102884. https://doi.org/10.1016/j.softx.2026.102884
+- Willenbockel, V., Sadr, J., Fiset, D., Horne, G. O., Gosselin, F., & Tanaka, J. W. (2010). Controlling low-level image properties: The SHINE toolbox. *Behavior Research Methods*, *42*(3), 671–684. https://doi.org/10.3758/BRM.42.3.671
 
 ---
-## 🤝 Contributing
+## Contributing
 See [CONTRIBUTING.md](documentation/contributing.md) for guidelines (coding standards, tests, docs, and PR flow).
 
 ---
-## 📄 License
+## License
 See [LICENSE](LICENSE) for more information.
 
 ---
-## 🛠️ Troubleshooting
+## Troubleshooting
 - No compiler available: install a C/C++ toolchain or proceed with the NumPy fallback (slower).
+- Compiled extension fails to load (e.g., NumPy too old / ABI mismatch): SHINIER warns and uses the NumPy fallback; upgrade NumPy (and pip/setuptools/wheel) and reinstall to restore the compiled core.
 - Import errors after upgrade: try pip install --upgrade pip setuptools wheel and reinstall.
 - Windows build issues: ensure MSVC Build Tools are installed and on PATH.
 
 ---
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-  <em>Version 0.2.0 - Complete technical documentation</em>
+  <em>Version 0.2.2 - Complete technical documentation</em>
 </p>

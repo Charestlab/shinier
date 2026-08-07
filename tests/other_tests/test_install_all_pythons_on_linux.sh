@@ -24,6 +24,8 @@ IMAGES=(
   "python:3.10-slim-bookworm"
   "python:3.11-slim-bookworm"
   "python:3.12-slim-bookworm"
+  "python:3.13-slim-bookworm"
+  "python:3.14-slim-bookworm"
 )
 
 ok=()

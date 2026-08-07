@@ -2,9 +2,9 @@ name: Tests
 
 on:
   push:
-    branches: [ main, dev_1.4, dev_1.7, dev_v0.2.0, dev_v0.2.1]
+    branches: [ main, dev_1.4, dev_1.7, dev_v0.2.0, dev_v0.2.1, dev_v0.2.2 ]
   pull_request:
-    branches: [ main, dev_1.4, dev_1.7, dev_v0.2.0, dev_v0.2.1 ]
+    branches: [ main, dev_1.4, dev_1.7, dev_v0.2.0, dev_v0.2.1, dev_v0.2.2 ]
 
 jobs:
   tests:
@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       # 1) Récupérer le code

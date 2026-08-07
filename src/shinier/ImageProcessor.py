@@ -409,7 +409,7 @@ class ImageProcessor(InformativeBaseModel):
             target_hist = self._compute_target_hist_from_image_path(target_hist, n_bins=n_bins)
         else:
             target_hist = target_hist[:, None] if target_hist.ndim == 1 else target_hist
-            target_hist /= (target_hist.sum(axis=0, keepdims=True) + 1e-12)
+            target_hist = target_hist / (target_hist.sum(axis=0, keepdims=True) + 1e-12)
             if target_hist.shape[0] != n_bins:
                 raise ValueError(f"target_hist must have {n_bins} bins, but has {target_hist.shape[0]}.")
         if target_hist.ndim > 1 and target_hist.shape[-1] != self.dataset.buffer.n_channels:

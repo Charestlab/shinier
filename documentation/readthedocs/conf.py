@@ -16,7 +16,7 @@ copyright = "2026, Nicolas Dupuis-Roy and Mathias Salvas-Hebert"
 try:
     from shinier import __version__
 except Exception:
-    __version__ = "0.2.0"
+    __version__ = "0.2.2"
 
 version = __version__
 release = __version__

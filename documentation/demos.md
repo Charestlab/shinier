@@ -140,7 +140,7 @@ MASKS_FOLDER  = "path"
 
 ---
 
-### Mode 1 – `lum_match`
+#### Mode 1 – `lum_match`
 
 ```python
 """
@@ -168,7 +168,7 @@ opts = Options(
 
 ---
 
-### Mode 2 – `hist_match`
+#### Mode 2 – `hist_match`
 
 ```python
 """
@@ -193,7 +193,7 @@ opts = Options(
 
 ---
 
-### Mode 3 – `sf_match`
+#### Mode 3 – `sf_match`
 
 ```python
 """
@@ -216,7 +216,7 @@ opts = Options(
 
 ---
 
-### Mode 4 – `spec_match`
+#### Mode 4 – `spec_match`
 
 ```python
 """
@@ -240,7 +240,7 @@ opts = Options(
 
 ---
 
-### Mode 5 – `hist_match` → `sf_match`
+#### Mode 5 – `hist_match` → `sf_match`
 
 ```python
 """
@@ -249,7 +249,7 @@ Mode 5 (hist_match & sf_match): histogram matching followed by rotational
 
 Example use case: Histogram specification with noise is applied (legacy method),
   then rotational Fourier spectra are aligned. No rescaling is performed
-  afterwards,to preserve the luminance distribution imposed by histogram
+  afterwards, to preserve the luminance distribution imposed by histogram
   matching.
 """
 opts = Options(
@@ -264,7 +264,7 @@ opts = Options(
 
 ---
 
-### Mode 6 – `hist_match` → `spec_match`
+#### Mode 6 – `hist_match` → `spec_match`
 
 ```python
 """
@@ -285,7 +285,7 @@ opts = Options(
 
 ---
 
-### Mode 7 – `sf_match` → `hist_match`
+#### Mode 7 – `sf_match` → `hist_match`
 
 ```python
 """
@@ -308,7 +308,7 @@ opts = Options(
 
 ---
 
-### Mode 8 – `spec_match` → `hist_match`
+#### Mode 8 – `spec_match` → `hist_match`
 
 ```python
 """
@@ -332,11 +332,11 @@ opts = Options(
 
 ---
 
-### Mode 9 – Standalone Per-Image Transform
+#### Mode 9 – Standalone Per-Image Transform
 
 Mode 9 applies a standalone transform to each image independently — no inter-image target is computed. The operation is selected via `standalone_op`.
 
-#### 9a – Image Enhancement (`standalone_op="ie_methods"`)
+**9a — Image enhancement** (`standalone_op="ie_methods"`)
 
 ```python
 """
@@ -355,7 +355,7 @@ opts = Options(
 )
 ```
 
-#### 9b – Dithering only (`standalone_op="dithering"`)
+**9b — Dithering only** (`standalone_op="dithering"`)
 
 ```python
 """
@@ -373,7 +373,7 @@ opts = Options(
 
 ---
 
-### Example 10 – Mode 2 + extra parameters
+#### Example 10 – Mode 2 + extra parameters
 
 ```python
 """
@@ -381,7 +381,7 @@ Example 10 (mode 2 + non-mode-specific parameters): to show the other parameters
 
 Example use case: hist_matching using Coltuc, Bolon & Chassery (2006) exact
   histogram specification. Target histogram will be the average from all the
-  images (default), no SSIM optimization (Avanki, 2009).
+  images (default), no SSIM optimization (Avanaki, 2009).
 
   The masks loaded from masks_folder are used for figure-ground separation
   (whole_image = 3). The images will be transformed to grayscale (1 channel),
@@ -405,7 +405,7 @@ opts = Options(
 
 ---
 
-### Example 11 – Preserve colors with `constrain_image_chrominance`
+#### Example 11 – Preserve colors with `constrain_image_chrominance`
 
 ```python
 """

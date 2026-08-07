@@ -5,7 +5,7 @@ Tests are organized into **unit** and **validation (integration)** levels.
 
 ---
 
-## ⚙️ Pytest Configuration
+## Pytest Configuration
 Make sure you did to install all dev dependencies: ```pip install '.[dev]'```
 
 ```ini
@@ -26,11 +26,11 @@ All test files must either:
 
 - start with `test_`, or
 - end with `_test.py`\
-  (e.g., `ImageDataset_test.py` ✅)
+  (e.g., `ImageDataset_test.py`)
 
 ---
 
-## 📙 Markers
+## Markers
 
 Use markers to select subsets of tests:
 
@@ -38,11 +38,11 @@ Use markers to select subsets of tests:
 |--------------------|-----------------------------------------|-------------------------------|
 | `unit_tests`       | Fast functional unit tests              | `pytest -m unit_tests`        |
 | `validation_tests` | Exhaustive validation (slow)            | `pytest -m validation_tests`  |
-| `test_all_options` | Exhaustive unit tests on Options (⚠ very slow; can take a few hours) | `pytest -m test_all_options` |
+| `test_all_options` | Exhaustive unit tests on Options (very slow; can take a few hours) | `pytest -m test_all_options` |
 
 --- 
 
-## 🧵 Multi-Core Execution
+## Multi-Core Execution
 
 Run tests in parallel automatically:
 
@@ -58,7 +58,7 @@ pytest -n 4 -s -m unit_tests
 
 ---
 
-## ⚡ Validation Tests — Coverage Modes
+## Validation Tests — Coverage Modes
 
 `ImageProcessor_validation_test.py` supports three coverage modes selected via `COVERAGE_MODE`:
 
@@ -88,7 +88,7 @@ Hash keys are namespaced by `COVERAGE_MODE` (e.g. `exhaustive:5` vs `pruned:5`) 
 
 ---
 
-## 🛠️ Running Shards Locally (GNU parallel)
+## Running Shards Locally (GNU parallel)
 
 Use **GNU parallel** to distribute shards across CPU cores:
 
@@ -98,12 +98,12 @@ parallel --ungroup --jobs 8 \
    pytest -s -m validation_tests' ::: 0 1 2 3 4 5 6 7
 ```
 
-> 🔹 `--ungroup` allows live tqdm updates in real time.\
+> `--ungroup` allows live tqdm updates in real time.\
 > Without it, each shard's output is buffered until completion.
 
 ---
 
-## 🖥️ Running on a Compute Cluster (SLURM/sbatch)
+## Running on a Compute Cluster (SLURM/sbatch)
 
 Use a SLURM job array so `$SLURM_ARRAY_TASK_ID` maps directly to `SHARD_INDEX`.
 Create a file (e.g. `run_validation.sh`) with the following template and adapt `N_SHARDS`,
@@ -146,7 +146,7 @@ START_AT=1180676 sbatch run_validation.sh
 
 ---
 
-## 🔎 Debugging Tests
+## Debugging Tests
 
 ### Drop into debugger on failure
 
@@ -168,7 +168,7 @@ pytest -m validation_tests -vv -s --tb=long
 
 ---
 
-## 🟡 Hard vs Soft Failures in Validation Tests
+## Hard vs Soft Failures in Validation Tests
 
 `ImageProcessor_validation_test.py` distinguishes two levels of failure:
 
@@ -190,7 +190,7 @@ Soft failures produce a `.pkl` / `.json` dump in `tests/assets/tmp/` for inspect
 
 ---
 
-## 🔄 Resume From a Given Combo
+## Resume From a Given Combo
 
 If a bug occurs at combo 21,600 (from tqdm output):
 
@@ -265,7 +265,7 @@ were AMBE 0.007961%, MSSIM 0.019079%, PSNR 0.014468%, BP2BPSIM 0.024168%, CI
 
 ---
 
-## 🤍 Replay a Dumped Failure
+## Replay a Dumped Failure
 
 To reproduce a failed validation test:
 
@@ -277,7 +277,7 @@ This will rebuild the same `Options`, reload selected images, and re-run the fai
 
 ---
 
-## 🔹 Tips
+## Tips
 
 - Use `--pdb` or `--trace` for interactive debugging.
 - Always set `PYTHONUNBUFFERED=1` in `parallel` to force live output.
@@ -293,7 +293,7 @@ This will rebuild the same `Options`, reload selected images, and re-run the fai
 
 ---
 
-## 🔧 Example Workflow
+## Example Workflow
 
 1. Run sampled validation tests locally across 8 cores:
 
@@ -314,3 +314,47 @@ This will rebuild the same `Options`, reload selected images, and re-run the fai
    ```bash
    python -m tests.tools.replay_failure path/to/failure_xxxxx.pkl
    ```
+
+---
+
+## MATLAB SHINE Comparison
+
+SHINIER ships with a standalone comparison tool that benchmarks the Python
+implementations against the original
+[MATLAB SHINE toolbox](http://www.mapageweb.umontreal.ca/gosselif/SHINE/)
+across processing modes 1–8. Three implementations are compared:
+
+| Implementation        | Description                                                        |
+|-----------------------|--------------------------------------------------------------------|
+| `matlab_shine`        | Original MATLAB SHINE toolbox, driven by a generated MATLAB script |
+| `shinier_legacy`      | SHINIER with `legacy_mode=True` (MATLAB-compatible behavior)       |
+| `shinier_modern_gray` | SHINIER defaults on grayscale (xyY luminance processing)           |
+
+The tool produces two comparison stages:
+
+1. **Output comparison** — pixel differences (RMSE, MAE, max abs, equal
+   fraction, histogram L1) between saved MATLAB and Python images.
+2. **Fixed-target comparison** — every implementation receives the same fixed
+   initial Python targets (histogram and spectrum) and each output is measured
+   against the target in its own processing domain.
+
+Requirements: a local MATLAB installation and the SHINE toolbox.
+
+```bash
+# Complete run (asks for MATLAB/SHINE paths if not found)
+bash tests/tools/run_matlab_shine_comparison.sh
+
+# Common overrides
+MATLAB_BIN=/Applications/MATLAB_R2025a.app/bin/matlab \
+SHINE_DIR=~/toolboxes/shinetoolbox \
+MODES="2 3 4" LIMIT=8 ITERATIONS=5 \
+bash tests/tools/run_matlab_shine_comparison.sh
+
+# Keep all intermediate images, MATLAB scripts and .mat files
+FULL_TRACKING=1 bash tests/tools/run_matlab_shine_comparison.sh
+```
+
+Results are written as CSV files (summary and per-image detail) under
+`tmp/matlab_shine_comparison/`, and summary tables are printed to the
+terminal. See the module docstring of
+`tests/tools/matlab_shine_comparison.py` for the full metric definitions.
