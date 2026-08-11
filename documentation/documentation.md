@@ -964,5 +964,5 @@ For **color management** and **gamut-control strategies**, see {class}`shinier.c
 
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-    <em>Version 0.2.2 - Complete technical documentation</em>
+    <em>Version 0.2.3 - Complete technical documentation</em>
 </p>
