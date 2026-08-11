@@ -10,6 +10,7 @@
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](../LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)]()
 [![PyPI version](https://img.shields.io/pypi/v/shinier.svg)](https://pypi.org/project/shinier/)
+[![Documentation Status](https://readthedocs.org/projects/shinier/badge/?version=latest)](https://shinier.readthedocs.io/en/latest/)
 ---
 
 # Documentation

@@ -33,6 +33,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/Charestlab/shinier"
+Documentation = "https://shinier.readthedocs.io/"
 
 [project.optional-dependencies]
 dev = [
