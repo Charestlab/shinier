@@ -301,7 +301,6 @@ mode = 2  # hist_match only
 **SSIM Optimization:**
 - `hist_optim=1`: SSIM-based optimization ([Avanaki, 2009](https://link.springer.com/article/10.1007/s10043-009-0119-z))
 - `hist_iterations`: Number of iterations (default: 10)
-- `step_size`: Step size (default: 34)
 
 ### **Spatial-frequency-based matching (Modes 3–4)**
 
