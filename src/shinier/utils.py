@@ -12,7 +12,7 @@ from datetime import datetime
 from numpy.lib.stride_tricks import sliding_window_view
 from typing import (
     Any, Optional, Tuple, Union, NewType, List, Iterable, ClassVar, Sequence,
-    Callable, Literal, Dict, Annotated, TYPE_CHECKING, get_args, get_origin)
+    Callable, Literal, Dict, Annotated, TYPE_CHECKING, get_args, get_origin, Mapping)
 from PIL import Image
 from itertools import chain
 
@@ -275,49 +275,49 @@ class MatlabOperators:
             return image
 
 MaskType = Literal["hard", "gaussian", "feathered_disk"]
+EdgeBias = Literal["center", "inward"]
 
 @dataclass
 class StimulusMasker:
-    """Create and apply ellipse masks to image stimuli.
+    """Create elliptical masks and apply them to image stimuli.
 
     Parameters
     ----------
     image_size : int | tuple[int, int]
-        Mask/image size in pixels. If int, creates a square mask. If tuple,
-        uses ``(height, width)``.
+        Mask size in pixels. Tuples use ``(height, width)``.
     cutoff_a : float
         Horizontal ellipse radius in normalized coordinates.
     cutoff_b : float | None, optional
-        Vertical ellipse radius. If None, uses ``cutoff_a`` (circular mask).
+        Vertical ellipse radius. If None, uses ``cutoff_a``.
     offset_a : float, optional
         Horizontal ellipse offset in normalized coordinates.
     offset_b : float, optional
         Vertical ellipse offset in normalized coordinates.
     mask_type : MaskType, optional
-        Mask edge type: ``"hard"``, ``"gaussian"``, or ``"feathered_disk"``.
+        ``"hard"``, ``"gaussian"``, or ``"feathered_disk"``.
     sigma : float, optional
-        Gaussian standard deviation in pixels, used when
-        ``mask_type == "gaussian"``.
+        Gaussian blur in pixels.
     edge_width : float, optional
-        Transition width in pixels, used when
-        ``mask_type == "feathered_disk"``.
+        Feathered edge width in pixels.
+    edge_bias : EdgeBias, optional
+        Where the ``gaussian``/``feathered_disk`` transition falls relative to
+        ``cutoff_a``/``cutoff_b``. No effect when ``mask_type="hard"``.
+
+        - ``"center"``: half inside the boundary, half outside.
+        - ``"inward"``: fully inside; nothing bleeds past the boundary, so a
+          soft mask never shows more than an equivalent ``"hard"`` one.
     background : float, optional
-        Background value in ``[0, 1]`` outside the mask.
+        Outside-mask value. ``0..1`` is normalized; values above 1 use
+        ``0..255`` scale.
     output_dtype : np.dtype | type, optional
         Output dtype for masked images.
-
-    Notes
-    -----
-    Input images can be grayscale ``(H, W)`` or channel-based ``(H, W, C)``.
-    Integer images are normalized by their dtype range. Float images with max
-    value greater than 1 are assumed to be in ``[0, 255]``.
+    preserve_grayscale : bool, optional
+        Keep grayscale inputs as ``(H, W)`` instead of expanding to RGB.
 
     Examples
     --------
     >>> masker = StimulusMasker(128, 0.7, mask_type="feathered_disk", edge_width=3)
-    >>> mask = masker.mask()
-    >>> masked_images = masker.apply_all(stim_arr)
-    >>> final_mask = masker.interactive_mask(image)
+    >>> masker.save_masked_stim(image, "masked.png", background=128, output_dtype=np.uint8)
     """
 
     image_size: Union[int, Tuple[int, int]]
@@ -325,24 +325,51 @@ class StimulusMasker:
     cutoff_b: Optional[float] = None
     offset_a: float = 0.0
     offset_b: float = 0.0
-    mask_type: MaskType = "feathered_disk"
+    mask_type: MaskType = "hard"
     sigma: float = 2.0
     edge_width: float = 2.0
+    edge_bias: EdgeBias = "center"
     background: float = 0.5
     output_dtype: Union[np.dtype, type] = np.float64
+    preserve_grayscale: bool = False
 
-    def mask(self) -> np.ndarray:
-        """Generate mask as float64 in [0, 1]."""
-        cutoff_b = self.cutoff_a if self.cutoff_b is None else self.cutoff_b
-        height, width = (self.image_size, self.image_size) if isinstance(self.image_size, int) else self.image_size
+    _IRRELEVANT_PARAMS: ClassVar[Dict[MaskType, Tuple[str, ...]]] = {
+        "hard": ("edge_bias", "sigma", "edge_width"),
+        "gaussian": ("edge_width",),
+        "feathered_disk": ("sigma",),
+    }
+
+    def __post_init__(self) -> None:
+        """Validate mask parameters early so configuration errors are explicit."""
+        height, width = self._mask_shape()
+        self._require_positive("image_size height", height)
+        self._require_positive("image_size width", width)
+        self._require_positive("cutoff_a", self.cutoff_a)
+        if self.cutoff_b is not None:
+            self._require_positive("cutoff_b", self.cutoff_b)
+        self._require_nonnegative("sigma", self.sigma)
+        self._require_nonnegative("edge_width", self.edge_width)
+        self._require_choice("mask_type", self.mask_type, get_args(MaskType))
+        self._require_choice("edge_bias", self.edge_bias, get_args(EdgeBias))
+
+    @staticmethod
+    def _ellipse_geometry(
+        height: int, width: int, cutoff_a: float, cutoff_b: float, offset_a: float, offset_b: float
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Normalized ellipse radius (``r < 1`` inside) and signed distance to its boundary, in pixels."""
         x = np.linspace(0, 1, width, dtype=np.float64)
         y = np.linspace(0, 1, height, dtype=np.float64)
         xv, yv = np.meshgrid(x, y)
         # Normalized ellipse radius: r < 1 is inside, r = 1 is the boundary.
-        r = np.sqrt(
-            ((2 * xv - 1 - self.offset_a) / self.cutoff_a) ** 2
-            + ((2 * yv - 1 - self.offset_b) / cutoff_b) ** 2
-        )
+        r = np.sqrt(((2 * xv - 1 - offset_a) / cutoff_a) ** 2 + ((2 * yv - 1 - offset_b) / cutoff_b) ** 2)
+        radius_pixels = min(cutoff_a * (width - 1), cutoff_b * (height - 1)) / 2
+        return r, (1 - r) * radius_pixels
+
+    def generate_mask(self) -> np.ndarray:
+        """Generate mask as float64 in [0, 1]."""
+        cutoff_b = self.cutoff_a if self.cutoff_b is None else self.cutoff_b
+        height, width = self._mask_shape()
+        r, signed_distance = self._ellipse_geometry(height, width, self.cutoff_a, cutoff_b, self.offset_a, self.offset_b)
         m = (r < 1).astype(np.float64)
         if (
             self.mask_type == "hard"
@@ -351,60 +378,292 @@ class StimulusMasker:
         ):
             return m
         if self.mask_type == "gaussian":
-            # Blur, then normalize so the maximum mask value is 1.
-            m = self._blur(m)
-            return np.clip(m / m.max(), 0, 1) if m.max() > 0 else m
+            return self._gaussian_mask(m, height, width, cutoff_b)
         if self.mask_type == "feathered_disk":
-            # Linear ramp from 0 to 1 across edge_width pixels, centered on the ellipse boundary.
-            radius_pixels = min(self.cutoff_a * (width - 1), cutoff_b * (height - 1)) / 2
-            signed_distance = (1 - r) * radius_pixels
-            return np.clip(signed_distance / self.edge_width + 0.5, 0, 1)
+            # Ramp across edge_width pixels: centered on the boundary, or pulled fully inside it.
+            center = 0.5 if self.edge_bias == "center" else 0.0
+            return np.clip(signed_distance / self.edge_width + center, 0, 1)
         raise ValueError(f"Unknown mask_type: {self.mask_type!r}")
 
-    def apply(self, image: np.ndarray) -> np.ndarray:
+    def _gaussian_mask(self, plateau: np.ndarray, height: int, width: int, cutoff_b: float) -> np.ndarray:
+        """Blur the binary plateau, then normalize so the maximum mask value is 1."""
+        if self.edge_bias == "center":
+            blurred = self._blur(plateau)
+            return np.clip(blurred / blurred.max(), 0, 1) if blurred.max() > 0 else blurred
+        # "inward": blur a plateau shrunk by several sigma, then zero out everything past the
+        # original boundary. Outside is exactly 0 (never brighter than a "hard" mask); inside
+        # ramps smoothly from 0 near the boundary up to 1 well within the shrunk shape.
+        margin = 4 * self.sigma
+        cutoff_a = max(self.cutoff_a - 2 * margin / max(width - 1, 1), 1e-3)
+        cutoff_b = max(cutoff_b - 2 * margin / max(height - 1, 1), 1e-3)
+        r_shrunk, _ = self._ellipse_geometry(height, width, cutoff_a, cutoff_b, self.offset_a, self.offset_b)
+        blurred = self._blur((r_shrunk < 1).astype(np.float64))
+        soft = np.clip(blurred / blurred.max(), 0, 1) if blurred.max() > 0 else blurred
+        return np.minimum(plateau, soft)
+
+    @classmethod
+    def from_mask(
+        cls,
+        mask: Union[np.ndarray, str, Path],
+        mask_type: Union[MaskType, Literal["auto"]] = "auto",
+        threshold: float = 0.5,
+        return_error: bool = False,
+        **kwargs: Any,
+    ) -> Union["StimulusMasker", tuple["StimulusMasker", float]]:
+        """Estimate ``StimulusMasker`` parameters from an existing mask.
+
+        Parameters
+        ----------
+        mask : np.ndarray | str | Path
+            Mask array, ``.npy`` path, or image path. Values are normalized from
+            their observed min/max before fitting.
+        mask_type : {"auto", "hard", "gaussian", "feathered_disk"}, optional
+            Type to fit. ``"auto"`` uses ``"hard"`` for binary masks and
+            otherwise picks the better of ``"feathered_disk"`` and ``"gaussian"``.
+        threshold : float, optional
+            Normalized threshold used to estimate the ellipse contour.
+        return_error : bool, optional
+            If True, return ``(masker, mean_squared_error)``.
+        **kwargs : Any
+            Extra constructor arguments for the returned masker.
+
+        Returns
+        -------
+        StimulusMasker | tuple[StimulusMasker, float]
+            Fitted masker, optionally with the mean squared reconstruction error.
+
+        Notes
+        -----
+        Assumes an upright ellipse.
+
+        Examples
+        --------
+        >>> fitted = StimulusMasker.from_mask("mask.npy")
+        >>> fitted.save_masked_stim(image, "image_with_fitted_mask.png", background=128, output_dtype=np.uint8)
         """
-        Apply the mask to one image.
+        observed = cls._load_mask_for_fit(mask)
+        cls._validate_fit_request(observed, mask_type, threshold)
+        foreground = cls._threshold_mask(observed, threshold)
+        params = cls._estimate_ellipse_params(foreground)
+        candidates = cls._fit_candidates(observed, mask_type)
+        fits = [cls._fit_mask_candidate(observed, params, candidate, kwargs) for candidate in candidates]
+        best = min(fits, key=lambda item: item[1])
+        cls._log(
+            "StimulusMasker fitted from mask "
+            f"(type={best[0].mask_type}, error={best[1]:.6g})."
+        )
+        return best if return_error else best[0]
+
+    @classmethod
+    def from_interactive_mask(
+        cls,
+        image: np.ndarray,
+        cutoff_a: float = 0.7,
+        **kwargs: Any,
+    ) -> "StimulusMasker":
+        """Create a masker by tuning it in the interactive GUI.
 
         Parameters
         ----------
         image : np.ndarray
-            Input image. Accepts ``(H, W)`` grayscale or ``(H, W, C)`` channel
-            images. Integer images are normalized by dtype range; float images
-            above 1 are assumed to be in ``[0, 255]``.
+            Preview image. The mask size is inferred from this image.
+        cutoff_a : float, optional
+            Initial horizontal ellipse radius.
+        **kwargs : Any
+            Extra constructor arguments.
 
         Returns
         -------
-        np.ndarray
-            Masked image cast to ``output_dtype``.
-        """
-        return self._apply_with_mask(image, self.mask())
+        StimulusMasker
+            Masker updated with the GUI-selected parameters.
 
-    def apply_all(self, stimuli: Iterable[np.ndarray]) -> list[np.ndarray]:
-        """Apply the same mask to multiple images."""
-        m = self.mask()
-        return [self._apply_with_mask(stim, m) for stim in stimuli]
-    
+        Examples
+        --------
+        >>> masker = StimulusMasker.from_interactive_mask(image, cutoff_a=0.7)
+        >>> masker.save_mask("mask.npy")
+        >>> masker.save_masked_stim(image, "masked.png", background=128, output_dtype=np.uint8)
+        """
+        if "image_size" in kwargs:
+            raise ValueError("image_size is inferred from image; do not pass it to from_interactive_mask.")
+        masker = cls(image_size=np.asarray(image).shape[:2], cutoff_a=cutoff_a, **kwargs)
+        masker.interactive_mask(image)
+        return masker
+
+    def apply_mask(
+        self,
+        stim: Union[np.ndarray, Mapping[str, np.ndarray], Iterable[np.ndarray]],
+        background: Optional[float] = None,
+        output_dtype: Optional[Union[np.dtype, type]] = None,
+        verbose: bool = True,
+    ) -> Union[np.ndarray, dict[str, np.ndarray], list[np.ndarray]]:
+        """Apply the mask to one image, a batch, or a name-to-image mapping.
+
+        Parameters
+        ----------
+        stim : np.ndarray | Mapping[str, np.ndarray] | Iterable[np.ndarray]
+            Single ``(H, W)``/``(H, W, C)`` image, filename-to-image mapping, or
+            iterable/stack of images.
+        background : float, optional
+            Temporary outside-mask value.
+        output_dtype : np.dtype | type, optional
+            Temporary output dtype.
+        verbose : bool, optional
+            Print the image count and full mask specification (``mask_type``,
+            ``edge_bias``, cutoffs, offsets, ``sigma``, ``edge_width``).
+
+        Returns
+        -------
+        np.ndarray | dict[str, np.ndarray] | list[np.ndarray]
+            Masked image; or masked images keyed by their original name, if
+            ``stim`` was a mapping; or a list of masked images otherwise.
+
+        Notes
+        -----
+        Well suited for masking your whole stimulus set once, up front, before
+        running an experiment: pass a ``{name: image}`` dict and get back a
+        ``{name: masked_image}`` dict, so each stimulus stays identifiable by
+        the same name/id you already use to reference it in your experiment.
+
+        Examples
+        --------
+        >>> masked = masker.apply_mask({"1": img1, "2": img2})
+        >>> masked["1"].shape
+        (128, 128, 3)
+        """
+        m = self.generate_mask()
+        if self._is_single_image(stim):
+            result = self._apply_with_mask(stim, m, background=background, output_dtype=output_dtype)
+            count = 1
+        elif isinstance(stim, Mapping):
+            result = {
+                name: self._apply_one_labeled(name, image, m, background, output_dtype)
+                for name, image in stim.items()
+            }
+            count = len(result)
+        else:
+            result = [
+                self._apply_one_labeled(idx, one, m, background, output_dtype)
+                for idx, one in enumerate(self._iter_images(stim))
+            ]
+            count = len(result)
+        if verbose:
+            spec = ", ".join(f"{name}={self._format_param(value)}" for name, value in self._relevant_params().items())
+            self._log(f"StimulusMasker applied to {count} image(s) -- {spec}")
+        return result
+
+    def save_mask(
+        self,
+        path: Union[str, Path],
+        dtype: Union[np.dtype, type] = np.float32,
+        inside_value: float = 1.0,
+        outside_value: float = 0.0,
+    ) -> Path:
+        """Save the mask as ``.npy`` data or an image preview.
+
+        Parameters
+        ----------
+        path : str | Path
+            Destination path. No suffix defaults to ``.npy``.
+        dtype : np.dtype | type, optional
+            Dtype for ``.npy`` output.
+        inside_value : float, optional
+            Value for fully inside-mask pixels.
+        outside_value : float, optional
+            Value for fully outside-mask pixels.
+
+        Returns
+        -------
+        Path
+            Written path.
+
+        Notes
+        -----
+        Emits a ``RuntimeWarning`` if the mask contains values strictly between
+        ``outside_value`` and ``inside_value`` (blurred/feathered edges) — the
+        saved file is meant for visualization only, not for reuse as a mask.
+        """
+        path = Path(path).expanduser()
+        if path.suffix == "":
+            path = path.with_suffix(".npy")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        mask = self.generate_mask() * (inside_value - outside_value) + outside_value
+        lo, hi = sorted((inside_value, outside_value))
+        if np.any((mask > lo) & (mask < hi)):
+            warnings.warn(
+                f"StimulusMasker.save_mask: mask_type={self.mask_type!r} produces intermediate "
+                f"values between outside_value={outside_value} and inside_value={inside_value} "
+                "(blurred/feathered edges). This saved mask is for visualization purposes only "
+                "-- do not reuse it to mask a stimulus later.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        if path.suffix.lower() == ".npy":
+            np.save(path, self._cast_mask(mask, dtype))
+        else:
+            self._save_image(self._mask_preview(mask), path)
+        self._log(f"StimulusMasker mask saved: {path}")
+        return path
+
+    def save_masked_stim(
+        self,
+        stim: Union[np.ndarray, Mapping[str, np.ndarray], Iterable[np.ndarray]],
+        path: Union[str, Path],
+        names: Optional[Iterable[str]] = None,
+        background: Optional[float] = None,
+        output_dtype: Optional[Union[np.dtype, type]] = None,
+    ) -> Union[Path, list[Path]]:
+        """Apply the mask and save one image or a batch.
+
+        Parameters
+        ----------
+        stim : np.ndarray | Mapping[str, np.ndarray] | Iterable[np.ndarray]
+            Single image, filename-to-image mapping, or iterable of images.
+        path : str | Path
+            File path for one image, or output directory for a batch.
+        names : Iterable[str], optional
+            Filenames for iterable batches.
+        background : float, optional
+            Temporary outside-mask value.
+        output_dtype : np.dtype | type, optional
+            Temporary output dtype.
+
+        Returns
+        -------
+        Path | list[Path]
+            Written path, or written paths for a batch.
+        """
+        if self._is_single_image(stim):
+            return self._save_one(stim, path, background, output_dtype)
+
+        output_dir = Path(path).expanduser()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        items = self._named_images(stim, names)
+        m = self.generate_mask()
+
+        paths: list[Path] = []
+        for name, image in items:
+            output_path = output_dir / self._image_filename(name)
+            masked = self._apply_one_labeled(name, image, m, background, output_dtype)
+            self._save_image(masked, output_path)
+            paths.append(output_path)
+        self._log(f"StimulusMasker saved {len(paths)} masked image(s): {output_dir}")
+        return paths
+
     def interactive_mask(self, image: np.ndarray) -> np.ndarray:
-        """
-        Open a Matplotlib GUI for tuning the mask on top of an image.
-
-        The GUI updates the current object in place. Closing the window keeps the
-        selected cutoff, offset, mask type, sigma, and edge_width values on self.
+        """Tune the current masker with a Matplotlib GUI.
 
         Parameters
         ----------
         image : np.ndarray
-            Image used for the masked preview. Accepts ``(H, W)`` grayscale or
-            ``(H, W, C)`` channel images. The mask size is automatically set
-            from this image.
+            Preview image. The mask size is inferred from this image.
 
         Returns
         -------
         np.ndarray
-            Final mask as ``float64`` in ``[0, 1]``.
+            Final mask in ``[0, 1]``.
         """
-        from matplotlib.widgets import Button, Slider
-        plt.rcParams["font.family"] = "Times New Roman"
+        from matplotlib.widgets import Button, Slider, TextBox
+        plt.rcParams["font.family"] = "DejaVu Sans"
         preview = self._normalize(image)
         # RGB/grayscale in 3 channels
         if preview.ndim == 2:
@@ -412,100 +671,164 @@ class StimulusMasker:
         preview = preview[:, :, :3]
 
         self.image_size = preview.shape[:2]
+        initial = self._masker_params()
 
         # ---- Layout parameters for aesthetic GUI design ----
         height, width = preview.shape[:2]
-        fig_width       = 6.4
-        panel_left      = 0.95
-        panel_width     = 4.90
+        fig_width       = 7.2
+        panel_left      = 0.80
+        panel_width     = 5.70
         bottom_margin   = 0.35
         slider_height   = 0.16
         slider_gap      = 0.10
+        textbox_width   = 0.82
+        textbox_gap     = 0.18
         image_gap       = 0.25
         softness_gap    = 0.28
         softness_height = 0.16
         button_gap      = 0.12
-        button_height   = 0.24
+        button_height   = 0.28
+        reset_gap       = 0.14
+        reset_height    = 0.26
+        reset_width     = 0.80
+        edge_width_btn  = 1.55
+        top_button_gap  = 0.12
         top_margin      = 0.25
+        slider_width = panel_width - textbox_width - textbox_gap
         slider_block_height = 4 * slider_height + 3 * slider_gap
-        image_height = min(panel_width * height / width, 4.7)
+        image_height = min(panel_width * height / width, 4.8)
         slider_bottom = bottom_margin
         image_bottom = slider_bottom + slider_block_height + image_gap
         softness_bottom = image_bottom + image_height + softness_gap
         button_bottom = softness_bottom + softness_height + button_gap
-        fig_height = button_bottom + button_height + top_margin
+        reset_bottom = button_bottom + button_height + reset_gap
+        fig_height = reset_bottom + reset_height + top_margin
         fig = plt.figure(figsize=(fig_width, fig_height))
         fig.canvas.manager.set_window_title("Interactive Masking GUI - SHINIER")
-        ax_img = fig.add_axes((
-            panel_left / fig_width,
-            image_bottom / fig_height,
-            panel_width / fig_width,
-            image_height / fig_height,
-        ))
+        axes = lambda left, bottom, w, h: fig.add_axes(
+            (left / fig_width, bottom / fig_height, w / fig_width, h / fig_height)
+        )
+        ax_img = axes(panel_left, image_bottom, panel_width, image_height)
         # ----
 
-        shown = ax_img.imshow(self._apply_with_mask(preview, self.mask()))
+        shown = ax_img.imshow(self._apply_with_mask(preview, self.generate_mask()))
         ax_img.set_axis_off()
-        
+
+        def style_button(button, fontsize=9):
+            button.label.set_color("0.5")
+            button.label.set_fontsize(fontsize)
+            for spine in button.ax.spines.values():
+                spine.set_edgecolor("0.5")
+                spine.set_linewidth(1.0)
+
+        def set_textbox_value(textbox, value, force=False):
+            """Mirror slider values into text boxes without firing callbacks."""
+            if not force and getattr(textbox, "capturekeystrokes", False):
+                return
+            textbox.eventson = False
+            textbox.set_val(f"{value:.3f}")
+            textbox.eventson = True
+
+        def make_on_submit(slider, textbox, vmin, vmax):
+            """Push a typed number to the slider, clamped to its range; revert on bad input."""
+            def on_submit(text):
+                try:
+                    typed = float(text)
+                except ValueError:
+                    set_textbox_value(textbox, slider.val, force=True)
+                    return
+                slider.set_val(min(max(typed, vmin), vmax))
+                set_textbox_value(textbox, slider.val, force=True)
+            return on_submit
+
+        def make_slider_with_textbox(y, height, label, vmin, vmax, value):
+            """Create a labeled slider with an adjacent editable-number textbox, wired together."""
+            slider = Slider(axes(panel_left, y, slider_width, height), label, vmin, vmax, valinit=value)
+            slider.valtext.set_visible(False)
+            slider.label.set_fontsize(9)
+            textbox = TextBox(
+                axes(panel_left + slider_width + textbox_gap, y, textbox_width, height), "", initial=f"{value:.3f}"
+            )
+            textbox.text_disp.set_fontsize(9)
+            textbox.on_submit(make_on_submit(slider, textbox, vmin, vmax))
+            return slider, textbox
+
         modes = ("hard", "gaussian", "feathered_disk")
+        mode_labels = {"hard": "Hard", "gaussian": "Gaussian", "feathered_disk": "Feathered"}
         buttons = {}
         for i, mode in enumerate(modes):
-            ax_button = fig.add_axes((
-                (panel_left + i * 1.70) / fig_width,
-                button_bottom / fig_height,
-                1.45 / fig_width,
-                button_height / fig_height,
-            ))
-            buttons[mode] = Button(ax_button, mode, color="0.96", hovercolor="0.88")
-            buttons[mode].label.set_color("0.5")
-            for spine in buttons[mode].ax.spines.values():
-                spine.set_edgecolor("0.5")
+            ax_button = axes(panel_left + i * 1.95, button_bottom, 1.65, button_height)
+            buttons[mode] = Button(ax_button, mode_labels[mode], color="0.97", hovercolor="0.90")
+            style_button(buttons[mode])
 
-        ax_softness = fig.add_axes((
-            panel_left / fig_width,
-            softness_bottom / fig_height,
-            panel_width / fig_width,
-            softness_height / fig_height,
-        ))
-        softness = Slider(ax_softness, "sigma", 0.0, 20.0, valinit=self.sigma)
+        ax_edge = axes(panel_left + panel_width - edge_width_btn, reset_bottom, edge_width_btn, reset_height)
+        edge_button = Button(ax_edge, "", color="0.97", hovercolor="0.90")
+        style_button(edge_button, fontsize=8)
+
+        ax_reset = axes(
+            panel_left + panel_width - edge_width_btn - top_button_gap - reset_width,
+            reset_bottom,
+            reset_width,
+            reset_height,
+        )
+        reset_button = Button(ax_reset, "Reset", color="0.97", hovercolor="0.90")
+        style_button(reset_button, fontsize=8)
+
+        softness_label = "edge_width" if initial["mask_type"] == "feathered_disk" else "sigma"
+        softness_value = initial["edge_width"] if initial["mask_type"] == "feathered_disk" else initial["sigma"]
+        softness, softness_textbox = make_slider_with_textbox(
+            softness_bottom, softness_height, softness_label, 0.0, 20.0, softness_value
+        )
 
         specs = [
-            ("cutoff_a", 0.05, 1.5, self.cutoff_a),
-            ("cutoff_b", 0.05, 1.5, self.cutoff_a if self.cutoff_b is None else self.cutoff_b),
-            ("offset_a", -1.0, 1.0, self.offset_a),
-            ("offset_b", -1.0, 1.0, self.offset_b),
+            ("cutoff_a", 0.05, 1.5, initial["cutoff_a"]),
+            ("cutoff_b", 0.05, 1.5, initial["cutoff_b"]),
+            ("offset_a", -1.0, 1.0, initial["offset_a"]),
+            ("offset_b", -1.0, 1.0, initial["offset_b"]),
         ]
-        sliders = {}
+        sliders, textboxes = {}, {}
         for i, (name, vmin, vmax, value) in enumerate(specs):
             y = slider_bottom + (len(specs) - 1 - i) * (slider_height + slider_gap)
-            ax = fig.add_axes((
-                panel_left / fig_width,
-                y / fig_height,
-                panel_width / fig_width,
-                slider_height / fig_height,
-            ))
-            sliders[name] = Slider(ax, name, vmin, vmax, valinit=value)
+            sliders[name], textboxes[name] = make_slider_with_textbox(y, slider_height, name, vmin, vmax, value)
+
+        def style_active(button, active):
+            """Style button as selected (active) or grayed out."""
+            button.label.set_color("0.12" if active else "0.45")
+            for spine in button.ax.spines.values():
+                spine.set_edgecolor("0.12" if active else "0.55")
+                spine.set_linewidth(1.6 if active else 1.0)
+
+        def highlight(group, active_key):
+            for key, button in group.items():
+                style_active(button, key == active_key)
+
+        def update_edge_button():
+            """Refresh the edge-bias toggle label and active state."""
+            inward = self.edge_bias == "inward"
+            edge_button.label.set_text("Edge: inward" if inward else "Edge: centered")
+            style_active(edge_button, inward)
 
         def update(_=None):
             """Refresh GUI state from sliders/buttons and redraw preview."""
             for name, slider in sliders.items():
-                # Update attributes based on slider values
+                # Update attributes based on slider values, and mirror the value into its textbox
                 setattr(self, name, slider.val)
-            ax_softness.set_visible(self.mask_type != "hard")
+                set_textbox_value(textboxes[name], slider.val)
+            soft = self.mask_type != "hard"
+            softness.ax.set_visible(soft)
+            softness_textbox.ax.set_visible(soft)
+            ax_edge.set_visible(soft)
             if self.mask_type == "gaussian":
                 softness.label.set_text("sigma")
                 self.sigma = softness.val
             elif self.mask_type == "feathered_disk":
                 softness.label.set_text("edge_width")
                 self.edge_width = softness.val
-            for mode, button in buttons.items():
-                active = mode == self.mask_type
-                button.label.set_color("black" if active else "0.5")
-                for spine in button.ax.spines.values():
-                    spine.set_edgecolor("black" if active else "0.5")
-                    spine.set_linewidth(1.5 if active else 1.0)
+            set_textbox_value(softness_textbox, softness.val)
+            highlight(buttons, self.mask_type)
+            update_edge_button()
             # shown is an AxesImage, this updates the displayed image
-            shown.set_data(self._apply_with_mask(preview, self.mask()))
+            shown.set_data(self._apply_with_mask(preview, self.generate_mask()))
             fig.canvas.draw_idle()
 
         def set_mask_type(mode):
@@ -518,14 +841,172 @@ class StimulusMasker:
             else:
                 update()
 
+        def toggle_edge_bias(_=None):
+            """Toggle edge_bias and refresh the preview."""
+            self.edge_bias = "center" if self.edge_bias == "inward" else "inward"
+            update()
+
+        def reset(_=None):
+            """Restore every control to its value when the GUI was opened."""
+            self.mask_type = initial["mask_type"]
+            self.edge_bias = initial["edge_bias"]
+            for slider in (*sliders.values(), softness):
+                slider.reset()
+            update()
+
         for s in sliders.values():
             s.on_changed(update)
         softness.on_changed(update)
         for mode, button in buttons.items():
             button.on_clicked(lambda _, mode=mode: set_mask_type(mode))
+        edge_button.on_clicked(toggle_edge_bias)
+        reset_button.on_clicked(reset)
         update()
         plt.show()
-        return self.mask()
+        self._print_interactive_mask_update(initial)
+        return self.generate_mask()
+
+    def _masker_params(self) -> dict[str, Union[str, float]]:
+        """Return the editable mask parameters shown in the interactive GUI."""
+        return {
+            "mask_type": self.mask_type,
+            "edge_bias": self.edge_bias,
+            "cutoff_a": self.cutoff_a,
+            "cutoff_b": self.cutoff_a if self.cutoff_b is None else self.cutoff_b,
+            "offset_a": self.offset_a,
+            "offset_b": self.offset_b,
+            "sigma": self.sigma,
+            "edge_width": self.edge_width,
+        }
+
+    def _relevant_params(self) -> dict[str, Union[str, float]]:
+        """Mask parameters that actually affect the current mask_type."""
+        drop = self._IRRELEVANT_PARAMS[self.mask_type]
+        return {name: value for name, value in self._masker_params().items() if name not in drop}
+
+    def _print_interactive_mask_update(self, before: dict[str, Union[str, float]]) -> None:
+        """Print a compact before/after summary after the GUI closes."""
+        rows = {
+            name: (self._format_param(before[name]), self._format_param(value))
+            for name, value in self._masker_params().items()
+        }
+        print("\n[SHINIER] StimulusMasker interactive update")
+        if all(old == new for old, new in rows.values()):
+            print("  No parameter changes.")
+            return
+        name_width = max(len(name) for name in rows)
+        old_width = max(len(old) for old, _ in rows.values())
+        for name, (old, new) in rows.items():
+            marker = "*" if old != new else " "
+            print(f"  {marker} {name:<{name_width}} : {old:<{old_width}} -> {new}")
+
+    @staticmethod
+    def _format_param(value: Union[str, float]) -> str:
+        return f"{value:.6g}" if isinstance(value, (float, np.floating)) else str(value)
+
+    @staticmethod
+    def _require_positive(name: str, value: float) -> None:
+        if value <= 0: raise ValueError(f"{name} must be greater than 0.")
+    @staticmethod
+    def _require_nonnegative(name: str, value: float) -> None:
+        if value < 0: raise ValueError(f"{name} must be greater than or equal to 0.")
+    @staticmethod
+    def _require_choice(name: str, value: str, choices: tuple[str, ...]) -> None:
+        if value not in choices: raise ValueError(f"{name} must be one of {choices}.")
+    @staticmethod
+    def _is_single_image(stimuli: Any) -> bool: return isinstance(stimuli, np.ndarray) and stimuli.ndim in (2, 3)
+    @staticmethod
+    def _iter_images(stimuli: Union[np.ndarray, Iterable[np.ndarray]]) -> Iterable[np.ndarray]:
+        if isinstance(stimuli, np.ndarray) and stimuli.ndim < 4:
+            raise ValueError("stimuli must be a single 2D/3D image or an iterable/stack of images.")
+        return stimuli
+
+    def _save_one(
+        self,
+        image: np.ndarray,
+        path: Union[str, Path],
+        background: Optional[float],
+        output_dtype: Optional[Union[np.dtype, type]],
+    ) -> Path:
+        output_path = Path(path).expanduser()
+        if output_path.suffix == "":
+            output_path = output_path.with_suffix(".png")
+        masked = self.apply_mask(image, background=background, output_dtype=output_dtype, verbose=False)
+        self._save_image(masked, output_path)
+        self._log(f"StimulusMasker saved masked image: {output_path}")
+        return output_path
+
+    @staticmethod
+    def _log(message: str) -> None: print(f"[SHINIER] {message}")
+
+    @staticmethod
+    def _named_images(
+        stimuli: Union[Mapping[str, np.ndarray], Iterable[np.ndarray]],
+        names: Optional[Iterable[str]],
+    ) -> list[tuple[Union[str, Path], np.ndarray]]:
+        if isinstance(stimuli, Mapping):
+            items = list(stimuli.items())
+            StimulusMasker._ensure_unique_image_filenames(name for name, _ in items)
+            return items
+        images = list(stimuli)
+        output_names = list(names) if names is not None else [f"image_{idx:03d}.png" for idx in range(len(images))]
+        if len(output_names) != len(images):
+            raise ValueError("names must have the same length as stimuli.")
+        StimulusMasker._ensure_unique_image_filenames(output_names)
+        return list(zip(output_names, images))
+
+    @staticmethod
+    def _ensure_unique_image_filenames(names: Iterable[Union[str, Path]]) -> None:
+        filenames = [StimulusMasker._image_filename(name) for name in names]
+        if len(set(filenames)) != len(filenames):
+            raise ValueError("output filenames must be unique to avoid overwriting masked images.")
+
+    @staticmethod
+    def _validate_fit_request(
+        observed: np.ndarray,
+        mask_type: Union[MaskType, Literal["auto"]],
+        threshold: float,
+    ) -> None:
+        if observed.ndim != 2:
+            raise ValueError("mask must be a 2D array or a grayscale image.")
+        if not 0 < threshold < 1:
+            raise ValueError("threshold must be in (0, 1).")
+        if mask_type != "auto" and mask_type not in get_args(MaskType):
+            raise ValueError(f"mask_type must be 'auto' or one of {get_args(MaskType)}.")
+
+    @staticmethod
+    def _threshold_mask(observed: np.ndarray, threshold: float) -> np.ndarray:
+        foreground = observed >= threshold
+        if not np.any(foreground):
+            raise ValueError("mask has no foreground pixels at the selected threshold.")
+        if np.all(foreground):
+            raise ValueError("mask is entirely foreground at the selected threshold.")
+        return foreground
+
+    @staticmethod
+    def _fit_candidates(observed: np.ndarray, mask_type: Union[MaskType, Literal["auto"]]) -> list[MaskType]:
+        if mask_type != "auto":
+            return [mask_type]
+        if np.all(np.isin(observed, (0.0, 1.0))):
+            return ["hard"]
+        return ["feathered_disk", "gaussian"]
+
+    @classmethod
+    def _fit_mask_candidate(
+        cls,
+        observed: np.ndarray,
+        params: dict[str, Union[Tuple[int, int], float]],
+        mask_type: MaskType,
+        kwargs: dict[str, Any],
+    ) -> tuple["StimulusMasker", float]:
+        edge_width = cls._estimate_edge_width(observed, params)
+        candidate_kwargs = {**kwargs, **params, "image_size": observed.shape, "mask_type": mask_type}
+        if mask_type == "feathered_disk":
+            candidate_kwargs["edge_width"] = edge_width
+        elif mask_type == "gaussian":
+            candidate_kwargs["sigma"] = max(edge_width / 2.56, 0.0)
+        fit = cls(**candidate_kwargs)
+        return fit, float(np.mean((fit.generate_mask() - observed) ** 2))
 
     def _normalize(self, image: np.ndarray) -> np.ndarray:
         """Return image as float64 in [0, 1]."""
@@ -537,24 +1018,162 @@ class StimulusMasker:
             out = out / 255.0
         return np.clip(out, 0, 1)
 
-    def _apply_with_mask(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    def _apply_one_labeled(
+        self,
+        label: Union[str, int],
+        image: np.ndarray,
+        mask: np.ndarray,
+        background: Optional[float],
+        output_dtype: Optional[Union[np.dtype, type]],
+    ) -> np.ndarray:
+        """Apply the mask to one image of a batch, naming it in shape-mismatch errors."""
+        try:
+            return self._apply_with_mask(image, mask, background=background, output_dtype=output_dtype)
+        except ValueError as exc:
+            raise ValueError(f"stimulus {label!r} -- {exc}") from exc
+
+    def _apply_with_mask(
+        self,
+        image: np.ndarray,
+        mask: np.ndarray,
+        background: Optional[float] = None,
+        output_dtype: Optional[Union[np.dtype, type]] = None,
+    ) -> np.ndarray:
         """Helper for the interactive_mask method."""
         stim = self._normalize(image)
-        if stim.ndim == 2:
+        self._validate_image_shape(stim, mask)
+        if stim.ndim == 2 and not self.preserve_grayscale:
             stim = np.repeat(stim[:, :, None], 3, axis=2)
         mask = np.asarray(mask, dtype=np.float64)
         stim = stim.copy()
-        # Mask up to the first 3 channels; alpha, if present, is left unchanged.
-        channels = min(3, stim.shape[2])
-        stim[:, :, :channels] = mask[:, :, None] * (stim[:, :, :channels] - self.background) + self.background
-        return self._as_output(np.clip(stim, 0, 1))
+        bg = self._normalize_background(self.background if background is None else background)
+        if stim.ndim == 2:
+            stim = mask * (stim - bg) + bg
+        else:
+            channels = min(3, stim.shape[2])
+            stim[:, :, :channels] = mask[:, :, None] * (stim[:, :, :channels] - bg) + bg
+        return self._as_output(np.clip(stim, 0, 1), output_dtype=output_dtype)
 
-    def _as_output(self, image: np.ndarray) -> np.ndarray:
+    def _normalize_background(self, background: float) -> float:
+        """Return a background value normalized to [0, 1]."""
+        bg = float(background)
+        if bg > 1:
+            bg = bg / 255.0
+        return float(np.clip(bg, 0, 1))
+
+    def _as_output(self, image: np.ndarray, output_dtype: Optional[Union[np.dtype, type]] = None) -> np.ndarray:
         """Convert the masked image to output_dtype."""
-        dtype = np.dtype(self.output_dtype)
+        dtype = np.dtype(self.output_dtype if output_dtype is None else output_dtype)
         if np.issubdtype(dtype, np.integer):
             image = np.rint(image * np.iinfo(dtype).max)
         return image.astype(dtype)
+
+    def _cast_mask(self, mask: np.ndarray, dtype: Union[np.dtype, type]) -> np.ndarray:
+        """Cast a saved mask without destroying soft transition values."""
+        dtype = np.dtype(dtype)
+        if np.issubdtype(dtype, np.integer):
+            info = np.iinfo(dtype)
+            mask = np.rint(np.clip(mask, info.min, info.max))
+        return mask.astype(dtype)
+
+    def _mask_preview(self, mask: np.ndarray) -> np.ndarray:
+        """Convert mask values to an 8-bit image preview."""
+        arr = np.asarray(mask, dtype=np.float64)
+        if arr.size and 0 <= arr.min() and arr.max() <= 1:
+            arr = arr * 255
+        return self._cast_mask(arr, np.uint8)
+
+    def _save_image(self, image: np.ndarray, path: Path) -> None:
+        """Save a masked image through Pillow."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        arr = np.asarray(image)
+        if np.issubdtype(arr.dtype, np.floating):
+            arr = np.rint(np.clip(arr, 0, 1) * 255).astype(np.uint8)
+        elif arr.dtype != np.uint8:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+        if arr.ndim == 3 and arr.shape[2] > 4:
+            arr = arr[:, :, :4]
+        Image.fromarray(arr).save(path)
+
+    @staticmethod
+    def _image_filename(name: Union[str, Path]) -> str:
+        path = Path(name)
+        return path.name if path.suffix else f"{path.name}.png"
+
+    def _mask_shape(self) -> tuple[int, int]:
+        """Return mask shape as ``(height, width)``."""
+        if isinstance(self.image_size, int):
+            return int(self.image_size), int(self.image_size)
+        if len(self.image_size) != 2:
+            raise ValueError("image_size must be an int or a (height, width) tuple.")
+        return int(self.image_size[0]), int(self.image_size[1])
+
+    def _validate_image_shape(self, image: np.ndarray, mask: np.ndarray) -> None:
+        """Raise a clear error when image and mask sizes differ."""
+        if image.ndim not in (2, 3):
+            raise ValueError("image must be a 2D grayscale or 3D channel-based array.")
+        if image.shape[:2] != mask.shape:
+            raise ValueError(f"Mask shape {mask.shape} does not match image shape {image.shape[:2]}.")
+
+    @staticmethod
+    def _load_mask_for_fit(mask: Union[np.ndarray, str, Path]) -> np.ndarray:
+        """Load and normalize a mask for parameter fitting."""
+        if isinstance(mask, (str, Path)):
+            path = Path(mask).expanduser()
+            if path.suffix.lower() == ".npy":
+                data = np.load(path)
+            else:
+                with Image.open(path) as image:
+                    data = np.asarray(image.convert("L"))
+        else:
+            data = np.asarray(mask)
+        if data.ndim == 3:
+            data = data[..., :3].mean(axis=2)
+        data = data.astype(np.float64, copy=False)
+        data_min = float(np.nanmin(data))
+        data_max = float(np.nanmax(data))
+        if not np.isfinite(data_min) or not np.isfinite(data_max) or data_max <= data_min:
+            raise ValueError("mask must contain at least two finite values.")
+        return np.clip((data - data_min) / (data_max - data_min), 0, 1)
+
+    @staticmethod
+    def _estimate_ellipse_params(foreground: np.ndarray) -> dict[str, Union[Tuple[int, int], float]]:
+        """Estimate ellipse center and cutoff values from a thresholded mask."""
+        height, width = foreground.shape
+        ys, xs = np.nonzero(foreground)
+        decimals = StimulusMasker._fit_decimals(foreground.shape)
+        params = {
+            "cutoff_a": (xs.max() - xs.min() + 1) / max(width - 1, 1),
+            "cutoff_b": (ys.max() - ys.min() + 1) / max(height - 1, 1),
+            "offset_a": (xs.min() + xs.max()) / max(width - 1, 1) - 1.0,
+            "offset_b": (ys.min() + ys.max()) / max(height - 1, 1) - 1.0,
+        }
+        return {key: round(float(value), decimals) for key, value in params.items()}
+
+    @staticmethod
+    def _fit_decimals(shape: tuple[int, int]) -> int:
+        """Precision for fitted normalized parameters; roughly pixel-grid limited."""
+        return max(3, int(np.ceil(np.log10(max(shape) - 1)))) if max(shape) > 1 else 3
+
+    @staticmethod
+    def _estimate_edge_width(mask: np.ndarray, params: dict[str, Union[Tuple[int, int], float]]) -> float:
+        """Estimate feathered edge width in pixels from soft transition values."""
+        height, width = mask.shape
+        _, signed_distance = StimulusMasker._ellipse_geometry(
+            height, width, float(params["cutoff_a"]), float(params["cutoff_b"]),
+            float(params["offset_a"]), float(params["offset_b"]),
+        )
+        transition = (mask > 0.05) & (mask < 0.95) & np.isfinite(signed_distance)
+        if not np.any(transition):
+            return 0.0
+
+        sd = signed_distance[transition]
+        y_fit = mask[transition] - 0.5
+        denom = float(np.sum(sd * y_fit))
+        if denom <= 0:
+            return 0.0
+        edge_width = float(np.sum(sd * sd) / denom)
+        return max(edge_width, 0.0)
 
     def _blur(self, image: np.ndarray) -> np.ndarray:
         """Apply a NumPy-only separable Gaussian blur."""

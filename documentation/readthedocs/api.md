@@ -88,7 +88,7 @@ documentation remains in the Markdown files under `documentation/`.
 
 ```{eval-rst}
 .. autoclass:: shinier.utils.StimulusMasker
-   :members: mask, apply, apply_all, interactive_mask
+   :members: generate_mask, apply_mask, save_mask, save_masked_stim, from_mask, from_interactive_mask, interactive_mask
    :exclude-members: __init__, __new__
 ```
 
