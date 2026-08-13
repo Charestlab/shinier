@@ -1,7 +1,9 @@
 # conftest.py
 from __future__ import annotations
 
-import os, shutil, uuid
+import os
+os.environ.setdefault("MPLBACKEND", "Agg")
+import shutil, uuid
 from pathlib import Path
 from typing import Iterator
 try:

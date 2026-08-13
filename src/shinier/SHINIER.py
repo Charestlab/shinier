@@ -345,7 +345,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
                 opts.ie_methods = _ie_method_names[_he - 1]
 
         as_gray = prompt("Load images as grayscale?", default="No", kind="bool")
-        opts.as_gray = as_gray == 1
+        opts.as_gray = as_gray
         linear_luminance = prompt("Are pixel values linearly related to luminance?", default=2, kind='choice', choices=[
             f"{Bcolors.CHOICE_VALUE}Yes [legacy mode]{Bcolors.ENDC}\n\t- No color-space conversion.\n\t- Assuming input images are linear to luminance.\n\t- All transformations will be applied independently to each channel which may produce out-of-gamut values",
             f"{Bcolors.DEFAULT_TEXT}No [default]{Bcolors.ENDC}:\n\t- Assumes input images are regular sRGB images, i.e. gamma-encoded.\n\t- Images will first be converted into CIE xyY color-space\n\t- All transformations will be applied on the luminance channel (Y) of the CIE xyY color space.\n\t- Images are then reconverted into sRGB using transformed luminance channel (Y) and original chromatic channels (x, y),\n\t- This mode should preserves color gamuts",
@@ -419,19 +419,18 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
 
         if mode in (2, 5, 6, 7, 8):
             ho = prompt("Histogram specification with SSIM optimization (see Avanaki, 2009)?", default='y', kind="bool")
-            opts.hist_optim = ho != 2
-            if ho == 2:
-                opts.hist_iterations = prompt("How many SSIM iterations?", default=5, kind="int", min_v=1, max_v=1_000_000)
-                opts.step_size = prompt("What is the SSIM step size?", default=34, kind="int", min_v=1, max_v=1_000_000)
+            opts.hist_optim = ho
             opts.hist_specification = None
-            if not opts.hist_optim:
+            if opts.hist_optim:
+                opts.hist_iterations = prompt("How many SSIM iterations?", default=5, kind="int", min_v=1, max_v=1_000_000)
+            else:
                 hs = prompt("Which histogram specification?", default=4, kind="choice", choices=[
                     "Exact with noise (legacy)",
                     "Coltuc with moving-average filters",
                     "Coltuc with gaussian filters",
                     "Coltuc with gaussian filters and noise if residual isoluminant pixels"
                 ])
-                opts.hist_specification = hs - 1
+                opts.hist_specification = hs
 
             image_exts = "/".join(f".{ext}" for ext in ACCEPTED_FORMATS)
             thp1 = prompt("How should the target histogram be defined?", default=1, kind="choice", choices=[
@@ -451,8 +450,13 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
                 opts.target_hist = th
 
         if mode in (3, 4, 5, 6, 7, 8):
-            rsel = prompt("What type of rescaling after sf/spec?", default=2, kind="choice",
-                          choices=["none", "min/max of all images", "avg min/max"])
+            rsel = prompt("What type of rescaling after sf/spec?", default=3, kind="choice",
+                          choices=[
+                              "none",
+                              "per-image stretch to [0, 255]",
+                              "dataset absolute min/max mapped to [0, 255] (no clipping)",
+                              "dataset average min/max mapped to [0, 255] (outlier images are clipped)",
+                          ])
             opts.rescaling = rsel - 1
             image_exts = "/".join(f".{ext}" for ext in ACCEPTED_FORMATS)
             tsp_sel = prompt("How should the target spectrum be defined?", default=1, kind="choice", choices=[
@@ -508,7 +512,7 @@ def SHINIER_CLI(images: Optional[np.ndarray] = None, masks: Optional[np.ndarray]
         opts.verbose = prog_info - 2
 
     # ---- Start SHINIER ----
-    dataset = ImageDataset(images=images, masks=masks, options=opts) if (images or masks) else ImageDataset(options=opts)
+    dataset = ImageDataset(images=images, masks=masks, options=opts) if (images is not None or masks is not None) else ImageDataset(options=opts)
     results = ImageProcessor(dataset=dataset, verbose=opts.verbose, from_cli=True)
 
     console_log("╔══════════════════════════════════════════════════════╗")

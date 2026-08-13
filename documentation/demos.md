@@ -10,6 +10,9 @@
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](../LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)]()
 [![PyPI version](https://img.shields.io/pypi/v/shinier.svg)](https://pypi.org/project/shinier/)
+[![Documentation Status](https://readthedocs.org/projects/shinier/badge/?version=latest)](https://shinier.readthedocs.io/en/latest/)
+[![DOI](https://img.shields.io/badge/DOI-10.1016%2Fj.softx.2026.102884-blue.svg)](https://doi.org/10.1016/j.softx.2026.102884)
+[![Tests](https://github.com/Charestlab/shinier/actions/workflows/tests.yml/badge.svg)](https://github.com/Charestlab/shinier/actions/workflows/tests.yml)
 ---
 
 # Demos / How-to-use

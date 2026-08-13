@@ -10,6 +10,9 @@
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](../LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)]()
 [![PyPI version](https://img.shields.io/pypi/v/shinier.svg)](https://pypi.org/project/shinier/)
+[![Documentation Status](https://readthedocs.org/projects/shinier/badge/?version=latest)](https://shinier.readthedocs.io/en/latest/)
+[![DOI](https://img.shields.io/badge/DOI-10.1016%2Fj.softx.2026.102884-blue.svg)](https://doi.org/10.1016/j.softx.2026.102884)
+[![Tests](https://github.com/Charestlab/shinier/actions/workflows/tests.yml/badge.svg)](https://github.com/Charestlab/shinier/actions/workflows/tests.yml)
 ---
 
 # Documentation
@@ -295,13 +298,12 @@ mode = 2  # hist_match only
 ![](figures/sliding_puzzle.png)
 
 **Available Algorithms:**
-- **Exact specification** (`hist_specification=0`): [Coltuc, Bolon & Chassery (2006)]((https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf)) algorithm
+- **Exact specification** (`hist_specification=0`): [Coltuc, Bolon & Chassery (2006)](https://www.cin.ufpe.br/~if751/projetos/artigos/Exact%20Histogram%20Specification.pdf) algorithm
 - **Specification with noise** (`hist_specification=1`): Legacy version with noise addition
 
 **SSIM Optimization:**
-- `hist_optim=1`: SSIM-based optimization ([Avanaki, 2009](https://link.springer.com/article/10.1007/s10043-009-0119-z)))
+- `hist_optim=1`: SSIM-based optimization ([Avanaki, 2009](https://link.springer.com/article/10.1007/s10043-009-0119-z))
 - `hist_iterations`: Number of iterations (default: 10)
-- `step_size`: Step size (default: 34)
 
 ### **Spatial-frequency-based matching (Modes 3–4)**
 
@@ -665,39 +667,52 @@ def show_processing_overview(processor: ImageProcessor, img_idx: int = 0, show_f
 ---
 
 ## StimulusMasker
-`StimulusMasker` is a utility class for creating elliptical masks and applying
-them to images or image sets. It is useful when stimuli should be shown inside a
-controlled region of interest while the outside area is replaced by a constant
-user-defined background value.
-
-Available mask types are:
-
-- `"hard"`: binary ellipse with a sharp border.
-- `"gaussian"`: hard ellipse with a Gaussian-smoothed border.
-- `"feathered_disk"`: linear edge transition with an explicit width in pixels.
-
-The interactive GUI is often the easiest way to choose the right cutoff and
-offset values because it shows the masked image live while sliders are adjusted.
+Helper to **facilitate** the **generation** and **application** of **elliptical masks**.
+Masks can be applied to a single image or a batch. It can generate binary masks with sharp edges
+(`"hard"`, compatible with the rest of SHINIER) or masks with blurred/feathered
+edges blended into a gray background (`"gaussian"`, `"feathered_disk"`, for
+presenting stimuli in your experiments). There are three ways to get a masker;
+once you have one, generating, applying, and saving work the same way
+regardless of which you used.
 
 ```python
+import numpy as np
 from shinier import StimulusMasker
 
+# 1. Construct one directly.
 masker = StimulusMasker(
     image_size=128,
     cutoff_a=0.7,
     mask_type="feathered_disk",
     edge_width=3,
+    background=128,
+    output_dtype=np.uint8,
 )
 
-mask = masker.mask()
-masked_image = masker.apply(image)
-masked_images = masker.apply_all(stim_arr)
+# 2. Or fit one to an existing mask (array, .npy file, or image file).
+fitted_masker = StimulusMasker.from_mask("mask.npy")
 
-# Opens a Matplotlib GUI with sliders for cutoff, offset, and mask softness.
-mask_from_gui = masker.interactive_mask(image)
+# 3. Or tune one interactively in a Matplotlib GUI (sliders for cutoff,
+#    offset, and mask softness).
+interactive_masker = StimulusMasker.from_interactive_mask(image, cutoff_a=0.7)
 ```
 
 ![Dynamic StimulusMasker GUI demo](readthedocs/_static/dynamic_stim_masker.gif)
+
+Once you have a masker, generate, apply, and save from it the same way:
+
+```python
+mask = masker.generate_mask()
+masked_image = masker.apply_mask(image)
+masked_images = masker.apply_mask(stim_arr)
+masked_by_name = masker.apply_mask({"stimulus_01.png": image})  # preserves the name mapping
+
+masker.save_mask("mask.npy")
+masker.save_mask("mask_preview.png", outside_value=128, inside_value=255)
+
+masker.save_masked_stim(image, "stimulus_01_masked.png", background=128, output_dtype=np.uint8)
+masker.save_masked_stim({"stimulus_01.png": image}, "masked_stimuli", background=128, output_dtype=np.uint8)
+```
 
 ---
 
@@ -926,7 +941,7 @@ options = Options(
 ```
 
 **Scientific Rationale:**
-Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum matching followed by histogram matching). Because each transformation modifies the image in ways that can partially undo the effects of the other, a **single pass rarely yields convergence**. As detailed in the original [SHINE documentation](../_static/shine_toolbox.pdf), **iterative application** of both steps allows the algorithm to progressively minimize residual discrepancies between the desired luminance distribution and spectral amplitude structure.
+Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum matching followed by histogram matching). Because each transformation modifies the image in ways that can partially undo the effects of the other, a **single pass rarely yields convergence**. As detailed in the original SHINE documentation, **iterative application** of both steps allows the algorithm to progressively minimize residual discrepancies between the desired luminance distribution and spectral amplitude structure.
 
 1. **Sequential Processing**: Each cycle compensates for the distortions introduced by the preceding transformation (e.g., histogram adjustment altering spectral power).
 2. **Convergence**: Repeated alternation drives both properties toward their joint target values.
@@ -937,20 +952,20 @@ Composite modes (5-8) apply **two sequential transformations** (e.g., spectrum m
 <a id="additional-resources"></a>
 ## Additional Resources
 
-The examples in this documentation are intentionally minimized. For more **complete usage examples**, see `demos.ipynb` in the documentation folder:
+The examples in this documentation are intentionally minimized. For more **complete usage examples**, see {doc}`Demos / How-to-use <demos>`:
 
 - Coding usage
 - Interactive CLI usage
 
-For a **detailed description** of the available **options**, see the `Options` class in `Options.py`; each parameter lists its purpose, allowed values, and default.
+For a **detailed description** of the available **options**, see {class}`shinier.Options`; each parameter lists its purpose, allowed values, and default.
 
-For **algorithmic details** and a walkthrough of processing steps, **see** the `ImageProcessor` class in `ImageProcessor.py`.
+For **algorithmic details** and a walkthrough of processing steps, see {class}`shinier.ImageProcessor`.
 
-For **color management** and **gamut-control strategies**, see the `GamutControl` class in `color/GamutControl.py`. Interactive **visual examples** are available at [shinier-web examples](https://charestlab.github.io/shinier-web/).
+For **color management** and **gamut-control strategies**, see {class}`shinier.color.GamutControl`. Interactive **visual examples** are available at [shinier-web examples](https://charestlab.github.io/shinier-web/).
 
 ---
 
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-    <em>Version 0.2.2 - Complete technical documentation</em>
+    <em>Version 0.2.3 - Complete technical documentation</em>
 </p>

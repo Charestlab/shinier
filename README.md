@@ -12,12 +12,18 @@
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](LICENSE)
 [![Python versions](https://img.shields.io/pypi/pyversions/shinier)](https://pypi.org/project/shinier/)
 [![PyPI version](https://img.shields.io/pypi/v/shinier.svg)](https://pypi.org/project/shinier/)
+[![Documentation Status](https://readthedocs.org/projects/shinier/badge/?version=latest)](https://shinier.readthedocs.io/)
+[![DOI](https://img.shields.io/badge/DOI-10.1016%2Fj.softx.2026.102884-blue.svg)](https://doi.org/10.1016/j.softx.2026.102884)
 [![Tests](https://github.com/Charestlab/shinier/actions/workflows/tests.yml/badge.svg)](https://github.com/Charestlab/shinier/actions/workflows/tests.yml)
 ---
 
 ## Overview
 
 SHINIER is a modern Python implementation of SHINE (Spectrum, Histogram, and Intensity Normalization and Equalization), originally developed in MATLAB by Willenbockel et al., 2010. It provides precise control over luminance, contrast, histograms, and spectral content across large image sets for well-calibrated visual experiments.
+
+**Full documentation, API reference, and demos: [shinier.readthedocs.io](https://shinier.readthedocs.io/)**
+
+**Paper: [SHINIER (SoftwareX, 2026)](https://doi.org/10.1016/j.softx.2026.102884)**
 
 ### Key Features and Improvements
 
@@ -153,5 +159,5 @@ See [LICENSE](LICENSE) for more information.
 ---
 <p align="center">
   <strong>Code developed by Nicolas Dupuis-Roy and Mathias Salvas-Hébert </strong><br>
-  <em>Version 0.2.2 - Complete technical documentation</em>
+  <em>Version 0.2.3 - Complete technical documentation</em>
 </p>

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shinier"
-version = "0.2.2"
+version = "0.2.3"
 description = "Python port of the SHINE toolbox with added options (color management, dithering, EHS), optimized for large image sets."
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -33,6 +33,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/Charestlab/shinier"
+Documentation = "https://shinier.readthedocs.io/"
 
 [project.optional-dependencies]
 dev = [
